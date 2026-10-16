@@ -111,5 +111,6 @@ Keep this list accurate:
 - Local Postgres is published on host port 15432 (not 5432), so it doesn't clash with a Postgres installed on the host.
 - SeaweedFS has no S3 lifecycle API. The 7-day expiry on `round-logs` is a SeaweedFS TTL (`fs.configure`, in `infra/seaweedfs/create-buckets.sh`); in AWS it becomes an S3 lifecycle rule.
 - Go runtime images are distroless (no shell or curl), so the binary checks its own health: `/app healthcheck`.
+- Loki (in otel-lgtm) stops accepting logs when its disk is over 90% full and answers "Ingester is shutting down". On CI, `stack.yml` frees runner disk first; locally, prune Docker if logs stop reaching Grafana.
 - Refresh tokens rotate on every use, and a reused one revokes the whole family. Any client must refresh single-flight (see `web/src/auth.ts`); two concurrent refreshes log the user out.
 - Testcontainers needs Docker's socket. `scripts/test.sh` sets `DOCKER_HOST` from the Docker context, because Docker Desktop may not create `/var/run/docker.sock`.
