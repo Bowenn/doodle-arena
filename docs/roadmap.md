@@ -48,7 +48,7 @@ Tracks:
 - [x] **1.5 Observability baseline**
   - Every skeleton exports traces, metrics and logs to the collector, using the log format in `docs/observability.md`.
   - Grafana is reachable locally.
-- [ ] **1.6 Docs**
+- [x] **1.6 Docs**
   - These kickoff docs are committed, and a README explains how to run the stack.
 
 **M1 exit criteria**
