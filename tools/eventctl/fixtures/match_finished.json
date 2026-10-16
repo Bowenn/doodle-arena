@@ -1,0 +1,11 @@
+{
+  "matchFinished": {
+    "roomId": "r_demo",
+    "mode": "GAME_MODE_CLASSIC",
+    "results": [
+      { "userId": "u_bob", "score": 100, "placement": 1 },
+      { "userId": "u_carol", "score": 85, "placement": 2 },
+      { "userId": "u_alice", "score": 20, "placement": 3 }
+    ]
+  }
+}
