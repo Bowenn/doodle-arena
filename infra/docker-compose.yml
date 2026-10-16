@@ -89,6 +89,9 @@ services:
     environment:
       <<: [*app-env, *auth-db-env]
       SERVICE_INSTANCE_ID: auth-1
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt-private-key
+    secrets:
+      - jwt-private-key
     depends_on:
       auth-migrate:
         condition: service_completed_successfully
@@ -298,3 +301,8 @@ volumes:
   kafka-data:
   seaweedfs-data:
   lgtm-data:
+
+secrets:
+  # Created by scripts/gen-jwt-key.sh (make up runs it). Local development only.
+  jwt-private-key:
+    file: ../secrets/jwt-private.pem

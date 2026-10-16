@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     db_user: str = "auth"
     db_password: str = ""
 
+    # Access tokens (ADR 0001). The key file is created by scripts/gen-jwt-key.sh.
+    jwt_private_key_path: str = ""
+    jwt_issuer: str = "http://localhost:8080/api/auth"
+    access_token_ttl_seconds: int = 900
+
     def database_url(self) -> str:
         return (
             f"postgresql+psycopg://{self.db_user}:{self.db_password}"

@@ -8,9 +8,12 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import Engine, text
 
 from app.db import make_engine
+from app.settings import Settings
 
 SERVICE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -22,6 +25,28 @@ if "DOCKER_HOST" not in os.environ and _desktop_socket.exists():
     os.environ.setdefault("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
 
 from testcontainers.community.postgres import PostgresContainer  # noqa: E402
+
+
+def new_rsa_pem() -> bytes:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+
+
+@pytest.fixture(scope="session")
+def key_file(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A throwaway JWT signing key, like the one scripts/gen-jwt-key.sh creates."""
+    path = tmp_path_factory.mktemp("keys") / "jwt-private.pem"
+    path.write_bytes(new_rsa_pem())
+    return str(path)
+
+
+@pytest.fixture
+def settings(key_file: str) -> Settings:
+    return Settings(jwt_private_key_path=key_file, service_version="1.2.3")
 
 
 def alembic_config(engine: Engine) -> Config:
