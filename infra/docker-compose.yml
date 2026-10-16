@@ -191,6 +191,8 @@ services:
   gateway:
     build: ../services/gateway
     restart: unless-stopped
+    depends_on:
+      - otel-lgtm
     ports:
       - "127.0.0.1:8080:80"
     healthcheck:
