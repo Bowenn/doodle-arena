@@ -24,6 +24,7 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/telemetry"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -122,6 +123,12 @@ func run(cfg config, logger *slog.Logger) error {
 	lobbyConn, err := grpc.NewClient(cfg.lobbyAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		// gRPC's default reconnect backoff grows to 2 minutes. Cap it at the heartbeat interval,
+		// so a restarted lobby sees this server again within a few seconds.
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff:           backoff.Config{BaseDelay: 250 * time.Millisecond, Multiplier: 1.6, Jitter: 0.2, MaxDelay: heartbeat.Interval},
+			MinConnectTimeout: time.Second,
+		}),
 	)
 	if err != nil {
 		return fmt.Errorf("lobby client: %w", err)

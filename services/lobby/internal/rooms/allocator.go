@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -48,6 +50,12 @@ func (a *GRPCAllocator) conn(addr string) (*grpc.ClientConn, error) {
 	c, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		// Keep reconnects fast (gRPC's default backoff grows to 2 minutes): a game server that
+		// restarted must be reachable again by the time its heartbeats return.
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff:           backoff.Config{BaseDelay: 250 * time.Millisecond, Multiplier: 1.6, Jitter: 0.2, MaxDelay: 2 * time.Second},
+			MinConnectTimeout: time.Second,
+		}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("game server %s: %w", addr, err)
