@@ -108,6 +108,24 @@ services:
       retries: 12
       start_period: 30s
 
+  # ------------------------------------------------------------------- web app
+
+  web:
+    build: ../web
+    restart: unless-stopped
+    environment:
+      VITE_HMR_CLIENT_PORT: "8080"
+    volumes:
+      # Edits on the host reload in the browser. node_modules stays inside the container,
+      # because the host's copy is built for macOS.
+      - ../web:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   # ---------------------------------------------------------------- data stores
 
   postgres:

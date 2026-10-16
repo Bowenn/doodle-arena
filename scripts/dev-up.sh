@@ -16,7 +16,9 @@ if [[ ! -f .env ]]; then
   chmod 600 .env
 fi
 
-docker compose -f infra/docker-compose.yml --env-file .env up -d --build --wait "$@"
+# --renew-anon-volumes refreshes web's node_modules volume after a dependency change.
+# Data lives in named volumes, which it never touches.
+docker compose -f infra/docker-compose.yml --env-file .env up -d --build --wait --renew-anon-volumes "$@"
 
 cat <<'EOF'
 
