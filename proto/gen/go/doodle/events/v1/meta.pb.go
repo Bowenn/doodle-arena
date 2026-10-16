@@ -172,4 +172,3 @@ func file_doodle_events_v1_meta_proto_init() {
 	file_doodle_events_v1_meta_proto_goTypes = nil
 	file_doodle_events_v1_meta_proto_depIdxs = nil
 }
-// hand edit: CI must reject this (negative check, reverted next)
