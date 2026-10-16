@@ -187,7 +187,9 @@ function PhaseBar({ state, send }: { state: RoomState; send: (m: ClientMessage) 
 }
 
 function RoundPoints({ state }: { state: RoomState }) {
-  const entries = Object.entries(state.roundPoints ?? {}).sort((a, b) => b[1] - a[1])
+  // A player who (re)joined during the reveal got a welcome, which has no round points.
+  if (!state.roundPoints) return null
+  const entries = Object.entries(state.roundPoints).sort((a, b) => b[1] - a[1])
   if (entries.length === 0) return <span className="muted">Nobody guessed it.</span>
   return (
     <span className="muted">

@@ -155,6 +155,12 @@ describe('Room', () => {
     expect(screen.getByText('Bob +100, Ada +10')).toBeTruthy()
   })
 
+  it('does not claim nobody scored after rejoining during the reveal', async () => {
+    await joined('b', view({ phase: 'reveal', round_no: 1, word: 'apple' }))
+    expect(screen.getByText('apple', { selector: 'strong' })).toBeTruthy()
+    expect(screen.queryByText('Nobody guessed it.')).toBeNull()
+  })
+
   it('takes the drawing tools away when the connection ends', async () => {
     const ws = await joined('a', view({ phase: 'drawing', drawer_ids: ['a'], round_no: 1, word_length: 3 }))
     expect(screen.getByRole('toolbar')).toBeTruthy()
