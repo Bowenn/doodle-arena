@@ -26,6 +26,10 @@ message AllocateRoomRequest {
   // Room settings chosen by the host. Ignored when the room already exists (failover
   // restores settings from the room's snapshot).
   RoomSettings settings = 3;
+  // User id of the player who created the room; only the host can start a match. If the host
+  // isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+  // first player to join hosts. Ignored when the room already exists.
+  string host_user_id = 4;
 }
 
 // RoomSettings are the host's choices for a room. A value of 0 means the server's default.

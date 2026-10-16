@@ -42,6 +42,9 @@ type Claims struct {
 	jwt.RegisteredClaims
 	// RoomID is the only room the ticket opens.
 	RoomID string `json:"room_id"`
+	// Name is the player's display name, copied from the access token, so game servers never
+	// take a name from the client.
+	Name string `json:"name,omitempty"`
 }
 
 // Signer mints tickets with the lobby's private key.
@@ -80,8 +83,8 @@ func LoadSigner(path string) (*Signer, error) {
 // KeyID is the RFC 7638 thumbprint of the signer's public key, sent as the kid header.
 func (s *Signer) KeyID() string { return s.kid }
 
-// Sign returns a ticket for userID in roomID and its expiry time.
-func (s *Signer) Sign(userID, roomID string) (string, time.Time, error) {
+// Sign returns a ticket for userID (shown as name) in roomID and its expiry time.
+func (s *Signer) Sign(userID, name, roomID string) (string, time.Time, error) {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", time.Time{}, fmt.Errorf("ticket id: %w", err)
@@ -98,6 +101,7 @@ func (s *Signer) Sign(userID, roomID string) (string, time.Time, error) {
 			ExpiresAt: jwt.NewNumericDate(exp),
 		},
 		RoomID: roomID,
+		Name:   name,
 	})
 	tok.Header["kid"] = s.kid
 	signed, err := tok.SignedString(s.key)

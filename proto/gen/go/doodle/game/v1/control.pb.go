@@ -30,7 +30,11 @@ type AllocateRoomRequest struct {
 	Mode GameMode `protobuf:"varint,2,opt,name=mode,proto3,enum=doodle.game.v1.GameMode" json:"mode,omitempty"`
 	// Room settings chosen by the host. Ignored when the room already exists (failover
 	// restores settings from the room's snapshot).
-	Settings      *RoomSettings `protobuf:"bytes,3,opt,name=settings,proto3" json:"settings,omitempty"`
+	Settings *RoomSettings `protobuf:"bytes,3,opt,name=settings,proto3" json:"settings,omitempty"`
+	// User id of the player who created the room; only the host can start a match. If the host
+	// isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+	// first player to join hosts. Ignored when the room already exists.
+	HostUserId    string `protobuf:"bytes,4,opt,name=host_user_id,json=hostUserId,proto3" json:"host_user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -84,6 +88,13 @@ func (x *AllocateRoomRequest) GetSettings() *RoomSettings {
 		return x.Settings
 	}
 	return nil
+}
+
+func (x *AllocateRoomRequest) GetHostUserId() string {
+	if x != nil {
+		return x.HostUserId
+	}
+	return ""
 }
 
 // RoomSettings are the host's choices for a room. A value of 0 means the server's default.
@@ -301,11 +312,13 @@ var File_doodle_game_v1_control_proto protoreflect.FileDescriptor
 
 const file_doodle_game_v1_control_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdoodle/game/v1/control.proto\x12\x0edoodle.game.v1\x1a\x19doodle/game/v1/game.proto\"\x96\x01\n" +
+	"\x1cdoodle/game/v1/control.proto\x12\x0edoodle.game.v1\x1a\x19doodle/game/v1/game.proto\"\xb8\x01\n" +
 	"\x13AllocateRoomRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12,\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x18.doodle.game.v1.GameModeR\x04mode\x128\n" +
-	"\bsettings\x18\x03 \x01(\v2\x1c.doodle.game.v1.RoomSettingsR\bsettings\"\x9c\x01\n" +
+	"\bsettings\x18\x03 \x01(\v2\x1c.doodle.game.v1.RoomSettingsR\bsettings\x12 \n" +
+	"\fhost_user_id\x18\x04 \x01(\tR\n" +
+	"hostUserId\"\x9c\x01\n" +
 	"\fRoomSettings\x12\x1f\n" +
 	"\vmax_players\x18\x01 \x01(\rR\n" +
 	"maxPlayers\x12%\n" +

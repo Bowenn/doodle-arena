@@ -34,6 +34,7 @@ private static final long serialVersionUID = 0L;
   private AllocateRoomRequest() {
     roomId_ = "";
     mode_ = 0;
+    hostUserId_ = "";
   }
 
   public static final com.google.protobuf.Descriptors.Descriptor
@@ -169,6 +170,57 @@ private static final long serialVersionUID = 0L;
     return settings_ == null ? com.doodlearena.proto.doodle.game.v1.RoomSettings.getDefaultInstance() : settings_;
   }
 
+  public static final int HOST_USER_ID_FIELD_NUMBER = 4;
+  @SuppressWarnings("serial")
+  private volatile java.lang.Object hostUserId_ = "";
+  /**
+   * <pre>
+   * User id of the player who created the room; only the host can start a match. If the host
+   * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+   * first player to join hosts. Ignored when the room already exists.
+   * </pre>
+   *
+   * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+   * @return The hostUserId.
+   */
+  @java.lang.Override
+  public java.lang.String getHostUserId() {
+    java.lang.Object ref = hostUserId_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      hostUserId_ = s;
+      return s;
+    }
+  }
+  /**
+   * <pre>
+   * User id of the player who created the room; only the host can start a match. If the host
+   * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+   * first player to join hosts. Ignored when the room already exists.
+   * </pre>
+   *
+   * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+   * @return The bytes for hostUserId.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getHostUserIdBytes() {
+    java.lang.Object ref = hostUserId_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      hostUserId_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -192,6 +244,9 @@ private static final long serialVersionUID = 0L;
     if (((bitField0_ & 0x00000001) != 0)) {
       output.writeMessage(3, getSettings());
     }
+    if (!com.google.protobuf.GeneratedMessage.isStringEmpty(hostUserId_)) {
+      com.google.protobuf.GeneratedMessage.writeString(output, 4, hostUserId_);
+    }
     getUnknownFields().writeTo(output);
   }
   private int computeSerializedSize_0() {
@@ -206,6 +261,9 @@ private static final long serialVersionUID = 0L;
     if (((bitField0_ & 0x00000001) != 0)) {
       size += com.google.protobuf.CodedOutputStream
         .computeMessageSize(3, getSettings());
+    }
+    if (!com.google.protobuf.GeneratedMessage.isStringEmpty(hostUserId_)) {
+      size += com.google.protobuf.GeneratedMessage.computeStringSize(4, hostUserId_);
     }
     return size;
   }
@@ -239,6 +297,8 @@ private static final long serialVersionUID = 0L;
       if (!getSettings()
           .equals(other.getSettings())) return false;
     }
+    if (!getHostUserId()
+        .equals(other.getHostUserId())) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -258,6 +318,8 @@ private static final long serialVersionUID = 0L;
       hash = (37 * hash) + SETTINGS_FIELD_NUMBER;
       hash = (53 * hash) + getSettings().hashCode();
     }
+    hash = (37 * hash) + HOST_USER_ID_FIELD_NUMBER;
+    hash = (53 * hash) + getHostUserId().hashCode();
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -406,6 +468,7 @@ private static final long serialVersionUID = 0L;
         settingsBuilder_.dispose();
         settingsBuilder_ = null;
       }
+      hostUserId_ = "";
       return this;
     }
 
@@ -452,6 +515,9 @@ private static final long serialVersionUID = 0L;
             : settingsBuilder_.build();
         to_bitField0_ |= 0x00000001;
       }
+      if (((from_bitField0_ & 0x00000008) != 0)) {
+        result.hostUserId_ = hostUserId_;
+      }
       result.bitField0_ |= to_bitField0_;
     }
 
@@ -477,6 +543,11 @@ private static final long serialVersionUID = 0L;
       }
       if (other.hasSettings()) {
         mergeSettings(other.getSettings());
+      }
+      if (!other.getHostUserId().isEmpty()) {
+        hostUserId_ = other.hostUserId_;
+        bitField0_ |= 0x00000008;
+        onChanged();
       }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
@@ -519,6 +590,11 @@ private static final long serialVersionUID = 0L;
               bitField0_ |= 0x00000004;
               break;
             } // case 26
+            case 34: {
+              hostUserId_ = input.readStringRequireUtf8();
+              bitField0_ |= 0x00000008;
+              break;
+            } // case 34
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -862,6 +938,108 @@ private static final long serialVersionUID = 0L;
         settings_ = null;
       }
       return settingsBuilder_;
+    }
+
+    private java.lang.Object hostUserId_ = "";
+    /**
+     * <pre>
+     * User id of the player who created the room; only the host can start a match. If the host
+     * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+     * first player to join hosts. Ignored when the room already exists.
+     * </pre>
+     *
+     * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+     * @return The hostUserId.
+     */
+    public java.lang.String getHostUserId() {
+      java.lang.Object ref = hostUserId_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        hostUserId_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <pre>
+     * User id of the player who created the room; only the host can start a match. If the host
+     * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+     * first player to join hosts. Ignored when the room already exists.
+     * </pre>
+     *
+     * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+     * @return The bytes for hostUserId.
+     */
+    public com.google.protobuf.ByteString
+        getHostUserIdBytes() {
+      java.lang.Object ref = hostUserId_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        hostUserId_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <pre>
+     * User id of the player who created the room; only the host can start a match. If the host
+     * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+     * first player to join hosts. Ignored when the room already exists.
+     * </pre>
+     *
+     * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+     * @param value The hostUserId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setHostUserId(
+        java.lang.String value) {
+      java.util.Objects.requireNonNull(value);
+      hostUserId_ = value;
+      bitField0_ |= 0x00000008;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * User id of the player who created the room; only the host can start a match. If the host
+     * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+     * first player to join hosts. Ignored when the room already exists.
+     * </pre>
+     *
+     * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearHostUserId() {
+      hostUserId_ = getDefaultInstance().getHostUserId();
+      bitField0_ = (bitField0_ & ~0x00000008);
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * User id of the player who created the room; only the host can start a match. If the host
+     * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+     * first player to join hosts. Ignored when the room already exists.
+     * </pre>
+     *
+     * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+     * @param value The bytes for hostUserId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setHostUserIdBytes(
+        com.google.protobuf.ByteString value) {
+      java.util.Objects.requireNonNull(value);
+      checkByteStringIsUtf8(value);
+      hostUserId_ = value;
+      bitField0_ |= 0x00000008;
+      onChanged();
+      return this;
     }
 
     // @@protoc_insertion_point(builder_scope:doodle.game.v1.AllocateRoomRequest)

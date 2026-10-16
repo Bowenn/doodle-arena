@@ -85,7 +85,7 @@ func newKey(t *testing.T) *rsa.PrivateKey {
 func sign(t *testing.T, key *rsa.PrivateKey, kid string, iat, exp time.Time) string {
 	t.Helper()
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-		"sub": "u-1", "roles": []string{"player"}, "iss": testIssuer, "aud": Audience,
+		"sub": "u-1", "name": "Ada", "roles": []string{"player"}, "iss": testIssuer, "aud": Audience,
 		"iat": iat.Unix(), "exp": exp.Unix(),
 	})
 	tok.Header["kid"] = kid
@@ -112,9 +112,12 @@ func TestClockSkew(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := v.Verify(context.Background(), sign(t, key, "k1", tt.iat, tt.exp))
+			c, err := v.Verify(context.Background(), sign(t, key, "k1", tt.iat, tt.exp))
 			if (err == nil) != tt.ok {
 				t.Fatalf("err = %v, want ok = %v", err, tt.ok)
+			}
+			if tt.ok && c.Name != "Ada" {
+				t.Fatalf("name = %q, want the token's name claim", c.Name)
 			}
 		})
 	}

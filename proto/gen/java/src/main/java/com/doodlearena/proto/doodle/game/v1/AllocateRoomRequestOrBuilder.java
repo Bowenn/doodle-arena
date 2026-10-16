@@ -78,4 +78,28 @@ public interface AllocateRoomRequestOrBuilder extends
    * <code>.doodle.game.v1.RoomSettings settings = 3 [json_name = "settings"];</code>
    */
   com.doodlearena.proto.doodle.game.v1.RoomSettingsOrBuilder getSettingsOrBuilder();
+
+  /**
+   * <pre>
+   * User id of the player who created the room; only the host can start a match. If the host
+   * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+   * first player to join hosts. Ignored when the room already exists.
+   * </pre>
+   *
+   * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+   * @return The hostUserId.
+   */
+  java.lang.String getHostUserId();
+  /**
+   * <pre>
+   * User id of the player who created the room; only the host can start a match. If the host
+   * isn't connected, hosting passes to the earliest-joined connected player. Empty means the
+   * first player to join hosts. Ignored when the room already exists.
+   * </pre>
+   *
+   * <code>string host_user_id = 4 [json_name = "hostUserId"];</code>
+   * @return The bytes for hostUserId.
+   */
+  com.google.protobuf.ByteString
+      getHostUserIdBytes();
 }

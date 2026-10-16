@@ -63,7 +63,13 @@ type Servers interface {
 
 // TicketSigner mints join tickets (ADR 0005).
 type TicketSigner interface {
-	Sign(userID, roomID string) (string, time.Time, error)
+	Sign(userID, name, roomID string) (string, time.Time, error)
+}
+
+// User is the verified caller: id and display name from the access token.
+type User struct {
+	ID   string
+	Name string
 }
 
 // Join is what a player needs to connect to a room.
@@ -178,8 +184,9 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 	}
 
 	req := &gamev1.AllocateRoomRequest{
-		RoomId: room.ID,
-		Mode:   gamev1.GameMode_GAME_MODE_CLASSIC,
+		RoomId:     room.ID,
+		HostUserId: hostID,
+		Mode:       gamev1.GameMode_GAME_MODE_CLASSIC,
 		Settings: &gamev1.RoomSettings{
 			MaxPlayers: settings.MaxPlayers, ChooseSeconds: settings.ChooseSeconds,
 			DrawSeconds: settings.DrawSeconds, WordOptions: settings.WordOptions,
@@ -261,13 +268,13 @@ func (s *Service) count(ctx context.Context, result string) {
 // Join returns the room's WebSocket URL and a fresh single-use ticket. The lobby doesn't
 // check capacity here: only the game server knows whether the player is already in the room
 // (a reconnect), so it enforces max_players itself.
-func (s *Service) Join(ctx context.Context, userID, roomID string) (j Join, err error) {
+func (s *Service) Join(ctx context.Context, user User, roomID string) (j Join, err error) {
 	ctx, span := s.tracer.Start(ctx, "lobby.join_room", trace.WithAttributes(attribute.String("room_id", roomID)))
 	defer func() { endSpan(span, err) }()
-	return s.join(ctx, userID, roomID)
+	return s.join(ctx, user, roomID)
 }
 
-func (s *Service) join(ctx context.Context, userID, roomID string) (Join, error) {
+func (s *Service) join(ctx context.Context, user User, roomID string) (Join, error) {
 	room, err := s.store.Get(ctx, roomID)
 	if err != nil {
 		return Join{}, err
@@ -283,11 +290,11 @@ func (s *Service) join(ctx context.Context, userID, roomID string) (Join, error)
 	if _, ok := srv.Room(room.ID); !ok && s.now().Sub(room.CreatedAt) > reportGrace {
 		return Join{}, ErrRoomNotFound
 	}
-	ticket, exp, err := s.tickets.Sign(userID, room.ID)
+	ticket, exp, err := s.tickets.Sign(user.ID, user.Name, room.ID)
 	if err != nil {
 		return Join{}, err
 	}
-	s.log.InfoContext(ctx, "join ticket issued", "room_id", room.ID, "user_id", userID, "server_id", srv.ID)
+	s.log.InfoContext(ctx, "join ticket issued", "room_id", room.ID, "user_id", user.ID, "server_id", srv.ID)
 	return Join{
 		RoomID:    room.ID,
 		WSURL:     strings.TrimRight(srv.WSAddress, "/") + "/rooms/" + room.ID,
@@ -335,7 +342,7 @@ func (s *Service) List(ctx context.Context, after *Cursor, n int) ([]Listing, *C
 
 // QuickPlay puts the player in the fullest waiting public room that has space, or creates a
 // new public room if there is none.
-func (s *Service) QuickPlay(ctx context.Context, userID string) (j Join, err error) {
+func (s *Service) QuickPlay(ctx context.Context, user User) (j Join, err error) {
 	ctx, span := s.tracer.Start(ctx, "lobby.quickplay")
 	defer func() { endSpan(span, err) }()
 
@@ -361,14 +368,14 @@ func (s *Service) QuickPlay(ctx context.Context, userID string) (j Join, err err
 	}
 	if best != nil {
 		span.SetAttributes(attribute.Bool("created", false))
-		return s.join(ctx, userID, best.ID)
+		return s.join(ctx, user, best.ID)
 	}
-	room, err := s.Create(ctx, userID, true, Settings{})
+	room, err := s.Create(ctx, user.ID, true, Settings{})
 	if err != nil {
 		return Join{}, err
 	}
 	span.SetAttributes(attribute.Bool("created", true))
-	return s.join(ctx, userID, room.ID)
+	return s.join(ctx, user, room.ID)
 }
 
 func endSpan(span trace.Span, err error) {

@@ -81,7 +81,7 @@ Until Will joins the project, Bowen covers every service, including marketplace 
 - Serves `/healthz` for itself and `/healthz/<service>` for every service, including each game-server instance (used by `make smoke`). These are restricted to internal traffic in AWS.
 - Only routes; it doesn't verify tokens (ADR 0001). It strips any client-supplied `X-User-*` and `X-Roles` headers, and never routes to a service's internal port.
 - Locally, the whole system is one origin, `http://localhost:8080`: the gateway also proxies the Vite dev server for the web app, so there is no CORS and the refresh cookie is first-party. TLS terminates at the gateway (or the load balancer in front of it) only in AWS.
-- How a WebSocket reaches the game server that owns its room is open: see ADR 0002.
+- WebSockets use `/ws/<server_id>/rooms/<room_id>`: an explicit map sends each `server_id` to its game-server instance, and unknown ids get 404 (ADR 0002).
 
 ### 4.2 Auth (FastAPI)
 
@@ -92,7 +92,7 @@ Owns the Postgres database `auth`.
 - Issues an opaque refresh token (32 random bytes, 30 days) in the cookie `da_refresh`: HttpOnly, SameSite=Strict, Path=`/api/auth`, and Secure in AWS. Refresh tokens are stored as SHA-256 hashes and rotated on every use. Every login starts a family. Reusing an already-used refresh token revokes the whole family.
 - `/refresh` locks the presented token (`SELECT … FOR UPDATE`), so concurrent uses of one token serialize: one wins, and the rest count as reuse. The web app therefore sends at most one refresh at a time (single-flight).
 - `/refresh` and `/logout` are cookie-authenticated POSTs. Besides SameSite=Strict, they refuse any `Origin` other than the web app's.
-- JWT claims: `sub` (user id), `roles` (`player`, `moderator`, `admin`), `iss`, `aud`, `iat`, `exp`, `jti`. The header carries `kid`, the RFC 7638 thumbprint of the signing key.
+- JWT claims: `sub` (user id), `roles` (`player`, `moderator`, `admin`), `name` (the display name, which the lobby copies into join tickets so game servers can show it; a rename shows after the next refresh), `iss`, `aud`, `iat`, `exp`, `jti`. The header carries `kid`, the RFC 7638 thumbprint of the signing key.
 - Stores the minimum user data: Google subject id, display name, avatar URL and roles. No email address.
 - API keys (Stage 4) for developers who register webhooks or call the public read API. Format `da_<prefix>_<secret>`, stored as the prefix plus a hash, with scopes and `last_used_at`. Other services verify keys through an internal endpoint and cache the result briefly.
 - Internal endpoints (such as `/internal/api-keys/verify`) are served on a separate internal port that the gateway never routes.
@@ -275,22 +275,27 @@ Notifier (authenticated with an API key):
 
 ### 6.4 WebSocket protocol
 
-The client connects to the URL from the lobby (the exact path depends on ADR 0002) and sends `hello` with its join ticket and, when resuming, `last_seq`. Messages are JSON in v1, at most 64 KB each. Coordinates are normalized to 0–10000, so canvas size doesn't matter. A binary format is a Stage 6 experiment.
+The client connects to the URL from the lobby (`/ws/<server_id>/rooms/<room_id>`, ADR 0002) and sends `hello` with its join ticket and, when resuming, `last_seq`, within 10 seconds. Messages are JSON text frames shaped `{"type": ..., "data": ...}`. A client message is at most 64 KB (a server message such as `welcome` can be larger, because it carries the canvas). Coordinates are normalized to 0–10000, so canvas size doesn't matter; a point is `[x, y, t_ms]` and a batch has 1–512 points. Deadlines are Unix milliseconds. A binary format is a Stage 6 experiment. The client pings every 15 seconds; a socket idle for 60 seconds is closed.
 
 Client to server:
 
 - `hello {ticket, last_seq?}`
+- `start {}` (host only; needs 2+ connected players, in Waiting or after a match)
 - `choose_word {index}` (drawer only)
 - `stroke_batch {stroke_id, points: [[x, y, t_ms], ...], color, width, done}`
 - `undo {stroke_id}`: a player can undo only their own strokes
-- `guess {text}`
-- `ping {t}`
+- `guess {text}` (1–100 characters; outside a round it is chat)
+- `ping {t}` (answered with `pong` without involving the room)
 
-Server to client, shared room events (each wrapped as `event {seq, type, data}` and stored in the room's event log): `player_joined`, `player_left`, `round_started {drawer_ids, word_length, deadline}`, `stroke_batch`, `stroke_undone`, `hint {mask}`, `chat {user_id, text}` (wrong guesses are shown as chat), `correct_guess {user_id, order}`, `round_ended {word, scores}`, `match_ended {results}`.
+Server to client, shared room events (each wrapped as `event {seq, type, data}` and stored in the room's event log): `player_joined {user_id, name}`, `player_left {user_id}`, `player_removed {user_id}` (seat freed after the rejoin grace), `host_changed {user_id}`, `match_started {match_id, order, deadline}`, `choosing {round_no, drawer_ids, deadline}`, `round_started {round_no, drawer_ids, word_length, deadline}`, `stroke_batch {user_id, stroke_id, points, color, width, done}`, `stroke_undone {stroke_id, user_id}`, `hint {mask}`, `chat {user_id, text}` (wrong guesses are shown as chat), `correct_guess {user_id, order}`, `round_ended {round_no, word, scores, round_points}`, `match_ended {match_id, results}` (results carry `placement` with competition ranking: 1, 2, 2, 4).
 
 Server to client, private messages (no `seq`, never stored in the shared log): `welcome {user_id, view, seq}`, `word_options {words}` (drawer), `your_word {word}` (drawers), `guess_result {correct}`, `rate_limited`, `room_moved {reason}`, `error {code, message}`, `pong {t}`.
 
-`view` is built for each player from the room state, and contains the word only for drawers. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is.
+`view` is built for each player from the room state (phase, host, players with scores, the round, the hint mask and the canvas). It contains the word only after the round has ended; drawers get the word through `your_word`, the only message that carries it during a round. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is. On `welcome`, a client replaces its state and then applies events with `seq` greater than `welcome.seq`; until task 2.5 a reconnect always gets a full `welcome`.
+
+Guess rules: a guess is compared after lowercasing and keeping only the letters a–z. A guess that contains the word without being it is answered only privately (`guess_result {correct: false}`) and never broadcast, because that would show everyone the word. Drawers, and players who already guessed, can't chat while a round runs. Guesses and chat pass a per-player token bucket (5 at once, then 1 per second); a rate-limited guess gets `rate_limited` and is not processed.
+
+Close codes: 4000 bad first message, 4001 invalid or reused ticket, 4003 room full, 4004 no such room, 4008 no `hello` in time, 4009 the same player connected again elsewhere, 1003 binary frame, 1008 flooding, 1009 message too big, 1011 ticket store unavailable, 1013 too slow (the send queue filled up), 1001 server shutting down. After a close, a client asks the lobby for a new ticket (tickets are single-use) and reconnects.
 
 ## 7. Key flows
 
@@ -323,7 +328,7 @@ stateDiagram-v2
   MatchEnd --> [*]: room closes
 ```
 
-Defaults, all configurable: up to 8 players; each player draws once per match; 10 seconds to choose a word from 3 options; 80 seconds to draw; hints reveal letters at 40% and 70% of the drawing time; a round ends early when every guesser is correct. A guesser earns `max(20, 100 - 15 * (order - 1))` points, and each drawer earns 10 points per correct guesser.
+Defaults, all configurable: up to 8 players; each player draws once per match; 10 seconds to choose a word from 3 options (on timeout the first option is used); 80 seconds to draw; hints reveal letters at 40% and 70% of the drawing time (each reveals `max(1, len/4)` more, never more than half the word); a round ends early when every connected guesser is correct, or when the drawer leaves. Fixed: a 3-second countdown (Starting), 5 seconds of Reveal. A match ends early when fewer than 2 players are connected. Only the host starts a match; when the host isn't connected, hosting passes to the earliest-joined connected player. A disconnected player keeps their seat and score for 60 seconds (between matches; during a match until it ends), so `max_players` counts seats and a reconnecting player always gets back in. A room with nobody connected closes after 60 seconds and drops out of the heartbeats. A guesser earns `max(20, 100 - 15 * (order - 1))` points, and each drawer earns 10 points per correct guesser.
 
 ### 7.4 Reconnect
 
@@ -427,7 +432,7 @@ Redis keys for each room:
 | `room:{id}:snapshot` | String or hash | Full room state plus its `seq`, written at every state transition and every 200 events |
 | `room:{id}:lease` | String | The owning `server_id`, with a 5-second TTL renewed every 1.5 seconds |
 | `room:{id}:fence` | Counter | Incremented when a server takes the lease; the result is that server's fencing token |
-| `room:{id}:ticket:{ticket_id}` | String | A used join ticket, set with `SET NX` and a 60-second TTL, so each ticket works once (ADR 0005) |
+| `room:{id}:ticket:{ticket_id}` | String | A used join ticket, set with `SET NX` and a TTL that outlives the ticket (at most 65 seconds), so each ticket works once (ADR 0005) |
 
 Writes go through a Lua script that checks the lease holder and the fencing token before it appends events or writes the snapshot. A server whose check fails stops the room immediately. The stream is trimmed to keep everything after the latest snapshot plus a margin.
 
@@ -517,12 +522,12 @@ Releases:
 | D18 | Every service verifies RS256 JWTs itself, with one audience (`doodle-api`); the gateway only routes; the Django admin bridges Google sign-in into a short session (ADR 0001) | No extra hop, no trusted headers, one identity for players and moderators |
 | D19 | Each Kafka topic carries one wrapper message with a `oneof` per event type; no schema registry, Buf only (ADR 0004) | The contract says what each topic holds and `buf breaking` checks it; no extra stateful service |
 | D20 | The lobby signs join tickets with Ed25519; game servers verify with the public key only; tickets last 60 seconds and are single-use through Redis `SET NX` (ADR 0005) | Only the lobby can mint tickets, rotation needs no coordinated restart, and a leaked ticket can't be replayed |
+| D21 | WebSockets connect to `/ws/<server_id>/rooms/<room_id>`, a direct URL from the lobby that the gateway maps to the instance (ADR 0002) | Always agrees with the lobby's view of the owner; consistent hashing would save no lobby call because tickets are single-use |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 15. Open questions
 
-- ADR 0002: how a WebSocket reaches the game server that owns its room. Decide in Stage 2.
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and the reward amounts (defaults are in section 7).
 - Before task 2.5: the takeover protocol when a game server loses the lobby but can still reach Redis. The lobby then reassigns rooms whose lease the old server is still renewing. Does the new server wait for the lease to expire, or take it by force with a new fencing token, and what do clients do in the meantime?

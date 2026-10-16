@@ -1,5 +1,5 @@
-// Command game-server runs a game server: room actors, rounds, guessing and the per-room event log.
-// Task 2.1: it registers with the lobby and accepts rooms; the game itself arrives in task 2.2.
+// Command game-server runs a game server: room actors, rounds and guessing over WebSockets,
+// registered with the lobby through heartbeats (design doc, sections 4.4 and 9).
 package main
 
 import (
@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,9 +21,15 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/heartbeat"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/logging"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/server"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/telemetry"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/ticket"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/ws"
+	"github.com/redis/go-redis/extra/redisotel/v9"
+	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
@@ -41,6 +48,10 @@ type config struct {
 	wsAddress      string
 	controlAddress string
 	maxRooms       int
+	redisAddr      string
+	ticketKeys     string   // comma-separated PEM files with the lobby's public keys
+	origins        []string // Origin hosts allowed to open a WebSocket
+	helloTimeout   time.Duration
 }
 
 func loadConfig() config {
@@ -61,6 +72,10 @@ func loadConfig() config {
 		wsAddress:      envOr("WS_ADDRESS", "/ws/"+instance),
 		controlAddress: envOr("CONTROL_ADDRESS", instance+":"+grpcPort),
 		maxRooms:       maxRooms,
+		redisAddr:      envOr("REDIS_ADDR", "localhost:6379"),
+		ticketKeys:     os.Getenv("TICKET_PUBLIC_KEY_PATH"),
+		origins:        strings.Split(envOr("WS_ALLOWED_ORIGINS", "localhost:8080"), ","),
+		helloTimeout:   ws.DefaultHelloTimeout,
 	}
 }
 
@@ -105,14 +120,45 @@ func run(cfg config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	keys, err := ticket.LoadPublicKeys(cfg.ticketKeys)
+	if err != nil {
+		return fmt.Errorf("join tickets (TICKET_PUBLIC_KEY_PATH, scripts/gen-ticket-key.sh): %w", err)
+	}
+	rdb := redis.NewClient(&redis.Options{
+		Addr: cfg.redisAddr, DialTimeout: 2 * time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second,
+	})
+	defer rdb.Close()
+	if err := redisotel.InstrumentTracing(rdb); err != nil {
+		return fmt.Errorf("redis tracing: %w", err)
+	}
+	meter := otel.Meter("game-server")
+	roomMetrics, err := room.NewMetrics(meter)
+	if err != nil {
+		return fmt.Errorf("metrics: %w", err)
+	}
+
+	// Rooms run until roomsCtx ends; on shutdown they close their sockets with 1001.
+	roomsCtx, stopRooms := context.WithCancel(context.Background())
+	defer stopRooms()
+	ctrl := control.New(roomsCtx, control.Config{
+		ID: cfg.instance, WSAddress: cfg.wsAddress, MaxRooms: cfg.maxRooms, Metrics: roomMetrics, Log: logger,
+	})
+	wsHandler, err := ws.NewHandler(ws.Config{
+		ServerID: cfg.instance, Rooms: ctrl, Verifier: ticket.NewVerifier(keys, time.Now),
+		Redeemer: ticket.NewRedisRedeemer(rdb, time.Now), Origins: cfg.origins,
+		HelloTimeout: cfg.helloTimeout, Log: logger, Meter: meter,
+	})
+	if err != nil {
+		return fmt.Errorf("websocket handler: %w", err)
+	}
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.port,
-		Handler:           server.NewHandler(server.Info{Service: serviceName, Version: cfg.version, Instance: cfg.instance}),
+		Handler:           server.NewHandler(server.Info{Service: serviceName, Version: cfg.version, Instance: cfg.instance}, wsHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	// Internal gRPC port for the lobby's ControlService calls; the gateway never routes it.
-	ctrl := control.New(cfg.instance, cfg.wsAddress, cfg.maxRooms, logger)
 	grpcSrv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
 	gamev1.RegisterControlServiceServer(grpcSrv, ctrl)
 	lis, err := net.Listen("tcp", ":"+cfg.grpcPort)
@@ -163,7 +209,8 @@ func run(cfg config, logger *slog.Logger) error {
 	}
 
 	// SIGTERM: stop heartbeats (the lobby stops sending rooms here within 6 seconds), stop
-	// accepting connections, let in-flight requests finish, then exit.
+	// accepting connections, close the rooms (their sockets get 1001 and can reconnect), wait
+	// for the sockets, then exit. Handing rooms to another server is task 2.5.
 	logger.Info("shutting down")
 	stopBeats()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -173,6 +220,11 @@ func run(cfg config, logger *slog.Logger) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
+	stopRooms()
+	if err := wsHandler.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("sockets still open at shutdown", "err", err)
+	}
+	ctrl.Wait()
 	select {
 	case <-stopped:
 	case <-shutdownCtx.Done():

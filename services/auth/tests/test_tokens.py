@@ -74,6 +74,14 @@ def test_issued_token_verifies_and_carries_the_claims(
     assert payload["aud"] == AUDIENCE and payload["iss"] == ISSUER and payload["jti"]
 
 
+def test_name_claim_carries_the_display_name(issuer: TokenIssuer) -> None:
+    named, _ = issuer.issue("u-1", ["player"], datetime.now(UTC), name="Ada")
+    unnamed, _ = issuer.issue("u-1", ["player"], datetime.now(UTC))
+
+    assert jwt.decode(named, options={"verify_signature": False})["name"] == "Ada"
+    assert "name" not in jwt.decode(unnamed, options={"verify_signature": False})
+
+
 def test_rejects_expired_token(issuer: TokenIssuer, verifier: TokenVerifier) -> None:
     token, _ = issuer.issue("u-1", ["player"], datetime.now(UTC) - timedelta(hours=1))
     with pytest.raises(InvalidTokenError, match="expired"):
