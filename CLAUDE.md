@@ -1,0 +1,103 @@
+# Doodle Arena
+
+<!-- Maintainer note (stripped before Claude reads this file): keep this file under ~150 lines.
+Procedures belong in .claude/skills/, area-specific rules in .claude/rules/, long specs in docs/. -->
+
+Doodle Arena is a real-time multiplayer draw-and-guess game. Each finished drawing becomes a unique item that players can trade for coins in a player marketplace.
+
+It is a portfolio project for backend internship interviews. Every technology was chosen to cover a skill from real job postings, so depth, correctness and explainability matter more than features or polish.
+
+## People and ownership
+
+- Bowen: Go services (`lobby`, `game-server`, `notifier`), the web app, local infra.
+- Will: Java services (`marketplace`, `analytics`).
+- Python services (`auth`, `assets`, `ai`): see the ownership table in `docs/design-doc.md`.
+- Both may run sessions in parallel on different tracks. Stay inside the services of the current task. Ask before editing another track's service or a shared contract in `proto/`.
+
+## Where things are documented
+
+- `docs/design-doc.md`: architecture, services, data ownership, contracts, key flows, decision log. Read the relevant sections before starting any task.
+- `docs/roadmap.md`: stages, tasks and milestone exit criteria. Work on one task at a time.
+- `docs/observability.md`: log format, metric names, tracing rules, alerts.
+- `docs/keyword-coverage.md`: which interview skill each part of the system covers.
+- `docs/adr/`: decisions. An ADR with status Proposed is undecided: present the options to a human instead of deciding.
+- `docs/interview-notes.md`: talking points collected after each task.
+- `docs/setup.md`: tools, accounts and secrets the humans set up.
+
+## Repo layout
+
+```text
+services/
+  gateway/       Nginx config: reverse proxy, TLS, WebSocket upgrade
+  auth/          Python, FastAPI: Google OAuth 2.0, JWT, API keys
+  lobby/         Go: rooms, game-server registry, room allocation, leaderboard
+  game-server/   Go: rounds, guessing, per-room event log, reconnect, failover
+  assets/        Python, Django + Celery: render, store, moderate, list drawings; replays
+  marketplace/   Java, Spring Boot: coin ledger, ownership, listings, Stripe, royalties
+  notifier/      Go: signed outgoing webhooks with retries and a dead-letter queue
+  ai/            Python, FastAPI: moderation (stub first), guesser and hints later
+  analytics/     Java, Flink (Stage 6): live top guesses, wash-trading detection
+proto/           Protobuf: gRPC services and Kafka event schemas (shared contracts)
+web/             TypeScript, React + Canvas
+infra/           docker-compose, observability config, Terraform (Stage 5)
+scripts/         Shell scripts: dev-up, seed, migrate, fake events, load helpers
+loadtest/        k6 scenarios
+docs/            Design doc, roadmap, ADRs, runbooks, interview notes
+```
+
+## Commands
+
+Create these in Stage 1, then keep this list accurate:
+
+- `make up` / `make down`: start or stop the local stack (Docker Compose).
+- `make test` runs every service's tests; `make test s=<service>` runs one.
+- `make lint`, `make proto` (regenerate code from `proto/`), `make seed`, `make logs s=<service>`.
+
+## Ground rules
+
+1. Humans own the architecture. If a task needs a decision the design doc doesn't cover (a new service or datastore, a different technology, a contract change), stop and ask. Record each decision as an ADR (use `/adr`).
+2. Technology choices are deliberate. Never swap one out to make a task easier, for example Kafka for direct HTTP calls, Flink for a plain consumer, or Postgres for SQLite.
+3. Contracts first: change `proto/` before the code that uses it. Changes are additive; never reuse or renumber a field. Regenerate with `make proto`.
+4. Database per service. A service never reads or writes another service's database, bucket or Redis key prefix. Data crosses services through Kafka events, gRPC or REST.
+5. Simple, readable code beats clever code. Bugs are acceptable outside the critical paths below, but the critical paths must be correct and tested.
+6. Work in small steps on a branch named `stage-<n>/<task-id>-<short-name>`. Make one commit per working step, using Conventional Commits in English (for example `feat(marketplace): add purchase transaction`).
+7. Write all code, comments, docs and commit messages in English.
+
+## Correctness rules (critical paths)
+
+- Money is integer coins (`BIGINT`), never floats. The entries of every ledger transaction sum to zero.
+- A purchase moves coins and ownership in one Postgres transaction. Coins are never debited without the transfer.
+- Every money-moving operation has an idempotency key protected by a `UNIQUE` constraint. A replay is a no-op that returns the original result.
+- Kafka delivery is at-least-once, so every consumer is idempotent.
+- The game server is authoritative for timing, scoring, answer checking and event order. Never trust client timestamps. Never send the secret word to guessers before the round ends.
+- Only the current lease holder writes a room's state, and every write is checked against its fencing token.
+
+## Telemetry (every service, every feature)
+
+- Use the OpenTelemetry SDK and export OTLP to the collector (`OTEL_EXPORTER_OTLP_ENDPOINT`).
+- Write JSON logs to stdout with `timestamp`, `level`, `service`, `version`, `trace_id` and `span_id`, plus `room_id`, `match_id`, `user_id` or `drawing_id` where relevant.
+- Never log secrets, tokens, API keys, email addresses or individual strokes.
+- Propagate trace context over HTTP, gRPC and Kafka message headers.
+- Use the metric names in `docs/observability.md`. IDs such as `room_id` or `user_id` are never metric attributes.
+
+## Definition of done (every task)
+
+- It runs in `make up`, `make test` passes (including the tests named in the roadmap's exit criteria), and CI is green.
+- The telemetry rules above are met, and the task's metrics exist.
+- Docs are updated when behavior, contracts or commands change.
+- Finish with a summary for the humans: what changed, how to verify it, and the main design decisions and trade-offs in plain English. Append 3–5 talking points to `docs/interview-notes.md`.
+
+## Workflow
+
+- Start each task with `/milestone <task-id>`, for example `/milestone 2.3`. It plans first and waits for approval before writing code.
+- Use plan mode for anything that touches marketplace money paths, room ownership in the game server, or `proto/`.
+- When two designs are both reasonable, present both with their trade-offs and ask.
+- Record measured numbers (load tests, failover times) in the evidence log at the end of `docs/roadmap.md`.
+
+## Gotchas
+
+- WebSocket auth uses a short-lived join ticket from the lobby, never a JWT in the URL, because URLs end up in logs.
+- Nginx `limit_req` is a leaky bucket. The token bucket (per-player guess limit) lives in the game server.
+- MinIO's community edition is no longer maintained. Use SeaweedFS for S3-compatible storage locally.
+- Prefer official upstream Docker images (`postgres`, `redis`, `mongo`, `apache/kafka`, `grafana/otel-lgtm`, `chrislusf/seaweedfs`), pinned to a version tag.
+- Run Go tests with `-race`: most game-server bugs are concurrency bugs.
