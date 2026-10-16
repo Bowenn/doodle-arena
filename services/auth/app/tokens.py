@@ -82,9 +82,12 @@ class TokenIssuer:
         self.issuer = issuer
         self.ttl = ttl
 
-    def issue(self, user_id: str, roles: list[str], now: datetime) -> tuple[str, int]:
-        """Returns a signed access token and its lifetime in seconds."""
-        claims = {
+    def issue(
+        self, user_id: str, roles: list[str], now: datetime, name: str | None = None
+    ) -> tuple[str, int]:
+        """Returns a signed access token and its lifetime in seconds. `name` is the display name,
+        which the lobby copies into join tickets so game servers can show it."""
+        claims: dict[str, Any] = {
             "sub": user_id,
             "roles": roles,
             "iss": self.issuer,
@@ -93,6 +96,8 @@ class TokenIssuer:
             "exp": now + self.ttl,
             "jti": str(uuid.uuid4()),
         }
+        if name:
+            claims["name"] = name
         token = jwt.encode(claims, self.key.private_key, ALGORITHM, headers={"kid": self.key.kid})
         return token, int(self.ttl.total_seconds())
 

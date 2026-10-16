@@ -6,6 +6,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
@@ -53,6 +54,8 @@ def test_refresh_rotation(client: TestClient, google: FakeGoogle) -> None:
     assert second and second != first  # rotated
     me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {body['access_token']}"})
     assert me.status_code == 200 and me.json()["display_name"] == "Ada Lovelace"
+    claims = jwt.decode(body["access_token"], options={"verify_signature": False})
+    assert claims["name"] == "Ada Lovelace"  # copied into join tickets by the lobby
 
     # The new token works and rotates again.
     assert use(client, second) == 200

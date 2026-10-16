@@ -154,7 +154,9 @@ def refresh_access_token(
             ctx.metrics.refresh("expired" if result.outcome == "expired" else "invalid")
         return unauthorized_refresh(request, ctx)
 
-    access_token, expires_in = ctx.issuer.issue(str(user.id), user.roles, ctx.now())
+    access_token, expires_in = ctx.issuer.issue(
+        str(user.id), user.roles, ctx.now(), name=user.display_name
+    )
     response = JSONResponse(
         {"access_token": access_token, "token_type": "Bearer", "expires_in": expires_in},
         headers={"Cache-Control": "no-store"},
