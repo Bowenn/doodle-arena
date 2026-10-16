@@ -4,7 +4,57 @@
 
 name: doodle-arena
 
+# Settings shared by every application service.
+x-app: &app
+  restart: unless-stopped
+  environment: &app-env
+    SERVICE_VERSION: 0.1.0
+    LOG_LEVEL: info
+    DEPLOYMENT_ENVIRONMENT: local
+
+# Go services check their own /healthz (their runtime image has no shell).
+x-go-healthcheck: &go-healthcheck
+  test: ["CMD", "/app", "healthcheck"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+
 services:
+  # ------------------------------------------------------------- Go services
+
+  lobby:
+    <<: *app
+    build: ../services/lobby
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: lobby-1
+    healthcheck: *go-healthcheck
+
+  # Two game servers, so failover can be tested (task 2.5).
+  game-server-1:
+    <<: *app
+    build: ../services/game-server
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: game-server-1
+    healthcheck: *go-healthcheck
+
+  game-server-2:
+    <<: *app
+    build: ../services/game-server
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: game-server-2
+    healthcheck: *go-healthcheck
+
+  notifier:
+    <<: *app
+    build: ../services/notifier
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: notifier-1
+    healthcheck: *go-healthcheck
+
   # ---------------------------------------------------------------- data stores
 
   postgres:
