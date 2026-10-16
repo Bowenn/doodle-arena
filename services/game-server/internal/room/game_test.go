@@ -457,3 +457,143 @@ func TestViewsHideTheWordWhileDrawing(t *testing.T) {
 		t.Fatalf("reveal view word = %q", v.Word)
 	}
 }
+
+func TestFinishedRoundRecord(t *testing.T) {
+	tb := newTable(t, DefaultSettings)
+	tb.join("host", "b")
+	word := tb.startRound()
+	drawStart := tb.now
+	tb.advance(time.Second)
+	tb.send("host", stroke("s1", 2))
+	tb.advance(time.Second)
+	tb.send("host", stroke("s1", 3))
+	tb.send("host", stroke("s2", 1))
+	tb.send("host", protocol.Undo{StrokeID: "s2"})
+	tb.advance(500 * time.Millisecond)
+	tb.send("host", stroke("s3", 1))
+	if len(tb.g.TakeFinished()) != 0 {
+		t.Fatal("a running round was reported as finished")
+	}
+	tb.send("b", protocol.Guess{Text: word}) // the only guesser: the round ends
+
+	f := tb.g.TakeFinished()
+	if len(f) != 1 || f[0].Round == nil {
+		t.Fatalf("finished = %+v, want one round", f)
+	}
+	r := *f[0].Round
+	if r.MatchID != tb.g.MatchID() || r.RoomID != "r1" || r.RoundNo != 1 || r.Word != word ||
+		!slices.Equal(r.DrawerIDs, []string{"host"}) || r.Correct != 1 {
+		t.Fatalf("round = %+v", r)
+	}
+	if !r.DrawStart.Equal(drawStart) || !r.EndedAt.Equal(tb.now) {
+		t.Fatalf("draw start %v, ended %v", r.DrawStart, r.EndedAt)
+	}
+	var ids []string
+	for _, b := range r.Canvas {
+		ids = append(ids, b.StrokeID)
+	}
+	if !slices.Equal(ids, []string{"s1", "s1", "s3"}) {
+		t.Fatalf("canvas strokes = %v, want the undone s2 left out", ids)
+	}
+	if got := r.Canvas[1].ReceivedAt.Sub(drawStart); got != 2*time.Second {
+		t.Fatalf("second batch received %v after the draw start, want 2s (server clock)", got)
+	}
+	// The record is a copy: the next round must not change it.
+	tb.toNext()
+	if len(r.Canvas) != 3 || r.Canvas[0].StrokeID != "s1" {
+		t.Fatal("the record changed after the round")
+	}
+}
+
+// playRound plays one round from Starting or Reveal: the drawer auto-picks, guessers guess,
+// and the round runs out of time unless everyone guessed.
+func (tb *table) playRound(guessers ...string) {
+	tb.t.Helper()
+	tb.toNext() // -> Choosing
+	tb.toNext() // auto-pick -> Drawing
+	for _, id := range guessers {
+		tb.send(id, protocol.Guess{Text: tb.g.word})
+	}
+	for tb.g.Phase() == PhaseDrawing {
+		tb.toNext()
+	}
+}
+
+func TestFinishedMatchRecord(t *testing.T) {
+	tb := newTable(t, DefaultSettings)
+	tb.join("host", "b", "c", "d")
+	tb.send("host", protocol.Start{})
+	firstRound := tb.now.Add(StartingFor)
+	tb.playRound("b") // host draws: b 100, host 10
+	tb.playRound()    // b draws, nobody guesses
+	tb.playRound("d") // c draws: d 100, c 10
+	tb.playRound()    // d draws
+	tb.toNext()       // everyone has drawn
+	if tb.g.Phase() != PhaseMatchEnd {
+		t.Fatalf("phase = %s", tb.g.Phase())
+	}
+
+	f := tb.g.TakeFinished()
+	if len(f) != 5 || f[4].Match == nil {
+		t.Fatalf("finished = %d items, want 4 rounds then the match", len(f))
+	}
+	for i, x := range f[:4] {
+		if x.Round == nil || x.Round.RoundNo != i+1 {
+			t.Fatalf("item %d = %+v, want round %d", i, x, i+1)
+		}
+	}
+	m := *f[4].Match
+	if m.MatchID != tb.g.MatchID() || m.RoomID != "r1" || m.Rounds != 4 {
+		t.Fatalf("match = %+v", m)
+	}
+	if !m.StartedAt.Equal(firstRound) || !m.EndedAt.Equal(tb.now) {
+		t.Fatalf("started %v (want %v), ended %v", m.StartedAt, firstRound, m.EndedAt)
+	}
+	want := []PlayerResult{{"b", 100, 1}, {"d", 100, 1}, {"host", 10, 3}, {"c", 10, 3}}
+	if !slices.Equal(m.Results, want) {
+		t.Fatalf("results = %v, want %v", m.Results, want)
+	}
+}
+
+func TestEarlyEndsAndAbortedMatches(t *testing.T) {
+	t.Run("a match aborted before any round finished is not reported", func(t *testing.T) {
+		tb := newTable(t, DefaultSettings)
+		tb.join("host", "b")
+		tb.send("host", protocol.Start{})
+		tb.leave("b") // during the countdown
+		if tb.g.Phase() != PhaseMatchEnd || len(tb.events("match_ended")) != 1 {
+			t.Fatalf("phase = %s", tb.g.Phase())
+		}
+		if f := tb.g.TakeFinished(); len(f) != 0 {
+			t.Fatalf("finished = %+v, want nothing", f)
+		}
+	})
+	t.Run("the last guesser leaving reports the round and the match", func(t *testing.T) {
+		tb := newTable(t, DefaultSettings)
+		tb.join("host", "b")
+		tb.startRound()
+		tb.send("host", stroke("s1", 2))
+		tb.leave("b")
+		f := tb.g.TakeFinished()
+		if len(f) != 2 || f[0].Round == nil || len(f[0].Round.Canvas) != 1 || f[1].Match == nil || f[1].Match.Rounds != 1 {
+			t.Fatalf("finished = %+v, want the round then the match", f)
+		}
+	})
+	t.Run("a rematch reports only its own rounds", func(t *testing.T) {
+		tb := newTable(t, DefaultSettings)
+		tb.join("host", "b")
+		tb.send("host", protocol.Start{})
+		tb.playRound()
+		tb.playRound()
+		tb.toNext()
+		first := tb.g.TakeFinished()
+		tb.send("host", protocol.Start{})
+		tb.leave("b")
+		if len(first) != 3 || first[2].Match.Rounds != 2 {
+			t.Fatalf("first match = %d items", len(first))
+		}
+		if f := tb.g.TakeFinished(); len(f) != 0 {
+			t.Fatalf("aborted rematch reported %+v", f)
+		}
+	})
+}

@@ -39,6 +39,19 @@ func (realClock) AfterFunc(d time.Duration, f func()) func() bool {
 // RealClock is the wall clock.
 var RealClock Clock = realClock{}
 
+// Sink takes finished rounds and matches out of the room (the event publisher). Both methods
+// must return at once and never do I/O: the actor calls them inside its loop. ctx carries
+// only the round's or match's end span; it is never cancelled with the room.
+type Sink interface {
+	RoundFinished(ctx context.Context, r FinishedRound)
+	MatchFinished(ctx context.Context, m FinishedMatch)
+}
+
+type noSink struct{}
+
+func (noSink) RoundFinished(context.Context, FinishedRound) {}
+func (noSink) MatchFinished(context.Context, FinishedMatch) {}
+
 // ErrClosed means the room has shut down.
 var ErrClosed = errors.New("room closed")
 
@@ -59,6 +72,7 @@ type Config struct {
 	Rand     *rand.Rand // nil: a random seed
 	Log      *slog.Logger
 	Metrics  *Metrics
+	Events   Sink // nil: finished rounds and matches go nowhere
 }
 
 // Inputs to the actor. Everything that touches a room goes through its inbox, in order.
@@ -89,6 +103,7 @@ type Room struct {
 	game    *Game
 	log     *slog.Logger
 	metrics *Metrics
+	events  Sink
 	tracer  trace.Tracer
 
 	conns     map[string]Conn // actor only
@@ -106,10 +121,13 @@ func New(cfg Config) *Room {
 	if cfg.Clock == nil {
 		cfg.Clock = RealClock
 	}
+	if cfg.Events == nil {
+		cfg.Events = noSink{}
+	}
 	r := &Room{
 		id: cfg.ID, mode: cfg.Mode, inbox: make(chan any, 256), done: make(chan struct{}),
 		clock: cfg.Clock, game: NewGame(cfg.ID, cfg.HostID, cfg.Settings, rng, cfg.Clock.Now()),
-		log: cfg.Log.With("room_id", cfg.ID), metrics: cfg.Metrics, tracer: otel.Tracer("game-server"),
+		log: cfg.Log.With("room_id", cfg.ID), metrics: cfg.Metrics, events: cfg.Events, tracer: otel.Tracer("game-server"),
 		conns: map[string]Conn{},
 	}
 	r.summary.Store(&Summary{})
@@ -271,6 +289,9 @@ func (r *Room) flush(ctx context.Context) {
 		r.metrics.broadcast(ctx, ev.Type, time.Since(start))
 		r.lifecycle(ev)
 	}
+	for _, f := range r.game.TakeFinished() {
+		r.finish(f)
+	}
 }
 
 // lifecycle logs and traces matches and rounds (never single strokes or guesses).
@@ -283,21 +304,39 @@ func (r *Room) lifecycle(ev protocol.Event) {
 		r.span("game.match.start", attrs)
 	case "round_started":
 		r.span("game.round.start", append(attrs, attribute.Int("round.no", g.RoundNo())))
-	case "round_ended":
-		lr := g.LastRound()
-		// The word is logged only now that everyone has seen it.
-		r.log.Info("round finished", "match_id", g.MatchID(), "round_no", lr.RoundNo, "word", lr.Word,
-			"stroke_count", lr.Strokes, "correct", lr.Correct, "user_id", lr.DrawerID)
-		r.span("game.round.end", append(attrs, attribute.Int("round.no", lr.RoundNo)))
 	case "match_ended":
-		r.log.Info("match finished", "match_id", g.MatchID())
-		r.span("game.match.end", attrs)
+		if g.roundsFinished == 0 {
+			r.log.Info("match ended before any round finished; not published", "match_id", g.MatchID())
+		}
 	}
 }
 
-func (r *Room) span(name string, attrs []attribute.KeyValue) {
-	_, s := r.tracer.Start(context.Background(), name, trace.WithAttributes(attrs...))
+// finish logs and traces a finished round or match and hands it to the event publisher. The
+// end span is the parent of the publisher's spans, so the Kafka traceparent leads back here.
+func (r *Room) finish(f Finished) {
+	switch {
+	case f.Round != nil:
+		fr := *f.Round
+		// The word is logged only now that everyone has seen it.
+		r.log.Info("round finished", "match_id", fr.MatchID, "round_no", fr.RoundNo, "word", fr.Word,
+			"stroke_batches", len(fr.Canvas), "correct", fr.Correct, "user_id", fr.DrawerIDs[0])
+		ctx := r.span("game.round.end", []attribute.KeyValue{attribute.String("room.id", r.id),
+			attribute.String("match.id", fr.MatchID), attribute.Int("round.no", fr.RoundNo)})
+		r.events.RoundFinished(ctx, fr)
+	case f.Match != nil:
+		fm := *f.Match
+		r.log.Info("match finished", "match_id", fm.MatchID, "rounds", fm.Rounds, "players", len(fm.Results))
+		ctx := r.span("game.match.end", []attribute.KeyValue{attribute.String("room.id", r.id),
+			attribute.String("match.id", fm.MatchID), attribute.Int("match.rounds", fm.Rounds)})
+		r.events.MatchFinished(ctx, fm)
+	}
+}
+
+// span records an instant span and returns a context that carries it.
+func (r *Room) span(name string, attrs []attribute.KeyValue) context.Context {
+	ctx, s := r.tracer.Start(context.Background(), name, trace.WithAttributes(attrs...))
 	s.End()
+	return ctx
 }
 
 func (r *Room) publish() {

@@ -17,6 +17,9 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // fakeClock fires timers only when the test advances it, synchronously, so the tick lands
@@ -141,7 +144,8 @@ type harness struct {
 	conns map[string]*fakeConn
 }
 
-func newHarness(t *testing.T, host string, s Settings, m *Metrics) *harness {
+// newHarness starts a room; opts change it before its actor starts.
+func newHarness(t *testing.T, host string, s Settings, m *Metrics, opts ...func(*Room)) *harness {
 	t.Helper()
 	if m == nil {
 		m = NoopMetrics()
@@ -149,6 +153,9 @@ func newHarness(t *testing.T, host string, s Settings, m *Metrics) *harness {
 	clock := &fakeClock{now: t0}
 	r := New(Config{ID: "r1", Mode: "classic", HostID: host, Settings: s, Clock: clock,
 		Rand: rand.New(rand.NewPCG(9, 9)), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: m})
+	for _, o := range opts {
+		o(r)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go r.Run(ctx)
 	t.Cleanup(func() { cancel(); <-r.Done() })
@@ -534,5 +541,65 @@ func TestGuessMetrics(t *testing.T) {
 	}
 	if got["correct"] != 1 || got["wrong"] != 1 || rooms != 1 {
 		t.Fatalf("guesses = %v, rooms active = %d", got, rooms)
+	}
+}
+
+// recordingSink records what the room hands to the publisher, with the span it came with.
+type recordingSink struct {
+	mu    sync.Mutex
+	items []any // FinishedRound or FinishedMatch
+	spans []trace.SpanContext
+}
+
+func (s *recordingSink) RoundFinished(ctx context.Context, r FinishedRound) { s.add(ctx, r) }
+func (s *recordingSink) MatchFinished(ctx context.Context, m FinishedMatch) { s.add(ctx, m) }
+
+func (s *recordingSink) add(ctx context.Context, item any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items = append(s.items, item)
+	s.spans = append(s.spans, trace.SpanContextFromContext(ctx))
+}
+
+func TestFinishedRoundsAndMatchesReachTheSink(t *testing.T) {
+	sink := &recordingSink{}
+	spans := tracetest.NewSpanRecorder()
+	h := newHarness(t, "a", DefaultSettings, nil, func(r *Room) {
+		r.events = sink
+		r.tracer = sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)).Tracer("t")
+	})
+	h.join("a")
+	h.join("b")
+	drawer, word := h.startDrawing("a")
+	h.input(drawer, stroke("s1", 2))
+	guesser := map[string]string{"a": "b", "b": "a"}[drawer]
+	h.input(guesser, protocol.Guess{Text: word}) // the only guesser: round 1 ends
+	h.sync()
+	h.room.Leave(h.conns[guesser]) // fewer than 2 players: the match ends
+	h.sync()
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.items) != 2 {
+		t.Fatalf("sink got %d items, want the round then the match", len(sink.items))
+	}
+	r, ok := sink.items[0].(FinishedRound)
+	if !ok || r.RoundNo != 1 || r.Word != word || len(r.Canvas) != 1 || r.DrawerIDs[0] != drawer {
+		t.Fatalf("round = %+v", sink.items[0])
+	}
+	m, ok := sink.items[1].(FinishedMatch)
+	if !ok || m.MatchID != r.MatchID || m.Rounds != 1 || len(m.Results) != 2 {
+		t.Fatalf("match = %+v", sink.items[1])
+	}
+	// Each hand-off carries its end span, which becomes the parent of the publish spans.
+	ended := map[string]trace.SpanContext{}
+	for _, s := range spans.Ended() {
+		ended[s.Name()] = s.SpanContext()
+	}
+	if !sink.spans[0].IsValid() || !sink.spans[0].Equal(ended["game.round.end"]) {
+		t.Fatalf("round span = %v, want game.round.end %v", sink.spans[0], ended["game.round.end"])
+	}
+	if !sink.spans[1].IsValid() || !sink.spans[1].Equal(ended["game.match.end"]) {
+		t.Fatalf("match span = %v, want game.match.end", sink.spans[1])
 	}
 }

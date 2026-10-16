@@ -60,13 +60,41 @@ type Out struct {
 	Seq    int64  // for a welcome: the seq it is current up to, so older events are skipped
 }
 
-// RoundStats describe the last finished round, for logs.
-type RoundStats struct {
-	RoundNo  int
-	Word     string
-	Strokes  int
-	Correct  int
-	DrawerID string
+// FinishedRound is a round that ended, as the room hands it to the event publisher. It is a
+// copy: the game never changes it after endRound.
+type FinishedRound struct {
+	MatchID   string
+	RoomID    string
+	RoundNo   int
+	Word      string // safe to publish: the round is over
+	DrawerIDs []string
+	Correct   int
+	Canvas    []CanvasBatch // in the order the room processed them; undone strokes are gone
+	DrawStart time.Time     // when the drawing phase started
+	EndedAt   time.Time
+}
+
+// FinishedMatch is a match that ended after at least one finished round.
+type FinishedMatch struct {
+	MatchID   string
+	RoomID    string
+	StartedAt time.Time // when the first round started
+	EndedAt   time.Time
+	Rounds    int
+	Results   []PlayerResult // ordered by placement
+}
+
+// PlayerResult is one player's final result in a match.
+type PlayerResult struct {
+	UserID    string
+	Score     int
+	Placement int // competition ranking: equal scores share a placement
+}
+
+// Finished is a finished round or match: exactly one of the two is set.
+type Finished struct {
+	Round *FinishedRound
+	Match *FinishedMatch
 }
 
 type player struct {
@@ -80,9 +108,11 @@ type player struct {
 	bucket    ratelimit.Bucket
 }
 
-type canvasBatch struct {
+// CanvasBatch is one stroke batch on the round's canvas.
+type CanvasBatch struct {
 	UserID string `json:"user_id"`
 	protocol.StrokeBatch
+	ReceivedAt time.Time `json:"-"` // server clock; never sent to clients
 }
 
 // Game is a room's state and rules. It does no I/O and keeps no clock: every method gets
@@ -115,10 +145,12 @@ type Game struct {
 	revealed     map[int]bool
 	correct      int
 	roundPoints  map[string]int
-	canvas       []canvasBatch
+	canvas       []CanvasBatch
 	canvasPoints int
 
-	lastRound RoundStats
+	matchStart     time.Time // when the match's first round started
+	roundsFinished int       // in the current match
+	finished       []Finished
 
 	seq    int64
 	log    []protocol.Event
@@ -157,8 +189,12 @@ func (g *Game) MatchID() string { return g.matchID }
 // RoundNo is the current round's number within the match.
 func (g *Game) RoundNo() int { return g.roundNo }
 
-// LastRound describes the last finished round. Its word is for logs after the round ended.
-func (g *Game) LastRound() RoundStats { return g.lastRound }
+// TakeFinished returns the rounds and matches that ended since the last call, in order.
+func (g *Game) TakeFinished() []Finished {
+	f := g.finished
+	g.finished = nil
+	return f
+}
 
 // Connected counts players with an open connection.
 func (g *Game) Connected() int {
@@ -250,7 +286,7 @@ func (g *Game) Handle(now time.Time, uid string, msg protocol.ClientMsg) string 
 		}
 		g.beginDrawing(now, g.options[m.Index])
 	case protocol.StrokeBatch:
-		g.handleStroke(uid, m)
+		g.handleStroke(now, uid, m)
 	case protocol.Undo:
 		g.handleUndo(uid, m)
 	case protocol.Guess:
@@ -272,7 +308,7 @@ func (g *Game) handleStart(now time.Time, uid string) {
 	}
 }
 
-func (g *Game) handleStroke(uid string, m protocol.StrokeBatch) {
+func (g *Game) handleStroke(now time.Time, uid string, m protocol.StrokeBatch) {
 	if g.phase != PhaseDrawing || uid != g.drawer {
 		g.fail(uid, "not_your_turn", "only the drawer can draw, while drawing")
 		return
@@ -282,7 +318,7 @@ func (g *Game) handleStroke(uid string, m protocol.StrokeBatch) {
 		return
 	}
 	g.canvasPoints += len(m.Points)
-	b := canvasBatch{UserID: uid, StrokeBatch: m}
+	b := CanvasBatch{UserID: uid, StrokeBatch: m, ReceivedAt: now}
 	g.canvas = append(g.canvas, b)
 	g.emit("stroke_batch", b)
 }
@@ -447,6 +483,8 @@ func (g *Game) startMatch(now time.Time) {
 	g.drawn = map[string]bool{}
 	g.usedWords = map[string]bool{}
 	g.roundNo = 0
+	g.roundsFinished = 0
+	g.matchStart = time.Time{}
 	g.phase = PhaseStarting
 	g.deadline = now.Add(StartingFor)
 	g.emit("match_started", map[string]any{"match_id": g.matchID, "order": g.drawOrder, "deadline": g.deadline.UnixMilli()})
@@ -470,6 +508,9 @@ func (g *Game) nextRound(now time.Time) {
 		return
 	}
 	g.roundNo++
+	if g.roundNo == 1 {
+		g.matchStart = now
+	}
 	g.drawer = next
 	g.drawn[next] = true
 	g.options = g.picker.Options(g.settings.WordOptions, g.usedWords)
@@ -519,7 +560,11 @@ func (g *Game) endRoundIfAllGuessed(now time.Time) {
 }
 
 func (g *Game) endRound(now time.Time) {
-	g.lastRound = RoundStats{RoundNo: g.roundNo, Word: g.word, Strokes: len(g.canvas), Correct: g.correct, DrawerID: g.drawer}
+	g.roundsFinished++
+	g.finished = append(g.finished, Finished{Round: &FinishedRound{
+		MatchID: g.matchID, RoomID: g.roomID, RoundNo: g.roundNo, Word: g.word, DrawerIDs: []string{g.drawer},
+		Correct: g.correct, Canvas: slices.Clone(g.canvas), DrawStart: g.drawStart, EndedAt: now,
+	}})
 	g.phase = PhaseReveal
 	g.deadline = now.Add(RevealFor)
 	g.emit("round_ended", map[string]any{
@@ -535,14 +580,24 @@ func (g *Game) endMatch(now time.Time) {
 	g.deadline = time.Time{}
 	g.drawer = ""
 	results := make([]map[string]any, 0, len(g.players))
+	final := make([]PlayerResult, 0, len(g.players))
 	placement := 0
 	for i, s := range g.scores() {
-		if i == 0 || s.Score < results[i-1]["score"].(int) {
+		if i == 0 || s.Score < final[i-1].Score {
 			placement = i + 1 // competition ranking: 1, 2, 2, 4
 		}
 		results = append(results, map[string]any{"user_id": s.UserID, "name": s.Name, "score": s.Score, "placement": placement})
+		final = append(final, PlayerResult{UserID: s.UserID, Score: s.Score, Placement: placement})
 	}
 	g.emit("match_ended", map[string]any{"match_id": g.matchID, "results": results})
+	// A match that ended before any round finished (players left during the countdown or the
+	// first choosing phase) is not a result: publishing it would let an aborted match earn rewards.
+	if g.roundsFinished > 0 {
+		g.finished = append(g.finished, Finished{Match: &FinishedMatch{
+			MatchID: g.matchID, RoomID: g.roomID, StartedAt: g.matchStart, EndedAt: now,
+			Rounds: g.roundsFinished, Results: final,
+		}})
+	}
 }
 
 // ScoreLine is one player's score, best first.
@@ -616,7 +671,7 @@ type View struct {
 	WordLength int            `json:"word_length,omitempty"`
 	Mask       string         `json:"mask,omitempty"`
 	Word       string         `json:"word,omitempty"` // only after the round ended
-	Strokes    []canvasBatch  `json:"strokes,omitempty"`
+	Strokes    []CanvasBatch  `json:"strokes,omitempty"`
 }
 
 // ViewFor builds uid's view. It never contains the word while a round is running, not even

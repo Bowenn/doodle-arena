@@ -25,6 +25,13 @@ const (
 	EmptyTTL    = 60 * time.Second // a room with nobody connected closes after this
 )
 
+// The canvas has a fixed 4:3 aspect. Points are normalized to 0-10000 on each axis, so these
+// sizes only tell renderers the aspect ratio (RoundFinished and the stroke log carry them).
+const (
+	CanvasWidth  = 800
+	CanvasHeight = 600
+)
+
 // Points.
 const (
 	DrawerPointsPerGuess = 10
