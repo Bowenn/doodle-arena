@@ -14,8 +14,9 @@ import org.springframework.core.env.Environment;
 
 /**
  * Writes one JSON object per log event with the required fields timestamp, level, service,
- * version and msg (docs/observability.md, section 2). trace_id and span_id are added once
- * OpenTelemetry is wired in (task 1.5).
+ * version, trace_id, span_id and msg (docs/observability.md, section 2). The OpenTelemetry Java
+ * agent puts trace_id and span_id into the MDC while a span is active; outside a span (for example
+ * at startup) both are left out.
  */
 public class JsonLogFormatter implements StructuredLogFormatter<ILoggingEvent> {
 
@@ -32,6 +33,8 @@ public class JsonLogFormatter implements StructuredLogFormatter<ILoggingEvent> {
 			members.add("level", (event) -> event.getLevel().toString().toLowerCase(Locale.ROOT));
 			members.add("service", service);
 			members.add("version", version);
+			members.add("trace_id", (event) -> event.getMDCPropertyMap().get("trace_id")).whenNotNull();
+			members.add("span_id", (event) -> event.getMDCPropertyMap().get("span_id")).whenNotNull();
 			members.add("msg", ILoggingEvent::getFormattedMessage);
 			members.add("logger", ILoggingEvent::getLoggerName);
 			members.add("exc", ILoggingEvent::getThrowableProxy).whenNotNull().as(ThrowableProxyUtil::asString);
