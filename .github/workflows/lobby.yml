@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - services/lobby/**
+      - proto/gen/go/**
       - .github/workflows/lobby.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
@@ -15,6 +16,7 @@ on:
     branches: [master]
     paths:
       - services/lobby/**
+      - proto/gen/go/**
       - .github/workflows/lobby.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
@@ -42,4 +44,5 @@ jobs:
     uses: ./.github/workflows/_docker.yml
     with:
       service: lobby
-      context: services/lobby
+      context: .
+      file: services/lobby/Dockerfile

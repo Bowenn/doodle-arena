@@ -44,7 +44,10 @@ services:
 
   lobby:
     <<: *app
-    build: ../services/lobby
+    build:
+      # The repository root, so the image can include proto/gen/go.
+      context: ..
+      dockerfile: services/lobby/Dockerfile
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: lobby-1
@@ -60,7 +63,10 @@ services:
   # Two game servers, so failover can be tested (task 2.5).
   game-server-1:
     <<: *app
-    build: ../services/game-server
+    build:
+      # The repository root, so the image can include proto/gen/go.
+      context: ..
+      dockerfile: services/game-server/Dockerfile
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: game-server-1
@@ -77,7 +83,10 @@ services:
 
   game-server-2:
     <<: *app
-    build: ../services/game-server
+    build:
+      # The repository root, so the image can include proto/gen/go.
+      context: ..
+      dockerfile: services/game-server/Dockerfile
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: game-server-2

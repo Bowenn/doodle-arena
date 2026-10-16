@@ -1,0 +1,6 @@
+# The build context is the repository root; send only what the game-server build needs.
+*
+!proto/gen/go
+!services/game-server
+services/game-server/bin
+services/game-server/coverage.out

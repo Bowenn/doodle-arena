@@ -10,6 +10,7 @@ on:
       - scripts/**
       - services/gateway/**
       - services/*/Dockerfile
+      - services/*/Dockerfile.dockerignore
       - web/Dockerfile
       - .env.example
       - Makefile
