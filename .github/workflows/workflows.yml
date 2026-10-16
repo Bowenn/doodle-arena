@@ -1,0 +1,38 @@
+# Lints the workflow files themselves with actionlint (syntax, expressions, shellcheck on run
+# scripts), the same check as `make lint s=ci`.
+name: workflows
+
+on:
+  pull_request:
+    paths:
+      - .github/**
+      - scripts/lint.sh
+  push:
+    branches: [master]
+    paths:
+      - .github/**
+      - scripts/lint.sh
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.2"
+          cache: false
+      - name: actionlint
+        run: ./scripts/lint.sh ci

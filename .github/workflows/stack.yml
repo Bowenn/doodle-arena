@@ -1,0 +1,48 @@
+# Boots the whole local stack (make up) and runs make smoke: every /healthz through the
+# gateway, plus the gateway's rate limit. Runs only when the stack itself changes, on master,
+# and on demand, because it takes about five runner-minutes.
+name: stack
+
+on:
+  pull_request:
+    paths:
+      - infra/**
+      - scripts/**
+      - services/gateway/**
+      - services/*/Dockerfile
+      - web/Dockerfile
+      - .env.example
+      - Makefile
+      - .github/workflows/stack.yml
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  smoke:
+    name: make up and make smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: make up (creates .env and the JWT key, builds every image)
+        run: make up
+      - name: make smoke
+        run: make smoke
+      - name: Show containers and logs
+        if: failure()
+        run: |
+          docker compose -f infra/docker-compose.yml --env-file .env ps -a
+          docker compose -f infra/docker-compose.yml --env-file .env logs --no-color --tail=200
+      - name: make down
+        if: always()
+        run: docker compose -f infra/docker-compose.yml --env-file .env down -v --remove-orphans
