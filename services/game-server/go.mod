@@ -6,6 +6,7 @@ toolchain go1.27.2
 
 require (
 	github.com/Bowenn/gap-project_private/proto/gen/go v0.0.0-00010101000000-000000000000
+	github.com/coder/websocket v1.8.15
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.44.0
