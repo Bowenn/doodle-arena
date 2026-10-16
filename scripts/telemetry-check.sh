@@ -42,10 +42,15 @@ for batch in data.get("batches", []):
 print(" ".join(sorted(names)))'
 }
 
-auth_log_lines() {
-  curl -s --max-time 5 -G "$(proxy loki)/loki/api/v1/query_range" \
-    --data-urlencode "query={service_name=\"auth\"} | trace_id=\"$trace_id\"" \
-    --data-urlencode "since=15m" | python3 -c '
+# Loki's raw answer to a LogQL query over the last 15 minutes, followed by "HTTP <code>".
+loki_raw() {
+  curl -s --max-time 5 -w '\nHTTP %{http_code}' -G "$(proxy loki)/loki/api/v1/query_range" \
+    --data-urlencode "query=$1" --data-urlencode "since=15m"
+}
+
+# Counts the log lines Loki returns for a LogQL query.
+loki_count() {
+  loki_raw "$1" | sed '$d' | python3 -c '
 import json, sys
 try:
     data = json.load(sys.stdin)
@@ -53,6 +58,8 @@ except ValueError:
     print(0); sys.exit(0)
 print(sum(len(s["values"]) for s in data.get("data", {}).get("result", [])))'
 }
+
+auth_log_lines() { loki_count "{service_name=\"auth\"} | trace_id=\"$trace_id\""; }
 
 prom_label_values() {
   curl -s --max-time 5 -G "$(proxy prometheus)/api/v1/query" --data-urlencode "query=$1" | python3 -c '
@@ -95,6 +102,12 @@ report "$logs_ok" "Loki has auth log lines with trace_id $trace_id" \
   "Loki: no auth log line with trace_id $trace_id"
 report "$metrics_ok" "Prometheus: all ${#SERVICES[@]} services export metrics; HTTP metrics present" \
   "Prometheus: missing target_info for: ${missing[*]:-none}; HTTP metrics from: ${http:-none}"
+
+if ((logs_ok == 0)); then
+  # Diagnostics: is Loki answering, and does it have any auth lines at all?
+  echo "  Loki's answer: $(loki_raw "{service_name=\"auth\"} | trace_id=\"$trace_id\"" | tail -c 300 | tr '\n' ' ')"
+  echo "  auth lines in Loki (any trace): $(loki_count '{service_name="auth"}')"
+fi
 
 if ((failed)); then
   echo "Telemetry check failed. In Grafana: $GRAFANA/explore (Tempo, search for the trace id)" >&2
