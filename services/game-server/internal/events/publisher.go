@@ -32,7 +32,7 @@ import (
 
 // Producer is the part of *kgo.Client the publisher uses.
 type Producer interface {
-	ProduceSync(ctx context.Context, rs ...*kgo.Record) kgo.ProduceResults
+	Produce(ctx context.Context, r *kgo.Record, promise func(*kgo.Record, error))
 }
 
 // ObjectStore is the part of *s3.Client the publisher uses.
@@ -219,7 +219,7 @@ func (p *Publisher) publishRound(ctx context.Context, eventID string, r room.Fin
 	key := StrokeLogKey(r.MatchID, r.RoundNo)
 	// Upload first: RoundFinished must never point at an object that doesn't exist. The key
 	// is deterministic, so uploading again after a timeout overwrites the same bytes.
-	err = p.retry(ctx, log, "upload stroke log", func(ctx context.Context) error {
+	err = p.retry(ctx, log, "upload stroke log", attemptTimeout, func(ctx context.Context) error {
 		_, err := p.cfg.S3.PutObject(ctx, &s3.PutObjectInput{
 			Bucket: aws.String(p.cfg.Bucket), Key: aws.String(key), Body: bytes.NewReader(body),
 			ContentType: aws.String(strokeLogMIMEType),
@@ -254,27 +254,44 @@ func (p *Publisher) publishMatch(ctx context.Context, eventID string, m room.Fin
 	return nil
 }
 
-// produce sends one wrapper message keyed by room id. A fresh record per attempt: franz-go's
-// tracing hook writes the traceparent header into each record it buffers. A retry after an
-// ambiguous failure can publish the event twice (at-least-once); consumers deduplicate on
-// event_id or the natural key.
+// produce sends one wrapper message keyed by room id and waits for the broker's ack or the
+// job's deadline, whichever comes first.
+//
+// franz-go retries a buffered record on its own, in order, and its idempotent producer keeps
+// those retries from writing duplicates. It fails a record only when that is safe (the record
+// was never sent, or the broker answered), so a failure is retried here with a fresh record
+// (the tracing hook writes traceparent into each record it buffers). While Kafka is
+// unreachable a record can wait past any deadline, so the publisher stops waiting at the
+// job's deadline and counts the event as failed; franz-go may still deliver it later. A
+// definite failure retried here, or a late delivery, can publish an event twice
+// (at-least-once): consumers deduplicate on event_id or the natural key.
 func (p *Publisher) produce(ctx context.Context, log *slog.Logger, topic, key string, wrapper proto.Message) error {
 	value, err := proto.Marshal(wrapper)
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", topic, err)
 	}
-	return p.retry(ctx, log, "produce to "+topic, func(ctx context.Context) error {
-		rec := &kgo.Record{Topic: topic, Key: []byte(key), Value: value}
-		return p.cfg.Kafka.ProduceSync(ctx, rec).FirstErr()
+	return p.retry(ctx, log, "produce to "+topic, 0, func(ctx context.Context) error {
+		acked := make(chan error, 1)
+		p.cfg.Kafka.Produce(ctx, &kgo.Record{Topic: topic, Key: []byte(key), Value: value},
+			func(_ *kgo.Record, err error) { acked <- err })
+		select {
+		case err := <-acked:
+			return err
+		case <-ctx.Done():
+			return fmt.Errorf("no ack before the deadline (the record stays buffered): %w", ctx.Err())
+		}
 	})
 }
 
-// retry runs f with a per-attempt deadline until it succeeds or ctx ends, backing off between
-// attempts.
-func (p *Publisher) retry(ctx context.Context, log *slog.Logger, what string, f func(context.Context) error) error {
+// retry runs f until it succeeds or ctx ends, backing off between attempts. With perAttempt
+// set, each attempt gets its own deadline.
+func (p *Publisher) retry(ctx context.Context, log *slog.Logger, what string, perAttempt time.Duration, f func(context.Context) error) error {
 	wait := p.cfg.Backoff
 	for attempt := 1; ; attempt++ {
-		actx, cancel := context.WithTimeout(ctx, attemptTimeout)
+		actx, cancel := ctx, context.CancelFunc(func() {})
+		if perAttempt > 0 {
+			actx, cancel = context.WithTimeout(ctx, perAttempt)
+		}
 		err := f(actx)
 		cancel()
 		if err == nil {

@@ -14,8 +14,9 @@ import (
 
 // NewKafkaClient returns a producer for the game topics. franz-go's idempotent producer
 // (on by default) keeps its own retries from writing duplicates, acks=all waits for the
-// in-sync replicas, and the tracing hook writes each record's traceparent header from the
-// context it is produced with.
+// in-sync replicas, records that were never sent fail after 30 s (so the publisher can retry
+// them), and the tracing hook writes each record's traceparent header from the context it is
+// produced with.
 func NewKafkaClient(brokers []string) (*kgo.Client, error) {
 	tracer := kotel.NewTracer() // the global tracer provider and propagator
 	c, err := kgo.NewClient(

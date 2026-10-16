@@ -93,29 +93,32 @@ func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*
 	return &s3.PutObjectOutput{}, nil
 }
 
-// fakeKafka records produced records; block, when set, holds every produce until closed.
+// fakeKafka records produced records. block, when set, holds every ack until it is closed,
+// like franz-go while no broker is reachable: the context doesn't cancel a held record.
 type fakeKafka struct {
-	mu      sync.Mutex
-	records []*kgo.Record
-	block   chan struct{}
-	err     error
+	mu       sync.Mutex
+	records  []*kgo.Record
+	block    chan struct{}
+	err      error
+	produced int // Produce calls
 }
 
-func (f *fakeKafka) ProduceSync(ctx context.Context, rs ...*kgo.Record) kgo.ProduceResults {
-	if f.block != nil {
-		select {
-		case <-f.block:
-		case <-ctx.Done():
-			return kgo.ProduceResults{{Record: rs[0], Err: ctx.Err()}}
-		}
-	}
+func (f *fakeKafka) Produce(_ context.Context, r *kgo.Record, promise func(*kgo.Record, error)) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.err != nil {
-		return kgo.ProduceResults{{Record: rs[0], Err: f.err}}
-	}
-	f.records = append(f.records, rs...)
-	return kgo.ProduceResults{{Record: rs[0]}}
+	f.produced++
+	f.mu.Unlock()
+	go func() {
+		if f.block != nil {
+			<-f.block
+		}
+		f.mu.Lock()
+		err := f.err
+		if err == nil {
+			f.records = append(f.records, r)
+		}
+		f.mu.Unlock()
+		promise(r, err)
+	}()
 }
 
 func (f *fakeKafka) all() []*kgo.Record {
@@ -341,6 +344,30 @@ func TestShutdownDrainsTheQueueThenDropsLateWork(t *testing.T) {
 	f.pub.MatchFinished(context.Background(), finishedMatch())
 	if got := f.results(t); got[TopicMatches+"/dropped"] != 1 {
 		t.Fatalf("published = %v, want work after Close dropped", got)
+	}
+}
+
+func TestKafkaOutageLongerThanTheDeadline(t *testing.T) {
+	k := &fakeKafka{block: make(chan struct{})}
+	defer close(k.block)
+	f := newFixture(t, &fakeS3{}, k, func(c *Config) { c.JobTimeout = 50 * time.Millisecond })
+	f.pub.MatchFinished(context.Background(), finishedMatch())
+	f.pub.MatchFinished(context.Background(), finishedMatch())
+	go f.pub.Run(context.Background())
+	done := make(chan struct{})
+	go func() { f.drain(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker hung on a record Kafka never acked")
+	}
+	if got := f.results(t); got[TopicMatches+"/failed"] != 2 {
+		t.Fatalf("published = %v, want both failed at their deadline", got)
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.produced != 2 {
+		t.Fatalf("Produce called %d times, want once per event (no retry after a timeout: the record may still be delivered)", k.produced)
 	}
 }
 
