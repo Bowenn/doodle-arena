@@ -1,0 +1,268 @@
+# Local stack for Doodle Arena. Start it with `make up` (scripts/dev-up.sh).
+# Image versions are pinned on purpose; see docs/setup.md before bumping one.
+# Data stores publish ports on 127.0.0.1 only, for debugging from the host.
+
+name: doodle-arena
+
+# Settings shared by every application service.
+x-app: &app
+  restart: unless-stopped
+  environment: &app-env
+    SERVICE_VERSION: 0.1.0
+    LOG_LEVEL: info
+    DEPLOYMENT_ENVIRONMENT: local
+
+# Go services check their own /healthz (their runtime image has no shell).
+x-go-healthcheck: &go-healthcheck
+  test: ["CMD", "/app", "healthcheck"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+
+# Python services check their health with the interpreter that runs them.
+x-py-healthcheck: &py-healthcheck
+  test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).status != 200)"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+
+services:
+  # ------------------------------------------------------------- Go services
+
+  lobby:
+    <<: *app
+    build: ../services/lobby
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: lobby-1
+    healthcheck: *go-healthcheck
+
+  # Two game servers, so failover can be tested (task 2.5).
+  game-server-1:
+    <<: *app
+    build: ../services/game-server
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: game-server-1
+    healthcheck: *go-healthcheck
+
+  game-server-2:
+    <<: *app
+    build: ../services/game-server
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: game-server-2
+    healthcheck: *go-healthcheck
+
+  notifier:
+    <<: *app
+    build: ../services/notifier
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: notifier-1
+    healthcheck: *go-healthcheck
+
+  # --------------------------------------------------------- Python services
+
+  auth:
+    <<: *app
+    build: ../services/auth
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: auth-1
+    healthcheck: *py-healthcheck
+
+  ai:
+    <<: *app
+    build: ../services/ai
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: ai-1
+    healthcheck: *py-healthcheck
+
+  assets:
+    <<: *app
+    build: ../services/assets
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: assets-1
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?}
+      DB_HOST: postgres
+      DB_NAME: assets
+      DB_USER: assets
+      DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
+    healthcheck: *py-healthcheck
+
+  # ----------------------------------------------------------- Java services
+
+  marketplace:
+    <<: *app
+    build: ../services/marketplace
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: marketplace-1
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  # ------------------------------------------------------------------- gateway
+
+  # The only entry point from the host: everything is one origin at http://localhost:8080.
+  gateway:
+    build: ../services/gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ------------------------------------------------------------------- web app
+
+  web:
+    build: ../web
+    restart: unless-stopped
+    environment:
+      VITE_HMR_CLIENT_PORT: "8080"
+    volumes:
+      # Edits on the host reload in the browser. node_modules stays inside the container,
+      # because the host's copy is built for macOS.
+      - ../web:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ---------------------------------------------------------------- data stores
+
+  postgres:
+    image: postgres:18.6-trixie
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make up to create .env}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?}
+      ASSETS_DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
+      MARKETPLACE_DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD:?}
+      NOTIFIER_DB_PASSWORD: ${NOTIFIER_DB_PASSWORD:?}
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/<major>/, so mount the parent.
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # 15432 on the host, so a Postgres installed on the host (5432) doesn't clash.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8.10.2-trixie
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mongo:
+    image: mongo:8.0.34
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?}
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "127.0.0.1:27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  kafka:
+    image: apache/kafka:4.2.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are created explicitly (task 1.2), never by a typo in a producer.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "127.0.0.1:9094:9094"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs/entrypoint.sh:/entrypoint.sh:ro
+    ports:
+      - "127.0.0.1:8333:8333"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9333/cluster/status"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  seaweedfs-buckets:
+    image: chrislusf/seaweedfs:4.48
+    entrypoint: ["/bin/sh", "/create-buckets.sh"]
+    volumes:
+      - ./seaweedfs/create-buckets.sh:/create-buckets.sh:ro
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    restart: "no"
+
+  # ------------------------------------------------------------- observability
+
+  otel-lgtm:
+    # Collector, Prometheus, Tempo, Loki and Grafana in one container (development only).
+    image: grafana/otel-lgtm:0.36.0
+    volumes:
+      - lgtm-data:/data
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+
+volumes:
+  postgres-data:
+  redis-data:
+  mongo-data:
+  kafka-data:
+  seaweedfs-data:
+  lgtm-data:

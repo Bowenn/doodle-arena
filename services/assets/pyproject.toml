@@ -1,0 +1,47 @@
+[project]
+name = "doodle-assets"
+version = "0.1.0"
+description = "Doodle Arena assets service: render, store, moderate and list drawings; replays"
+requires-python = "==3.14.*"
+dependencies = [
+    "django>=6.1.2",
+    "gunicorn>=26.2.0",
+    "psycopg[binary]>=3.3.6",
+    "pydantic-settings>=2.16.0",
+]
+
+[tool.uv]
+required-version = ">=0.13"
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy", "mypy_django_plugin.main"]
+
+[[tool.mypy.overrides]]
+module = ["gunicorn.*"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "config.test_settings"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+DJANGO_SETTINGS_MODULE = "config.test_settings"
+
+[dependency-groups]
+dev = [
+    "django-stubs>=6.1.2",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+    "ruff>=0.17.1",
+]

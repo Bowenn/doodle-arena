@@ -61,36 +61,40 @@ The web app talks REST and WebSocket through the gateway. The lobby and game ser
 | Service | Language | Owner | First stage |
 |---|---|---|---|
 | gateway | Nginx config | Bowen | 1 |
-| auth | Python (FastAPI) | Bowen (proposed) | 1 |
+| auth | Python (FastAPI) | Bowen | 1 |
 | lobby | Go | Bowen | 2 |
 | game-server | Go | Bowen | 2 |
-| assets | Python (Django + Celery) | Will (proposed) | 3 |
-| ai | Python (FastAPI) | Open | 3 (stub) |
+| assets | Python (Django + Celery) | Bowen | 3 |
+| ai | Python (FastAPI) | Bowen | 3 (stub) |
 | marketplace | Java (Spring Boot) | Will | 4 |
 | notifier | Go | Bowen | 4 |
 | analytics | Java (Flink) | Will | 6 |
 | web | TypeScript (React) | Bowen | 1 |
 
-The Python owners are a proposal. Confirm them and update this table.
+Until Will joins the project, Bowen covers every service, including marketplace and analytics. The table shows the intended long-term owners.
 
 ### 4.1 Gateway (Nginx)
 
 - Routes `/api/auth/*` to auth, `/api/lobby/*` to lobby, `/api/assets/*` and `/admin/*` to assets, `/api/market/*` to marketplace, `/api/notifier/*` to notifier, `/ws/*` to game servers, and `/otlp/*` to the collector for browser telemetry.
 - Passes the `Upgrade` and `Connection` headers for WebSockets, with a long read timeout.
 - Applies coarse per-IP rate limiting with `limit_req`, which is a leaky bucket. Fine-grained limits live in the services.
+- Serves `/healthz` for itself and `/healthz/<service>` for every service, including each game-server instance (used by `make smoke`). These are restricted to internal traffic in AWS.
+- Only routes; it doesn't verify tokens (ADR 0001). It strips any client-supplied `X-User-*` and `X-Roles` headers, and never routes to a service's internal port.
+- Locally, the whole system is one origin, `http://localhost:8080`: the gateway also proxies the Vite dev server for the web app, so there is no CORS and the refresh cookie is first-party. TLS terminates at the gateway (or the load balancer in front of it) only in AWS.
 - How a WebSocket reaches the game server that owns its room is open: see ADR 0002.
 
 ### 4.2 Auth (FastAPI)
 
 Owns the Postgres database `auth`.
 
-- Google OAuth 2.0 authorization code flow, with PKCE and a `state` parameter.
-- Issues a short-lived JWT access token (about 15 minutes) signed with an asymmetric key. Public keys are served at `/api/auth/.well-known/jwks.json`.
+- Google OAuth 2.0 authorization code flow, with PKCE and a `state` parameter. It requests only the `openid profile` scopes, so Google never sends an email address.
+- Issues a short-lived JWT access token (about 15 minutes) signed with RS256, with `aud` set to `doodle-api`. Public keys are served at `/api/auth/.well-known/jwks.json`.
 - Issues an opaque refresh token in an HttpOnly cookie. Refresh tokens are stored hashed and rotated on every use. Reusing an old refresh token revokes the whole token family.
 - JWT claims: `sub` (user id), `roles` (`player`, `moderator`, `admin`), `iss`, `aud`, `iat`, `exp`.
 - Stores the minimum user data: Google subject id, display name, avatar URL and roles. No email address.
 - API keys (Stage 4) for developers who register webhooks or call the public read API. Format `da_<prefix>_<secret>`, stored as the prefix plus a hash, with scopes and `last_used_at`. Other services verify keys through an internal endpoint and cache the result briefly.
-- Where JWTs are verified (at the gateway or in each service) is open: see ADR 0001.
+- Internal endpoints (such as `/internal/api-keys/verify`) are served on a separate internal port that the gateway never routes.
+- Each service verifies JWTs itself, against the cached JWKS: see ADR 0001 (Accepted) for the exact checks and for how the Django admin signs moderators in.
 
 ### 4.3 Lobby (Go)
 
@@ -101,7 +105,7 @@ Owns the Redis key prefix `lobby:*`.
 - Allocates new rooms to the least-loaded healthy game server through gRPC `AllocateRoom`.
 - On join, returns the room's WebSocket URL and a join ticket: a signed token, valid for 60 seconds, that names the user and the room.
 - Notices dead game servers through missed heartbeats and reassigns their rooms. Clients that reconnect get the new server's URL.
-- Consumes `MatchFinished` to update a weekly leaderboard in a Redis sorted set.
+- Consumes `MatchFinished` to update a weekly leaderboard in a Redis sorted set. `ZINCRBY` isn't idempotent, so the consumer first records the `match_id` (`SET NX` with a TTL longer than a week) and skips matches it has already seen.
 
 ### 4.4 Game server (Go)
 
@@ -149,6 +153,7 @@ Owns the Postgres database `notifier`.
 - Signature header: `Doodle-Signature: t=<unix-seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`. A `Doodle-Event-Id` header lets receivers dedupe. Receivers should reject timestamps older than 5 minutes.
 - Retries use exponential backoff with full jitter (base 2 seconds, cap 30 minutes, at most 8 attempts) and 5-second timeouts. After the last attempt, the delivery is marked `DEAD` and published to `notifier.dlq.v1`.
 - The delivery log can be queried over REST.
+- Endpoint URLs come from outside users, so the notifier blocks server-side request forgery: it resolves the host at send time and refuses loopback, private, link-local (including `169.254.169.254`) and unique-local addresses, and it doesn't follow redirects. Production endpoints must use HTTPS.
 
 ### 4.8 AI service (FastAPI)
 
@@ -254,6 +259,7 @@ Marketplace:
 - `GET /api/market/wallet`, `GET /api/market/wallet/transactions`
 - `GET /api/market/listings`, `POST /api/market/listings` (requires `Idempotency-Key`), `DELETE /api/market/listings/{id}`
 - `POST /api/market/listings/{id}/purchase` (requires `Idempotency-Key`): `200`, `409 LISTING_NOT_AVAILABLE` or `422 INSUFFICIENT_FUNDS`
+- Every endpoint that takes an `Idempotency-Key` can also return `409 IDEMPOTENCY_KEY_IN_PROGRESS` (the same key is still being processed) or `422 IDEMPOTENCY_KEY_REUSED` (the same key with a different request body). Clients tell these apart by `error.code`, not by the status code.
 - `GET /api/market/drawings/{id}/ownership-history`
 - `GET /api/market/coin-packs`, `POST /api/market/coin-packs/{id}/checkout` (returns a Stripe Checkout URL)
 - `POST /api/market/stripe/webhook` (verified by Stripe signature, no JWT)
@@ -278,7 +284,9 @@ Client to server:
 
 Server to client, shared room events (each wrapped as `event {seq, type, data}` and stored in the room's event log): `player_joined`, `player_left`, `round_started {drawer_ids, word_length, deadline}`, `stroke_batch`, `stroke_undone`, `hint {mask}`, `chat {user_id, text}` (wrong guesses are shown as chat), `correct_guess {user_id, order}`, `round_ended {word, scores}`, `match_ended {results}`.
 
-Server to client, private messages (no `seq`, never stored in the shared log): `welcome {user_id, snapshot, seq}`, `word_options {words}` (drawer), `your_word {word}` (drawers), `guess_result {correct}`, `rate_limited`, `room_moved {reason}`, `error {code, message}`, `pong {t}`.
+Server to client, private messages (no `seq`, never stored in the shared log): `welcome {user_id, view, seq}`, `word_options {words}` (drawer), `your_word {word}` (drawers), `guess_result {correct}`, `rate_limited`, `room_moved {reason}`, `error {code, message}`, `pong {t}`.
+
+`view` is built for each player from the room state, and contains the word only for drawers. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is.
 
 ## 7. Key flows
 
@@ -293,7 +301,7 @@ Server to client, private messages (no `seq`, never stored in the shared log): `
 1. `POST /api/lobby/rooms`: the lobby picks the least-loaded healthy game server and calls `AllocateRoom`.
 2. The game server creates the room actor and takes the room's lease.
 3. `POST /api/lobby/rooms/{id}/join` returns the WebSocket URL and a join ticket.
-4. The client connects and sends `hello`. The game server verifies the ticket and replies with `welcome` and a snapshot.
+4. The client connects and sends `hello`. The game server verifies the ticket and replies with `welcome`, which carries that player's view of the room.
 
 ### 7.3 Round lifecycle
 
@@ -317,7 +325,7 @@ Defaults, all configurable: up to 8 players; each player draws once per match; 1
 1. The client remembers the last `seq` it applied.
 2. After a disconnect, it reconnects with backoff. If the connection fails or it receives `room_moved`, it asks the lobby for the room's current URL and a new ticket first.
 3. It sends `hello {ticket, last_seq}`. The server replays every event after `last_seq` from the stream, then resends the player's private state.
-4. If `last_seq` is older than the stream's retention, the server sends a full snapshot instead.
+4. If `last_seq` is older than the stream's retention, the server sends a fresh `welcome` with the player's full view instead.
 
 ### 7.5 Game server failover
 
@@ -435,13 +443,14 @@ In CAP terms, the marketplace chooses consistency during a network partition: it
 
 ## 11. Security
 
-- Authentication: Google OAuth 2.0 with PKCE; short-lived JWT access tokens; rotated refresh tokens with reuse detection; API keys for developers. Roles: `player`, `moderator`, `admin`.
+- Authentication: Google OAuth 2.0 with PKCE; short-lived RS256 JWT access tokens that every service verifies itself (ADR 0001); rotated refresh tokens with reuse detection; API keys for developers. Roles: `player`, `moderator`, `admin`.
+- Internal endpoints and gRPC listen on internal ports that the gateway never routes.
 - WebSockets use single-purpose join tickets that expire after 60 seconds, never a JWT in the URL.
-- Outgoing webhooks are signed with a per-endpoint secret and a timestamp; incoming Stripe webhooks are verified with Stripe's signature.
+- Outgoing webhooks are signed with a per-endpoint secret and a timestamp, and never go to internal addresses (section 4.7); incoming Stripe webhooks are verified with Stripe's signature.
 - Secrets come from environment variables (`.env` locally, never committed; `.env.example` lists the names). In AWS they come from SSM Parameter Store or Secrets Manager.
 - Logs never contain secrets, tokens, API keys, email addresses or individual strokes.
 - Every endpoint validates its input. Rate limits apply at the gateway (coarse) and in the game server (per player).
-- The Django admin is reachable only for `moderator` and `admin` roles, and is restricted further in AWS.
+- The Django admin is reachable only for `moderator` and `admin` roles: Google sign-in is bridged into a short Django session (ADR 0001). It is restricted further in AWS.
 
 ## 12. Observability
 
@@ -452,13 +461,16 @@ See `docs/observability.md` for the pipeline, the log format, metric names, trac
 Local:
 
 - Docker Compose runs everything: two game-server instances, one instance of every other service, Postgres, Redis, MongoDB, Kafka (KRaft), SeaweedFS and `grafana/otel-lgtm`.
+- Everything is reached through the gateway at `http://localhost:8080`, one origin with no TLS (section 4.1).
+- `make test` runs each service's tests with the host toolchains (Go, JDK, uv, Node). Integration tests start their own containers with Testcontainers. CI does the same with `setup-*` actions.
 - The Stripe CLI forwards test webhooks to the marketplace.
+- Pinned tool and image versions, and how they map to AWS, are listed in `docs/setup.md`.
 
 CI (GitHub Actions):
 
 - One workflow per service, triggered by path filters: lint, unit tests, integration tests, Docker image build.
 - `buf lint` and `buf breaking` on `proto/`.
-- From Stage 5: push images on merge to `main`, plus Lighthouse CI for the web app.
+- From Stage 5: push images on merge to the default branch (`master`), plus Lighthouse CI for the web app.
 
 AWS (Stage 5):
 
@@ -491,16 +503,21 @@ Releases:
 | D15 | Drawing metadata in Postgres; replays in MongoDB | Django needs SQL; replays are large documents read whole |
 | D16 | JSON WebSocket messages in v1; binary format is a Stage 6 experiment | Easy debugging first, measured optimization later |
 | D17 | OpenTelemetry to Prometheus, Tempo and Loki, plus CloudWatch; Grafana alerting to Discord | One UI for every signal; alerts arrive where the team already is |
+| D18 | Every service verifies RS256 JWTs itself, with one audience (`doodle-api`); the gateway only routes; the Django admin bridges Google sign-in into a short session (ADR 0001) | No extra hop, no trusted headers, one identity for players and moderators |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 15. Open questions
 
-- ADR 0001: where JWTs are verified (gateway or each service). Decide in Stage 1.
 - ADR 0002: how a WebSocket reaches the game server that owns its room. Decide in Stage 2.
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
-- Owners of the Python services (section 4).
 - Coin pack prices and the reward amounts (defaults are in section 7).
+- Before task 1.2: how a consumer knows which event a Kafka message holds when a topic carries two event types (`assets.drawings.v1`, `market.listings.v1`). `EventMeta` is inside the message, so it can't be read before the type is known. Options: one wrapper message per topic with a `oneof`, or an `event_type` Kafka header. Also confirm that there's no schema registry (Buf only).
+- Before task 2.1: how the lobby signs join tickets and how game servers verify them (a shared HMAC secret, or an asymmetric key that the lobby publishes).
+- Before task 2.5: the takeover protocol when a game server loses the lobby but can still reach Redis. The lobby then reassigns rooms whose lease the old server is still renewing. Does the new server wait for the lease to expire, or take it by force with a new fencing token, and what do clients do in the meantime?
+- Before task 4.3: what happens to an `IN_PROGRESS` idempotency key when the process crashes mid-request. One option is to insert the key in the same transaction as the purchase, so a crash rolls it back; another is to let `IN_PROGRESS` rows expire after a short timeout.
+- Before task 4.6: royalties for co-drawn drawings. Today, when one of two co-authors sells for the first time, the other gets nothing, and only `drawer_ids[0]` ever becomes the owner. Also, when the buyer is an author, their account appears twice in the lock set, so the set must be deduplicated.
+- `docs/keyword-coverage.md` mentions two things this doc doesn't design yet: Redis cache-aside for listings and wallet reads (which Redis key prefix does the marketplace own, and should balances be cached at all, given they need strong consistency?), and a MongoDB replica set.
 
 ## 16. Deferred and optional features
 

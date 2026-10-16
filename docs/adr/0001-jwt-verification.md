@@ -1,12 +1,14 @@
 # ADR 0001: Where JWTs are verified
 
-- Status: Proposed (decide in Stage 1, task 1.3)
+- Status: Accepted
 - Date: 2026-10-15
-- Deciders: Bowen, Will
+- Deciders: Bowen
 
 ## Context
 
 The auth service issues short-lived JWT access tokens signed with an asymmetric key, and publishes the public keys at `/api/auth/.well-known/jwks.json`. Every other service needs to know who is calling. The question is where the token is checked.
+
+Related questions that come with it: which signing algorithm and audience to use, how the Django admin (a server-rendered page that a browser navigates to, so it can't send an in-memory bearer token) authenticates moderators, and which auth endpoints must never be reachable through the gateway.
 
 ## Options
 
@@ -15,7 +17,7 @@ The auth service issues short-lived JWT access tokens signed with an asymmetric 
 Nginx calls auth for every request (`auth_request`), and forwards the user id and roles to services as trusted headers.
 
 - Pros: one place to get right; services stay simpler.
-- Cons: an extra hop on every request; services must trust headers, so anything that reaches a service without passing the gateway is unauthenticated; harder to explain as zero-trust.
+- Cons: an extra hop on every request, and auth becomes a dependency of every request; services must trust headers, so anything that reaches a service without passing the gateway is unauthenticated, and the gateway must strip client-supplied identity headers; harder to explain as zero-trust. API keys would still need their own path.
 
 ### Option B: each service verifies the JWT itself
 
@@ -24,12 +26,22 @@ Each service fetches the JWKS, caches it, and verifies the signature, expiry, is
 - Pros: no extra hop; services don't trust the network; standard practice for JWTs with public keys.
 - Cons: verification code exists in three languages (well-supported libraries make this small); key rotation must be handled by caching the JWKS and refreshing it on unknown key ids.
 
-Suggestion for discussion: Option B, with a shared test that checks all three languages reject expired, wrongly signed and wrong-audience tokens.
-
 ## Decision
 
-(empty until decided)
+Option B: every service verifies access tokens itself.
+
+- **Algorithm: RS256.** It is the default in every JWT library we use, including Spring Security's `NimbusJwtDecoder`, Python's `PyJWT`/`joserfc` and Go's `golang-jwt` / `lestrrat-go/jwx`. ES256 or EdDSA would give smaller tokens but add configuration in at least one language for no benefit we need.
+- **Audience: a single value, `doodle-api`.** Every request comes from the same web app acting for the same user, so per-service audiences would force the app to hold several tokens (or put every audience into one token, which defeats the point) without reducing real risk. The 15-minute expiry limits the damage of a leaked token. Authorization uses the `roles` claim. If service-to-service tokens are ever needed, they get their own audiences then.
+- **Checks in every service:** signature against the cached JWKS (refetched when an unknown `kid` appears, rate-limited), `iss`, `aud == doodle-api`, `exp` and `iat` with at most 30 seconds of clock skew, and only `RS256` accepted (never `none`, never HMAC).
+- **The gateway only routes.** It still strips any client-supplied `X-User-*` and `X-Roles` headers as a safeguard, so nobody adds a trusted-header shortcut later.
+- **Internal endpoints live on a separate internal port** that the gateway never routes. This covers the API-key check endpoint in auth (`/internal/api-keys/verify`) and every gRPC port. `/api/auth/*` on the public port serves only public endpoints.
+- **Django admin: Google sign-in bridged into a Django session.** A moderator opens `/admin/`, which redirects to the normal Google login in auth. The web app then sends its access token once, in a `POST` body (never in a URL), to `/admin/sso/` in assets. Assets verifies the JWT with the same rules as every other service, requires the `moderator` or `admin` role, creates or updates a Django `User` with `is_staff` set, and logs it into a Django session. The session cookie is HttpOnly, `SameSite=Lax`, scoped to `/admin/`, and lasts at most 1 hour, so a revoked role stops working within the hour. Django's CSRF protection stays on. There are no Django passwords.
 
 ## Consequences
 
-(fill in once decided)
+- Each language needs a small verification module plus a shared test suite: every service must reject an expired token, a token signed by an unknown key, a token with the wrong `aud` or `iss`, and an `alg: none` or HS256 token. The test fixtures (keys and tokens) live in one place and are reused by all three languages.
+- Key rotation: auth publishes the old and new keys in the JWKS during a rotation, and services refetch on an unknown `kid`. Rotation needs no coordinated restart.
+- Auth isn't on the hot path of every request, so an auth outage blocks logins and refreshes but not requests that carry a still-valid token.
+- The Django bridge is security-sensitive custom code (about 100 lines) and needs its own tests: wrong role, expired token, token sent by GET, CSRF.
+- A role change takes effect at the next token refresh (at most 15 minutes) for APIs and at session expiry (at most 1 hour) for the admin.
+- Interview angle: zero-trust between services; the trade-off against gateway verification; why one audience is enough here.

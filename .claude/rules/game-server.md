@@ -11,6 +11,7 @@ Read "Game server internals" in `docs/design-doc.md` before changing room logic.
 - One actor goroutine per room owns all of that room's state. Other goroutines talk to it through its channel; never share room state behind a mutex.
 - The actor gives every shared room event a `seq` and appends it to the Redis Stream `room:{id}:events` with the explicit ID `<seq>-0`, so resuming is an `XRANGE` from the last seq. Private messages (word options, the word for drawers) are sent directly and never go into the stream.
 - Every write to a room's Redis keys goes through a Lua script that checks the lease holder and fencing token. If the check fails, the server stops the room and closes its sockets with a "room moved" message.
+- The stored snapshot contains the word. Never send it to a client: `welcome` carries a view built for each player, with the word only for drawers.
 - Snapshot the room at every state transition and every 200 events. Recovery is the latest snapshot plus `XRANGE` after the snapshot's seq.
 - Deadlines are absolute timestamps stored in the snapshot, so a new owner can continue the timers.
 - Each socket has a bounded send buffer. A slow client is disconnected (it can resume); it is never allowed to block the actor.

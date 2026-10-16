@@ -1,1 +1,35 @@
+# Secrets and local config
+.env
+*.pem
+*.key
+
+# OS and editors
 .DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local tool state
+.remember/
+
+# Go
+services/*/bin/
+coverage.out
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Java / Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
