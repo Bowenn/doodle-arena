@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchMe, loginUrl, logout, refresh, resetAuthForTests } from './auth.ts'
+import { authFetch, fetchMe, loginUrl, logout, refresh, resetAuthForTests } from './auth.ts'
 
 const ME = { id: 'u-1', display_name: 'Ada', avatar_url: null, roles: ['player'] }
 
@@ -8,6 +8,10 @@ function json(status: number, body: unknown) {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+function authHeader(call: unknown[]) {
+  return new Headers((call[1] as RequestInit).headers).get('Authorization')
 }
 
 describe('auth', () => {
@@ -51,10 +55,8 @@ describe('auth', () => {
       .mockResolvedValueOnce(json(200, ME))
 
     expect(await fetchMe()).toEqual(ME)
-    expect(fetchMock.mock.calls[1]).toEqual([
-      '/api/auth/me',
-      { headers: { Authorization: 'Bearer t1' } },
-    ])
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/auth/me')
+    expect(authHeader(fetchMock.mock.calls[1])).toBe('Bearer t1')
   })
 
   it('refreshes once and retries when /me says the token expired', async () => {
@@ -65,7 +67,7 @@ describe('auth', () => {
       .mockResolvedValueOnce(json(200, ME))
 
     expect(await fetchMe()).toEqual(ME)
-    expect(fetchMock.mock.calls[3][1]).toEqual({ headers: { Authorization: 'Bearer new' } })
+    expect(authHeader(fetchMock.mock.calls[3])).toBe('Bearer new')
   })
 
   it('refreshes again a minute before the token expires', async () => {
@@ -95,6 +97,29 @@ describe('auth', () => {
       { method: 'POST', credentials: 'same-origin' },
     ])
     expect(await fetchMe()).toBeNull() // had to refresh again: no token left in memory
+  })
+
+  it('authFetch keeps the request options and adds the token', async () => {
+    fetchMock
+      .mockResolvedValueOnce(json(200, { access_token: 't1', token_type: 'Bearer', expires_in: 900 }))
+      .mockResolvedValueOnce(json(201, { room_id: 'r1' }))
+
+    const resp = await authFetch('/api/lobby/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+
+    expect(resp?.status).toBe(201)
+    const init = fetchMock.mock.calls[1][1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
+    expect(authHeader(fetchMock.mock.calls[1])).toBe('Bearer t1')
+  })
+
+  it('authFetch resolves null when the user is signed out', async () => {
+    fetchMock.mockResolvedValueOnce(json(401, {}))
+    expect(await authFetch('/api/lobby/rooms')).toBeNull()
   })
 
   it('builds the login URL with an encoded return path', () => {

@@ -52,18 +52,26 @@ function clearSession() {
   timer = null
 }
 
-/** The signed-in user, or null when signed out. Refreshes once if the token has expired. */
-export async function fetchMe(): Promise<Me | null> {
+/** fetch with the access token. When the server answers 401 (the token expired), it refreshes
+ * once and retries. Resolves null when the user is signed out. */
+export async function authFetch(url: string, init: RequestInit = {}): Promise<Response | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!accessToken && !(await refresh())) return null
-    const resp = await fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-    if (resp.ok) return (await resp.json()) as Me
-    if (resp.status !== 401) throw new Error(`GET /api/auth/me failed with ${resp.status}`)
+    const headers = new Headers(init.headers)
+    headers.set('Authorization', `Bearer ${accessToken}`)
+    const resp = await fetch(url, { ...init, headers })
+    if (resp.status !== 401) return resp
     accessToken = null
   }
   return null
+}
+
+/** The signed-in user, or null when signed out. Refreshes once if the token has expired. */
+export async function fetchMe(): Promise<Me | null> {
+  const resp = await authFetch('/api/auth/me')
+  if (!resp) return null
+  if (!resp.ok) throw new Error(`GET /api/auth/me failed with ${resp.status}`)
+  return (await resp.json()) as Me
 }
 
 export async function logout(): Promise<void> {
