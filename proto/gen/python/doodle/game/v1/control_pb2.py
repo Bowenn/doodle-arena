@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from doodle.game.v1 import game_pb2 as doodle_dot_game_dot_v1_dot_game__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x64oodle/game/v1/control.proto\x12\x0e\x64oodle.game.v1\x1a\x19\x64oodle/game/v1/game.proto\"\x96\x01\n\x13\x41llocateRoomRequest\x12\x17\n\x07room_id\x18\x01 \x01(\tR\x06roomId\x12,\n\x04mode\x18\x02 \x01(\x0e\x32\x18.doodle.game.v1.GameModeR\x04mode\x12\x38\n\x08settings\x18\x03 \x01(\x0b\x32\x1c.doodle.game.v1.RoomSettingsR\x08settings\"\x9c\x01\n\x0cRoomSettings\x12\x1f\n\x0bmax_players\x18\x01 \x01(\rR\nmaxPlayers\x12%\n\x0e\x63hoose_seconds\x18\x02 \x01(\rR\rchooseSeconds\x12!\n\x0c\x64raw_seconds\x18\x03 \x01(\rR\x0b\x64rawSeconds\x12!\n\x0cword_options\x18\x04 \x01(\rR\x0bwordOptions\"R\n\x14\x41llocateRoomResponse\x12\x1b\n\tserver_id\x18\x01 \x01(\tR\x08serverId\x12\x1d\n\nws_address\x18\x02 \x01(\tR\twsAddress\"\x14\n\x12\x44rainServerRequest\">\n\x13\x44rainServerResponse\x12\'\n\x0frooms_remaining\x18\x01 \x01(\rR\x0eroomsRemaining2\xc3\x01\n\x0e\x43ontrolService\x12Y\n\x0c\x41llocateRoom\x12#.doodle.game.v1.AllocateRoomRequest\x1a$.doodle.game.v1.AllocateRoomResponse\x12V\n\x0b\x44rainServer\x12\".doodle.game.v1.DrainServerRequest\x1a#.doodle.game.v1.DrainServerResponseB\xd8\x01\n$com.doodlearena.proto.doodle.game.v1B\x0c\x43ontrolProtoP\x01ZHgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1;gamev1\xa2\x02\x03\x44GX\xaa\x02\x0e\x44oodle.Game.V1\xca\x02\x0e\x44oodle\\Game\\V1\xe2\x02\x1a\x44oodle\\Game\\V1\\GPBMetadata\xea\x02\x10\x44oodle::Game::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x64oodle/game/v1/control.proto\x12\x0e\x64oodle.game.v1\x1a\x19\x64oodle/game/v1/game.proto\"\xb8\x01\n\x13\x41llocateRoomRequest\x12\x17\n\x07room_id\x18\x01 \x01(\tR\x06roomId\x12,\n\x04mode\x18\x02 \x01(\x0e\x32\x18.doodle.game.v1.GameModeR\x04mode\x12\x38\n\x08settings\x18\x03 \x01(\x0b\x32\x1c.doodle.game.v1.RoomSettingsR\x08settings\x12 \n\x0chost_user_id\x18\x04 \x01(\tR\nhostUserId\"\x9c\x01\n\x0cRoomSettings\x12\x1f\n\x0bmax_players\x18\x01 \x01(\rR\nmaxPlayers\x12%\n\x0e\x63hoose_seconds\x18\x02 \x01(\rR\rchooseSeconds\x12!\n\x0c\x64raw_seconds\x18\x03 \x01(\rR\x0b\x64rawSeconds\x12!\n\x0cword_options\x18\x04 \x01(\rR\x0bwordOptions\"R\n\x14\x41llocateRoomResponse\x12\x1b\n\tserver_id\x18\x01 \x01(\tR\x08serverId\x12\x1d\n\nws_address\x18\x02 \x01(\tR\twsAddress\"\x14\n\x12\x44rainServerRequest\">\n\x13\x44rainServerResponse\x12\'\n\x0frooms_remaining\x18\x01 \x01(\rR\x0eroomsRemaining2\xc3\x01\n\x0e\x43ontrolService\x12Y\n\x0c\x41llocateRoom\x12#.doodle.game.v1.AllocateRoomRequest\x1a$.doodle.game.v1.AllocateRoomResponse\x12V\n\x0b\x44rainServer\x12\".doodle.game.v1.DrainServerRequest\x1a#.doodle.game.v1.DrainServerResponseB\xd8\x01\n$com.doodlearena.proto.doodle.game.v1B\x0c\x43ontrolProtoP\x01ZHgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1;gamev1\xa2\x02\x03\x44GX\xaa\x02\x0e\x44oodle.Game.V1\xca\x02\x0e\x44oodle\\Game\\V1\xe2\x02\x1a\x44oodle\\Game\\V1\\GPBMetadata\xea\x02\x10\x44oodle::Game::V1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,15 +34,15 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'\n$com.doodlearena.proto.doodle.game.v1B\014ControlProtoP\001ZHgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1;gamev1\242\002\003DGX\252\002\016Doodle.Game.V1\312\002\016Doodle\\Game\\V1\342\002\032Doodle\\Game\\V1\\GPBMetadata\352\002\020Doodle::Game::V1'
   _globals['_ALLOCATEROOMREQUEST']._serialized_start=76
-  _globals['_ALLOCATEROOMREQUEST']._serialized_end=226
-  _globals['_ROOMSETTINGS']._serialized_start=229
-  _globals['_ROOMSETTINGS']._serialized_end=385
-  _globals['_ALLOCATEROOMRESPONSE']._serialized_start=387
-  _globals['_ALLOCATEROOMRESPONSE']._serialized_end=469
-  _globals['_DRAINSERVERREQUEST']._serialized_start=471
-  _globals['_DRAINSERVERREQUEST']._serialized_end=491
-  _globals['_DRAINSERVERRESPONSE']._serialized_start=493
-  _globals['_DRAINSERVERRESPONSE']._serialized_end=555
-  _globals['_CONTROLSERVICE']._serialized_start=558
-  _globals['_CONTROLSERVICE']._serialized_end=753
+  _globals['_ALLOCATEROOMREQUEST']._serialized_end=260
+  _globals['_ROOMSETTINGS']._serialized_start=263
+  _globals['_ROOMSETTINGS']._serialized_end=419
+  _globals['_ALLOCATEROOMRESPONSE']._serialized_start=421
+  _globals['_ALLOCATEROOMRESPONSE']._serialized_end=503
+  _globals['_DRAINSERVERREQUEST']._serialized_start=505
+  _globals['_DRAINSERVERREQUEST']._serialized_end=525
+  _globals['_DRAINSERVERRESPONSE']._serialized_start=527
+  _globals['_DRAINSERVERRESPONSE']._serialized_end=589
+  _globals['_CONTROLSERVICE']._serialized_start=592
+  _globals['_CONTROLSERVICE']._serialized_end=787
 # @@protoc_insertion_point(module_scope)
