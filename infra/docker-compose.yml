@@ -8,9 +8,15 @@ name: doodle-arena
 x-app: &app
   restart: unless-stopped
   environment: &app-env
-    SERVICE_VERSION: 0.1.0
+    SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
     LOG_LEVEL: info
     DEPLOYMENT_ENVIRONMENT: local
+    # OpenTelemetry (docs/observability.md): every signal over OTLP/HTTP to the collector.
+    # Each service adds OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES.
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    OTEL_SEMCONV_STABILITY_OPT_IN: http
+    OTEL_METRIC_EXPORT_INTERVAL: "10000"
 
 # The auth database connection, shared by auth and its migrate job.
 x-auth-db-env: &auth-db-env
@@ -42,6 +48,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: lobby-1
+      OTEL_SERVICE_NAME: lobby
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=lobby-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
       kafka-topics:
         condition: service_completed_successfully
@@ -54,6 +62,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: game-server-1
+      OTEL_SERVICE_NAME: game-server
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=game-server-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
       kafka-topics:
         condition: service_completed_successfully
@@ -67,6 +77,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: game-server-2
+      OTEL_SERVICE_NAME: game-server
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=game-server-2,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
       kafka-topics:
         condition: service_completed_successfully
@@ -80,6 +92,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: notifier-1
+      OTEL_SERVICE_NAME: notifier
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=notifier-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
       kafka-topics:
         condition: service_completed_successfully
@@ -105,6 +119,8 @@ services:
     environment:
       <<: [*app-env, *auth-db-env]
       SERVICE_INSTANCE_ID: auth-1
+      OTEL_SERVICE_NAME: auth
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=auth-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt-private-key
       # Empty Google credentials keep the stack running; sign-in then returns 503.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
@@ -125,6 +141,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: ai-1
+      OTEL_SERVICE_NAME: ai
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=ai-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     healthcheck: *py-healthcheck
 
   assets:
@@ -133,6 +151,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: assets-1
+      OTEL_SERVICE_NAME: assets
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?}
       DB_HOST: postgres
       DB_NAME: assets
@@ -153,6 +173,8 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: marketplace-1
+      OTEL_SERVICE_NAME: marketplace
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=marketplace-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
       kafka-topics:
         condition: service_completed_successfully
