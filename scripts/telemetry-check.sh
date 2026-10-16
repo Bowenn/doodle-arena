@@ -107,6 +107,19 @@ if ((logs_ok == 0)); then
   # Diagnostics: is Loki answering, and does it have any auth lines at all?
   echo "  Loki's answer: $(loki_raw "{service_name=\"auth\"} | trace_id=\"$trace_id\"" | tail -c 300 | tr '\n' ' ')"
   echo "  auth lines in Loki (any trace): $(loki_count '{service_name="auth"}')"
+  echo "  services with logs in Loki: $(curl -s --max-time 5 "$(proxy loki)/loki/api/v1/label/service_name/values")"
+  # The collector's own counters: did log records arrive, and did the export to Loki work?
+  curl -s --max-time 5 -G "$(proxy prometheus)/api/v1/query" --data-urlencode \
+    'query={__name__=~"otelcol_(receiver_accepted|receiver_refused|exporter_sent|exporter_send_failed)_log_records.*"}' |
+    python3 -c '
+import json, sys
+try:
+    rows = json.load(sys.stdin)["data"]["result"]
+except (ValueError, KeyError):
+    rows = []
+for r in rows:
+    m = r["metric"]
+    print("  collector", m["__name__"], m.get("exporter", m.get("receiver", "")), r["value"][1])'
 fi
 
 if ((failed)); then
