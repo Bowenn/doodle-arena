@@ -80,6 +80,19 @@ services:
       SERVICE_INSTANCE_ID: ai-1
     healthcheck: *py-healthcheck
 
+  assets:
+    <<: *app
+    build: ../services/assets
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: assets-1
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?}
+      DB_HOST: postgres
+      DB_NAME: assets
+      DB_USER: assets
+      DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
+    healthcheck: *py-healthcheck
+
   # ---------------------------------------------------------------- data stores
 
   postgres:
