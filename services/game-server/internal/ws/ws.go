@@ -326,9 +326,17 @@ func (pc *playerConn) closeWith(code websocket.StatusCode, reason string) bool {
 func (pc *playerConn) writer() {
 	defer close(pc.writerDone)
 	for {
+		// A close wins over queued messages.
+		if pc.ctx.Err() != nil {
+			pc.once.Do(func() {})
+			_ = pc.ws.Close(pc.code, pc.reason)
+			return
+		}
 		select {
 		case b := <-pc.out:
-			ctx, cancel := context.WithTimeout(pc.ctx, writeTimeout)
+			// Not derived from pc.ctx: if a write's context is cancelled, the library drops
+			// the connection without a close frame, and the client would never see the code.
+			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 			err := pc.ws.Write(ctx, websocket.MessageText, b)
 			cancel()
 			if errors.Is(err, context.DeadlineExceeded) {

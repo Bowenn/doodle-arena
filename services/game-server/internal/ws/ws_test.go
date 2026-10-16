@@ -303,3 +303,37 @@ func TestShutdownClosesWithGoingAway(t *testing.T) {
 		t.Fatalf("handler didn't drain: %v", err)
 	}
 }
+
+// Closing a socket while messages are still being written must still send the close code:
+// cancelling a write's context makes the library drop the connection without a close frame.
+func TestCloseDuringWritesKeepsTheCloseCode(t *testing.T) {
+	accepted := make(chan *playerConn, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		pc := newPlayerConn(context.Background(), c, "u1", func() {})
+		accepted <- pc
+		<-pc.writerDone
+	}))
+	defer srv.Close()
+
+	for i := range 20 {
+		c, _, err := websocket.Dial(t.Context(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.SetReadLimit(1 << 22)
+		pc := <-accepted
+		big := []byte(`{"type":"x","data":"` + strings.Repeat("a", 512<<10) + `"}`)
+		for range 8 {
+			pc.Send(big)
+		}
+		pc.Close(protocol.CloseReplaced, "connected again elsewhere")
+		if got := closeCode(t, c); got != protocol.CloseReplaced {
+			t.Fatalf("attempt %d: close = %d, want %d", i, got, protocol.CloseReplaced)
+		}
+		c.CloseNow()
+	}
+}
