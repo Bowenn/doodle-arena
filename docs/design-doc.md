@@ -175,6 +175,15 @@ Stateless.
 
 Pages: login, lobby, room (canvas, guesses, scores, timer), gallery and replays, marketplace, wallet (buy coins), and developer settings (API keys and webhooks). Follows `.claude/rules/web.md`.
 
+The room client (task 2.3):
+
+- Pages route by path (`/` is the lobby, `/rooms/<room_id>` a room), so an invite link opens the room. There is no router library.
+- State is a pure reducer over server messages: `welcome` replaces it, events apply only when `seq` is newer, and scores, phases and the word change only when the server says so. The chat feed isn't part of the view, so a reconnect keeps it.
+- The canvas has a fixed 4:3 aspect and two layers. The base layer paints only the server's `stroke_batch` events, so every player sees the same picture; the overlay paints the drawer's own stroke at once and drops it when the server's copy arrives, so drawing doesn't lag by a round trip. Points go out every 50 ms (`VITE_STROKE_BATCH_MS`, or `?batch_ms=` for one experiment) or at 512 points.
+- The connection asks the lobby for a new ticket on every attempt and reconnects with jittered exponential backoff (0.5 s doubling to 8 s, giving up after 12 attempts, about a minute, which matches the seat grace). Close codes 4000, 4003, 4004 and 4009 and a lobby `ROOM_NOT_FOUND` end the connection instead. A gap in `seq` or a `room_moved` reconnects at once.
+- The timer counts down to the server's deadline on the local clock. It is display only; the server ends phases. Clock skew shows as a timer that is a little off.
+- The ping round-trip time is shown next to the connection status; exporting it as `web.ws.rtt` comes with browser telemetry (task 5.4).
+
 ## 5. Data ownership
 
 | Store | Database, prefix or bucket | What it holds | Owner |
@@ -282,7 +291,7 @@ Client to server:
 - `hello {ticket, last_seq?}`
 - `start {}` (host only; needs 2+ connected players, in Waiting or after a match)
 - `choose_word {index}` (drawer only)
-- `stroke_batch {stroke_id, points: [[x, y, t_ms], ...], color, width, done}`
+- `stroke_batch {stroke_id, points: [[x, y, t_ms], ...], color, width, done}`: `color` is `#rrggbb`, `width` is 1–200 in the same normalized units as coordinates (so a line looks the same on every screen), and `t_ms` counts from the start of the stroke
 - `undo {stroke_id}`: a player can undo only their own strokes
 - `guess {text}` (1–100 characters; outside a round it is chat)
 - `ping {t}` (answered with `pong` without involving the room)

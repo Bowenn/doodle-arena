@@ -66,7 +66,8 @@ Tracks:
   - Game servers send heartbeats and accept rooms through a stub `AllocateRoom`; room actors and ticket checks come in 2.2. Shared JWT fixtures (`fixtures/jwt/`) are used by auth and the lobby.
 - [x] **2.2 Game server core**: the room actor, WebSocket handling with tickets, the round state machine, word lists, scoring, hints, the per-player token bucket, and the JSON protocol from the design doc.
   - ADR 0002 is decided (2026-10-16): direct URLs `/ws/<server_id>/rooms/<room_id>`, mapped by the gateway. Access tokens and tickets carry the display name; `AllocateRoom` names the host.
-- [ ] **2.3 Web room UI**: canvas with batched strokes, guess box, scores and timer.
+- [x] **2.3 Web room UI**: canvas with batched strokes, guess box, scores and timer.
+  - Lobby page and `/rooms/<id>` invite links; a pure reducer over server messages; strokes batched every 50 ms (`VITE_STROKE_BATCH_MS`, `?batch_ms=`) with widths in normalized units; reconnect with a fresh ticket, `last_seq` and jittered backoff. Checked live on 2026-10-16 with one signed-in browser and two scripted players, through two full matches.
 - [ ] **2.4 Events out**: the stroke log upload (claim check), `RoundFinished` and `MatchFinished`.
 - [ ] **2.5 Reliability**: the Redis Stream event log with explicit `seq` IDs, snapshots, reconnect with resume, the lease and fencing token through Lua, and failover through the lobby, with two game-server instances in Compose. The humans decide ADR 0002 first.
 - [ ] **2.6 Shared canvas and leaderboard**: two drawers per round with own-stroke undo; a weekly leaderboard built from `MatchFinished`.
@@ -186,3 +187,4 @@ Record every number you might put on a resume or mention in an interview.
 | 2026-10-16 | End-to-end telemetry: one request through the gateway | Trace with gateway and auth spans in Tempo; auth log line with the same trace_id in Loki; all 7 services export metrics | `make telemetry-check` (also runs in CI's stack job), then Grafana Explore: Tempo trace → Related logs | Task 1.5 PR |
 | 2026-10-16 | Dead game server detection (registry) | Stopped `game-server-1` dropped out of the registry 4 s after `docker compose stop` (TTL 6 s after the last 2 s heartbeat); `lobby.servers.healthy` went from 2 to 1 | `docker compose stop game-server-1`, polling `EXISTS lobby:server:game-server-1`, then Prometheus via Grafana | Task 2.1 PR |
 | 2026-10-16 | Game-server registration at cold start | First successful heartbeat about 4 s after start (8 s before capping gRPC's reconnect backoff at 2 s) | Container logs: `grpc listening` to `heartbeat recovered` | Task 2.1 PR |
+| 2026-10-16 | Browser WebSocket round-trip time (ping/pong) | 2–6 ms on one machine through the gateway | The room page's ping every 15 s, shown next to the connection status | Task 2.3 PR |
