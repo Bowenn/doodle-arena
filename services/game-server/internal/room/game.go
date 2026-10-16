@@ -78,6 +78,7 @@ type FinishedRound struct {
 type FinishedMatch struct {
 	MatchID   string
 	RoomID    string
+	Mode      string    // the room's mode; the actor fills it in
 	StartedAt time.Time // when the first round started
 	EndedAt   time.Time
 	Rounds    int

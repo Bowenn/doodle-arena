@@ -325,6 +325,7 @@ func (r *Room) finish(f Finished) {
 		r.events.RoundFinished(ctx, fr)
 	case f.Match != nil:
 		fm := *f.Match
+		fm.Mode = r.mode
 		r.log.Info("match finished", "match_id", fm.MatchID, "rounds", fm.Rounds, "players", len(fm.Results))
 		ctx := r.span("game.match.end", []attribute.KeyValue{attribute.String("room.id", r.id),
 			attribute.String("match.id", fm.MatchID), attribute.Int("match.rounds", fm.Rounds)})

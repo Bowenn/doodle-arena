@@ -588,7 +588,7 @@ func TestFinishedRoundsAndMatchesReachTheSink(t *testing.T) {
 		t.Fatalf("round = %+v", sink.items[0])
 	}
 	m, ok := sink.items[1].(FinishedMatch)
-	if !ok || m.MatchID != r.MatchID || m.Rounds != 1 || len(m.Results) != 2 {
+	if !ok || m.MatchID != r.MatchID || m.Mode != "classic" || m.Rounds != 1 || len(m.Results) != 2 {
 		t.Fatalf("match = %+v", sink.items[1])
 	}
 	// Each hand-off carries its end span, which becomes the parent of the publish spans.

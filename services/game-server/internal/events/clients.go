@@ -1,0 +1,57 @@
+package events
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws"
+)
+
+// NewKafkaClient returns a producer for the game topics. franz-go's idempotent producer
+// (on by default) keeps its own retries from writing duplicates, acks=all waits for the
+// in-sync replicas, and the tracing hook writes each record's traceparent header from the
+// context it is produced with.
+func NewKafkaClient(brokers []string) (*kgo.Client, error) {
+	tracer := kotel.NewTracer() // the global tracer provider and propagator
+	c, err := kgo.NewClient(
+		kgo.SeedBrokers(brokers...),
+		kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.RecordDeliveryTimeout(30*time.Second),
+		kgo.ProducerLinger(0),
+		kgo.WithHooks(kotel.NewKotel(kotel.WithTracer(tracer)).Hooks()...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("kafka client: %w", err)
+	}
+	return c, nil
+}
+
+// S3Config reaches the object store: SeaweedFS locally, S3 in AWS.
+type S3Config struct {
+	Endpoint  string // empty: AWS's own endpoint
+	Region    string
+	AccessKey string
+	SecretKey string
+}
+
+// NewS3Client returns a traced S3 client with path-style addressing (SeaweedFS needs it).
+func NewS3Client(cfg S3Config) *s3.Client {
+	opts := s3.Options{
+		Region:       cfg.Region,
+		UsePathStyle: true,
+		Credentials:  credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, ""),
+		// Only send checksums S3 requires; some S3-compatible stores reject the newer
+		// default checksum headers.
+		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
+	}
+	if cfg.Endpoint != "" {
+		opts.BaseEndpoint = aws.String(cfg.Endpoint)
+	}
+	otelaws.AppendMiddlewares(&opts.APIOptions)
+	return s3.New(opts)
+}
