@@ -30,19 +30,42 @@ jobs:
     name: make up and make smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # Show otel-lgtm's collector and Loki logs, so a failed export to Loki is explained.
+      OTEL_LGTM_COMPONENT_LOGS: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The runner's disk is ~94% full once every service image is built, and Loki stops
+      # accepting logs above 90% disk usage ("Ingester is shutting down"). Remove large
+      # preinstalled toolchains this job never uses.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          docker image prune -af > /dev/null
+          df -h /
       - name: make up (creates .env and the JWT key, builds every image)
         run: make up
       - name: make smoke
         run: make smoke
+      - name: make telemetry-check (trace, logs and metrics reach Grafana)
+        run: make telemetry-check
+      - name: Disk usage after the run
+        if: always()
+        run: df -h /
       - name: Show containers and logs
         if: failure()
         run: |
           docker compose -f infra/docker-compose.yml --env-file .env ps -a
           docker compose -f infra/docker-compose.yml --env-file .env logs --no-color --tail=200
+      - name: Show Loki's own log lines
+        if: failure()
+        run: |
+          # Loki logs in logfmt (lines start with level=); the collector's lines don't.
+          docker compose -f infra/docker-compose.yml --env-file .env logs --no-color --no-log-prefix otel-lgtm |
+            grep -E '^level=' | grep -v 'logproto.Pusher/Push' | head -120 || true
       - name: make down
         if: always()
         run: docker compose -f infra/docker-compose.yml --env-file .env down -v --remove-orphans

@@ -2,12 +2,14 @@ from datetime import timedelta
 
 import httpx
 from fastapi import FastAPI
+from opentelemetry.metrics import Meter
 from sqlalchemy import Engine
 
 from app import SERVICE_NAME
 from app.context import AuthContext
 from app.db import make_engine
 from app.errors import install_error_handlers
+from app.metrics import AuthMetrics
 from app.oauth import GoogleClient
 from app.routes import router
 from app.settings import Settings
@@ -18,7 +20,10 @@ GOOGLE_TIMEOUT = httpx.Timeout(5.0)
 
 
 def build_context(
-    settings: Settings, engine: Engine | None = None, http: httpx.Client | None = None
+    settings: Settings,
+    engine: Engine | None = None,
+    http: httpx.Client | None = None,
+    meter: Meter | None = None,
 ) -> AuthContext:
     key = SigningKey.from_file(settings.jwt_private_key_path)  # fails fast without a key
     google = None
@@ -38,6 +43,7 @@ def build_context(
         issuer=TokenIssuer(key, settings.jwt_issuer, ttl),
         verifier=TokenVerifier({key.kid: key.public_key}, settings.jwt_issuer),
         google=google,
+        metrics=AuthMetrics(meter),
     )
 
 

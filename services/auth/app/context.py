@@ -1,12 +1,13 @@
 """Everything a request handler needs, built once at startup and stored on app.state."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from fastapi import Request
 from sqlalchemy import Engine
 
+from app.metrics import AuthMetrics
 from app.oauth import GoogleClient
 from app.settings import Settings
 from app.tokens import TokenIssuer, TokenVerifier
@@ -24,6 +25,7 @@ class AuthContext:
     verifier: TokenVerifier
     # None when no Google client is configured; sign-in then returns 503.
     google: GoogleClient | None
+    metrics: AuthMetrics = field(default_factory=AuthMetrics)
     now: Callable[[], datetime] = utc_now
 
 

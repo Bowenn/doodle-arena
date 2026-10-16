@@ -14,7 +14,8 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-ins
 COPY manage.py gunicorn.conf.py ./
 COPY config ./config
 
-RUN useradd --system --uid 10001 app
+# gunicorn keeps its control socket in the home directory, so the user needs one.
+RUN useradd --system --create-home --uid 10001 app
 USER app
 EXPOSE 8080
 CMD ["gunicorn", "config.wsgi:application", "--config", "gunicorn.conf.py"]

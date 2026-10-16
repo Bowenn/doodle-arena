@@ -2,7 +2,8 @@ from django.http import HttpRequest, JsonResponse
 from django.urls import path
 from django.views.decorators.http import require_GET
 
-from config.settings import SERVICE_NAME, env
+from config import SERVICE_NAME
+from config.settings import env
 
 
 @require_GET
