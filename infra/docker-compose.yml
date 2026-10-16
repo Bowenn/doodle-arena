@@ -19,6 +19,13 @@ x-go-healthcheck: &go-healthcheck
   timeout: 3s
   retries: 12
 
+# Python services check their health with the interpreter that runs them.
+x-py-healthcheck: &py-healthcheck
+  test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).status != 200)"]
+  interval: 5s
+  timeout: 3s
+  retries: 12
+
 services:
   # ------------------------------------------------------------- Go services
 
@@ -54,6 +61,24 @@ services:
       <<: *app-env
       SERVICE_INSTANCE_ID: notifier-1
     healthcheck: *go-healthcheck
+
+  # --------------------------------------------------------- Python services
+
+  auth:
+    <<: *app
+    build: ../services/auth
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: auth-1
+    healthcheck: *py-healthcheck
+
+  ai:
+    <<: *app
+    build: ../services/ai
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: ai-1
+    healthcheck: *py-healthcheck
 
   # ---------------------------------------------------------------- data stores
 
