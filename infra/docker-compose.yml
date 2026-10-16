@@ -88,7 +88,16 @@ services:
       LOBBY_GRPC_ADDR: lobby:9090
       CONTROL_ADDRESS: game-server-1:9090
       WS_ADDRESS: /ws/game-server-1
+      REDIS_ADDR: redis:6379
+      # The lobby's public keys only: game servers verify join tickets, never mint them (ADR 0005).
+      TICKET_PUBLIC_KEY_PATH: /run/secrets/ticket-public-key
+      # Browsers send Origin http://localhost:8080; the gateway forwards Host without the port.
+      WS_ALLOWED_ORIGINS: localhost:8080
+    secrets:
+      - ticket-public-key
     depends_on:
+      redis:
+        condition: service_healthy
       otel-lgtm:
         condition: service_healthy
       kafka-topics:
@@ -113,7 +122,16 @@ services:
       LOBBY_GRPC_ADDR: lobby:9090
       CONTROL_ADDRESS: game-server-2:9090
       WS_ADDRESS: /ws/game-server-2
+      REDIS_ADDR: redis:6379
+      # The lobby's public keys only: game servers verify join tickets, never mint them (ADR 0005).
+      TICKET_PUBLIC_KEY_PATH: /run/secrets/ticket-public-key
+      # Browsers send Origin http://localhost:8080; the gateway forwards Host without the port.
+      WS_ALLOWED_ORIGINS: localhost:8080
+    secrets:
+      - ticket-public-key
     depends_on:
+      redis:
+        condition: service_healthy
       otel-lgtm:
         condition: service_healthy
       kafka-topics:
@@ -425,3 +443,5 @@ secrets:
   # Created by scripts/gen-ticket-key.sh (make up runs it). Only the lobby gets it (ADR 0005).
   ticket-private-key:
     file: ../secrets/ticket-private.pem
+  ticket-public-key:
+    file: ../secrets/ticket-public.pem
