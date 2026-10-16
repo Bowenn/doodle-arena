@@ -469,10 +469,15 @@ Local:
 - The Stripe CLI forwards test webhooks to the marketplace.
 - Pinned tool and image versions, and how they map to AWS, are listed in `docs/setup.md`.
 
-CI (GitHub Actions):
+CI (GitHub Actions, `.github/workflows/`):
 
-- One workflow per service, triggered by path filters: lint, unit tests, integration tests, Docker image build.
-- `buf lint` and `buf breaking` on `proto/`.
+- One workflow per service, triggered by path filters: lint, unit tests, integration tests (Testcontainers on the runner's Docker), Docker image build. The service workflows are thin; they call reusable workflows per language (`_go`, `_python`, `_java`, `_web`) and `_docker`.
+- CI runs the same `scripts/lint.sh` and `scripts/test.sh` as `make lint` and `make test`, so local and CI results match.
+- `proto.yml`: `buf breaking` against the PR base (or the previous push), then `make proto`, failing if the committed generated code differs.
+- `stack.yml`: `make up` plus `make smoke`, when the stack changes (infra, scripts, gateway, Dockerfiles), on `master` and on demand.
+- `workflows.yml`: actionlint on the workflow files (`make lint s=ci` locally).
+- Actions are pinned to full commit SHAs, and Dependabot updates them weekly. Workflows have read-only permissions, and event data never goes straight into `run:` scripts.
+- A path-filtered workflow that doesn't run never reports a status, so it can't be a required check. If `master` gets branch protection, add an always-run gate job first.
 - From Stage 5: push images on merge to the default branch (`master`), plus Lighthouse CI for the web app.
 
 AWS (Stage 5):

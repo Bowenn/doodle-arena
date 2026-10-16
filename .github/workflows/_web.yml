@@ -1,0 +1,31 @@
+# Reusable: lint, test and build the web app with the same scripts as `make lint` and
+# `make test`.
+name: web
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  lint-test:
+    name: lint, test and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Lint (oxlint, tsc)
+        run: ./scripts/lint.sh web
+      - name: Test (vitest)
+        run: ./scripts/test.sh web
+      - name: Build
+        working-directory: web
+        run: npm run build

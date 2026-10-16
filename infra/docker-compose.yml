@@ -42,6 +42,9 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: lobby-1
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
     healthcheck: *go-healthcheck
 
   # Two game servers, so failover can be tested (task 2.5).
@@ -51,6 +54,11 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: game-server-1
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
+      seaweedfs-buckets:
+        condition: service_completed_successfully
     healthcheck: *go-healthcheck
 
   game-server-2:
@@ -59,6 +67,11 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: game-server-2
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
+      seaweedfs-buckets:
+        condition: service_completed_successfully
     healthcheck: *go-healthcheck
 
   notifier:
@@ -67,6 +80,9 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: notifier-1
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
     healthcheck: *go-healthcheck
 
   # --------------------------------------------------------- Python services
@@ -122,6 +138,11 @@ services:
       DB_NAME: assets
       DB_USER: assets
       DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
+      seaweedfs-buckets:
+        condition: service_completed_successfully
     healthcheck: *py-healthcheck
 
   # ----------------------------------------------------------- Java services
@@ -132,6 +153,9 @@ services:
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: marketplace-1
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 5s
@@ -251,6 +275,8 @@ services:
       timeout: 10s
       retries: 30
 
+  # One-shot job. Services that use Kafka depend on it with service_completed_successfully, so
+  # they start after the topics exist (and `compose up --wait` accepts the job exiting).
   kafka-topics:
     image: apache/kafka:4.2.2
     entrypoint: ["/bin/bash", "/create-topics.sh"]
@@ -278,6 +304,7 @@ services:
       timeout: 3s
       retries: 30
 
+  # One-shot job; the game servers and assets depend on it, like kafka-topics.
   seaweedfs-buckets:
     image: chrislusf/seaweedfs:4.48
     entrypoint: ["/bin/sh", "/create-buckets.sh"]

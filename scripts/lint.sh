@@ -19,6 +19,8 @@ run_one() {
       ;;
     java) (cd "$dir" && ./gradlew --quiet compileJava compileTestJava) ;;
     proto) ./scripts/proto.sh check ;;
+    # actionlint checks workflow syntax, expressions and (with shellcheck installed) run scripts.
+    ci) go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm run lint) ;;
   esac
 }

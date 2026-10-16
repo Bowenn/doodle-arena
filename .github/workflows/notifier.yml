@@ -1,0 +1,45 @@
+# Notifier (Go): lint, test with -race, Docker build.
+name: notifier
+
+on:
+  pull_request:
+    paths:
+      - services/notifier/**
+      - .github/workflows/notifier.yml
+      - .github/workflows/_go.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  push:
+    branches: [master]
+    paths:
+      - services/notifier/**
+      - .github/workflows/notifier.yml
+      - .github/workflows/_go.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let every run on master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  go:
+    uses: ./.github/workflows/_go.yml
+    with:
+      service: notifier
+      directory: services/notifier
+
+  docker:
+    uses: ./.github/workflows/_docker.yml
+    with:
+      service: notifier
+      context: services/notifier

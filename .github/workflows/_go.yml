@@ -1,0 +1,37 @@
+# Reusable: lint and test one Go module with the same scripts as `make lint` and `make test`.
+name: go
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: Name known to scripts/services.sh, for example lobby
+        type: string
+        required: true
+      directory:
+        description: Folder of the Go module (its go.mod picks the Go version)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-test:
+    name: lint and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SERVICE: ${{ inputs.service }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ inputs.directory }}/go.mod
+          cache-dependency-path: ${{ inputs.directory }}/go.mod
+      - name: Lint (go vet, gofmt)
+        run: ./scripts/lint.sh "$SERVICE"
+      - name: Test (go test -race)
+        run: ./scripts/test.sh "$SERVICE"

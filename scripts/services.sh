@@ -5,7 +5,7 @@ GO_SERVICES=(lobby game-server notifier)
 PY_SERVICES=(auth ai assets)
 JAVA_SERVICES=(marketplace)
 # Not services, but checked by make test and make lint too.
-EXTRA_MODULES=(proto eventctl)
+EXTRA_MODULES=(proto eventctl ci)
 ALL_SERVICES=("${GO_SERVICES[@]}" "${PY_SERVICES[@]}" "${JAVA_SERVICES[@]}" web "${EXTRA_MODULES[@]}")
 
 # Prints go, python, java or web for a service name; fails for unknown names.
@@ -16,6 +16,7 @@ service_lang() {
   for x in "${JAVA_SERVICES[@]}"; do [[ "$x" == "$s" ]] && { echo java; return; }; done
   [[ "$s" == web ]] && { echo web; return; }
   [[ "$s" == proto ]] && { echo proto; return; }
+  [[ "$s" == ci ]] && { echo ci; return; }
   echo "unknown service: $s (known: ${ALL_SERVICES[*]})" >&2
   return 1
 }
@@ -26,6 +27,7 @@ service_dir() {
     web) echo web ;;
     proto) echo proto ;;
     eventctl) echo tools/eventctl ;;
+    ci) echo .github ;;
     *) echo "services/$1" ;;
   esac
 }

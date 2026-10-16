@@ -1,0 +1,39 @@
+# eventctl dev tool (Go): lint and test. Also runs when generated Go contracts change.
+name: eventctl
+
+on:
+  pull_request:
+    paths:
+      - tools/eventctl/**
+      - proto/gen/go/**
+      - .github/workflows/eventctl.yml
+      - .github/workflows/_go.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+  push:
+    branches: [master]
+    paths:
+      - tools/eventctl/**
+      - proto/gen/go/**
+      - .github/workflows/eventctl.yml
+      - .github/workflows/_go.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let every run on master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  go:
+    uses: ./.github/workflows/_go.yml
+    with:
+      service: eventctl
+      directory: tools/eventctl

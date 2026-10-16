@@ -27,6 +27,7 @@ run_one() {
     python) (cd "$dir" && uv run --frozen pytest) ;;
     java) (cd "$dir" && ./gradlew --quiet test) ;;
     proto) ./scripts/proto.sh check ;;
+    ci) echo "(no tests; workflows are checked by make lint s=ci)" ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm test) ;;
   esac
 }

@@ -30,6 +30,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Where tokens live.** The access token (15 minutes, RS256) lives only in JavaScript memory, never in localStorage, which XSS can read. The refresh token is an HttpOnly, SameSite=Strict cookie scoped to `/api/auth`, so page scripts can't read it and other sites can't send it. `/refresh` and `/logout` also check `Origin`. Trade-off: a page reload costs one refresh call.
 - **Coarse limits at the edge, fine ones in the service.** Nginx `limit_req` is a leaky bucket per IP: 20 r/s on the API, 5 r/s on sign-in and refresh, with a JSON 429 and `Retry-After`. A burst of 40 gets 29 rejections. Behind a load balancer the client IP must come from `X-Forwarded-For`, or every user shares one bucket. Per-player limits (guesses) need game context, so they live in the game server.
 
+### 1.4 CI
+
+- **CI runs exactly what developers run.** Every job sets up a toolchain, then calls `scripts/lint.sh` and `scripts/test.sh`, the same scripts as `make`. No build or test logic is duplicated in YAML, so "green locally, red in CI" can only mean an environment difference, not a different command. Rejected: hand-written steps per workflow, which drift from the Makefile within weeks.
+- **Per-service workflows on reusable building blocks.** Ten thin workflows, one per service, each with a path filter, call five reusable workflows (one per language, plus Docker). A change to `services/auth` runs only auth's lint, test and image build, which matters on a private repo with a minutes quota. Trade-off: a workflow skipped by its path filter never reports, so it can't be a required check. Branch protection would need an always-run gate job, which a single matrix workflow gives for free.
+- **Contracts are checked twice.** `buf breaking` compares the PR against its base commit, so a renumbered or retyped field fails before anyone depends on it. Then CI regenerates all three languages and fails if the committed code differs, so nobody can merge a `.proto` change without its generated code, or edit generated code by hand.
+- **Supply-chain hygiene.** Every action is pinned to a 40-character commit SHA, because a tag like `v7` can be moved to malicious code and a SHA can't. Dependabot keeps the pins current. Workflows get read-only tokens, checkouts don't persist credentials, and event data reaches shell scripts only through environment variables (no `${{ }}` inside `run:`), which closes the classic workflow-injection hole.
+- **Cost-aware integration testing.** The full-stack smoke test (`make up` plus `make smoke`, about 5 minutes) runs only when the stack itself changes, on `master`, and on demand. Unit and Testcontainers integration tests run on every relevant PR. That spends minutes where breakage is likely.
+
 ## Stage 2: Game core
 
 ## Stage 3: Drawing lifecycle

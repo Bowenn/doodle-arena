@@ -203,3 +203,15 @@ def test_login_without_google_credentials_returns_503(settings: object) -> None:
     resp = client.get("/api/auth/google/login")
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "GOOGLE_NOT_CONFIGURED"
+
+
+def test_login_works_right_after_the_host_boots(
+    client: TestClient, google: FakeGoogle, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # time.monotonic() counts from boot. Shortly after boot it is small, and the very first
+    # fetch of Google's keys must still happen (regression: CI runners are freshly booted).
+    monkeypatch.setattr("app.oauth.time.monotonic", lambda: 5.0)
+    params = start_login(client)
+    google.answer_with(google.id_token(nonce=params["nonce"]))
+
+    assert finish_login(client, params["state"]).status_code == 302
