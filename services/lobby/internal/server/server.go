@@ -35,8 +35,8 @@ type Verifier interface {
 type Rooms interface {
 	Create(ctx context.Context, hostID string, public bool, s rooms.Settings) (rooms.Room, error)
 	List(ctx context.Context, after *rooms.Cursor, n int) ([]rooms.Listing, *rooms.Cursor, error)
-	Join(ctx context.Context, userID, roomID string) (rooms.Join, error)
-	QuickPlay(ctx context.Context, userID string) (rooms.Join, error)
+	Join(ctx context.Context, user rooms.User, roomID string) (rooms.Join, error)
+	QuickPlay(ctx context.Context, user rooms.User) (rooms.Join, error)
 }
 
 // Deps are what the API routes need. With a nil Rooms, only /healthz is served.
@@ -99,8 +99,13 @@ type api struct {
 }
 
 func userID(r *http.Request) string {
+	return caller(r).ID
+}
+
+// caller is the verified user, with the display name from the access token.
+func caller(r *http.Request) rooms.User {
 	c, _ := authn.FromContext(r.Context())
-	return c.UserID
+	return rooms.User{ID: c.UserID, Name: c.Name}
 }
 
 type createRoomRequest struct {
@@ -199,7 +204,7 @@ func (a *api) joinRoom(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "no such room")
 		return
 	}
-	j, err := a.rooms.Join(r.Context(), userID(r), id)
+	j, err := a.rooms.Join(r.Context(), caller(r), id)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -208,7 +213,7 @@ func (a *api) joinRoom(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) quickPlay(w http.ResponseWriter, r *http.Request) {
-	j, err := a.rooms.QuickPlay(r.Context(), userID(r))
+	j, err := a.rooms.QuickPlay(r.Context(), caller(r))
 	if err != nil {
 		a.fail(w, r, err)
 		return

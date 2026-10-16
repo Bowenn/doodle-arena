@@ -35,12 +35,14 @@ type fakeAllocator struct {
 	mu      sync.Mutex
 	answers map[string]error
 	calls   []string
+	hosts   []string
 }
 
-func (f *fakeAllocator) AllocateRoom(_ context.Context, addr string, _ *gamev1.AllocateRoomRequest) (*gamev1.AllocateRoomResponse, error) {
+func (f *fakeAllocator) AllocateRoom(_ context.Context, addr string, req *gamev1.AllocateRoomRequest) (*gamev1.AllocateRoomResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, addr)
+	f.hosts = append(f.hosts, req.GetHostUserId())
 	if err := f.answers[addr]; err != nil {
 		return nil, err
 	}
@@ -134,6 +136,9 @@ func TestCreatePicksTheLeastLoadedServer(t *testing.T) {
 	}
 	if room.ServerID != "gs-2" || room.HostID != "u-host" || room.Settings != DefaultSettings || len(room.ID) != 16 {
 		t.Fatalf("room = %+v", room)
+	}
+	if !slices.Equal(e.alloc.hosts, []string{"u-host"}) {
+		t.Fatalf("AllocateRoom hosts = %v, want the creator", e.alloc.hosts)
 	}
 	stored, err := e.store.Get(t.Context(), room.ID)
 	if err != nil || stored.ServerID != "gs-2" {
@@ -239,7 +244,7 @@ func TestJoinReturnsATicketForThatUserAndRoom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, err := e.svc.Join(t.Context(), "u-guest", room.ID)
+	j, err := e.svc.Join(t.Context(), User{ID: "u-guest", Name: "Grace"}, room.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +255,7 @@ func TestJoinReturnsATicketForThatUserAndRoom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.Subject != "u-guest" || !claims.ExpiresAt.Equal(j.ExpiresAt) {
+	if claims.Subject != "u-guest" || claims.Name != "Grace" || !claims.ExpiresAt.Equal(j.ExpiresAt) {
 		t.Fatalf("claims = %+v", claims)
 	}
 	if _, err := e.verifier.Verify(j.Ticket, "another-room"); err == nil {
@@ -266,13 +271,13 @@ func TestJoinErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := e.svc.Join(t.Context(), "u-1", "no-such-room"); !errors.Is(err, ErrRoomNotFound) {
+	if _, err := e.svc.Join(t.Context(), User{ID: "u-1"}, "no-such-room"); !errors.Is(err, ErrRoomNotFound) {
 		t.Fatalf("unknown room: err = %v", err)
 	}
 
 	// The server stops reporting the room after the grace period: the room has ended.
 	e.clock.add(reportGrace + time.Second)
-	if _, err := e.svc.Join(t.Context(), "u-1", room.ID); !errors.Is(err, ErrRoomNotFound) {
+	if _, err := e.svc.Join(t.Context(), User{ID: "u-1"}, room.ID); !errors.Is(err, ErrRoomNotFound) {
 		t.Fatalf("ended room: err = %v", err)
 	}
 
@@ -281,7 +286,7 @@ func TestJoinErrors(t *testing.T) {
 	if err := e.store.Save(t.Context(), orphan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Join(t.Context(), "u-1", orphan.ID); !errors.Is(err, ErrRoomUnavailable) {
+	if _, err := e.svc.Join(t.Context(), User{ID: "u-1"}, orphan.ID); !errors.Is(err, ErrRoomUnavailable) {
 		t.Fatalf("dead server: err = %v", err)
 	}
 }
@@ -419,7 +424,7 @@ func TestQuickPlayJoinsTheFullestWaitingRoomWithSpace(t *testing.T) {
 		registry.Room{ID: ids[2], Players: 3, Phase: registry.PhasePlaying}, // match running
 		registry.Room{ID: ids[3], Players: 2, Phase: registry.PhaseWaiting}, // the one
 	)
-	j, err := e.svc.QuickPlay(t.Context(), "u-1")
+	j, err := e.svc.QuickPlay(t.Context(), User{ID: "u-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +436,7 @@ func TestQuickPlayJoinsTheFullestWaitingRoomWithSpace(t *testing.T) {
 func TestQuickPlayCreatesARoomWhenNoneHasSpace(t *testing.T) {
 	e := newEnv(t)
 	e.beat(t, "gs-1", 0, false)
-	j, err := e.svc.QuickPlay(t.Context(), "u-1")
+	j, err := e.svc.QuickPlay(t.Context(), User{ID: "u-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

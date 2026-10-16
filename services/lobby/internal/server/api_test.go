@@ -22,7 +22,7 @@ type fakeVerifier struct{}
 
 func (fakeVerifier) Verify(_ context.Context, token string) (authn.Claims, error) {
 	if user, ok := strings.CutPrefix(token, "good-"); ok {
-		return authn.Claims{UserID: user, Roles: []string{"player"}}, nil
+		return authn.Claims{UserID: user, Name: "Name " + user, Roles: []string{"player"}}, nil
 	}
 	return authn.Claims{}, authn.ErrInvalidToken
 }
@@ -53,14 +53,15 @@ func (f *fakeRooms) List(_ context.Context, after *rooms.Cursor, _ int) ([]rooms
 	return []rooms.Listing{l}, &rooms.Cursor{Score: 5, ID: "r1"}, nil
 }
 
-func (f *fakeRooms) Join(_ context.Context, user, room string) (rooms.Join, error) {
+func (f *fakeRooms) Join(_ context.Context, user rooms.User, room string) (rooms.Join, error) {
 	if f.joinErr != nil {
 		return rooms.Join{}, f.joinErr
 	}
-	return rooms.Join{RoomID: room, WSURL: "/ws/gs-1/rooms/" + room, Ticket: "t-" + user, ExpiresAt: time.Unix(60, 0)}, nil
+	// The ticket echoes who it was signed for, so tests can check the name got through.
+	return rooms.Join{RoomID: room, WSURL: "/ws/gs-1/rooms/" + room, Ticket: "t-" + user.ID + "-" + user.Name, ExpiresAt: time.Unix(60, 0)}, nil
 }
 
-func (f *fakeRooms) QuickPlay(ctx context.Context, user string) (rooms.Join, error) {
+func (f *fakeRooms) QuickPlay(ctx context.Context, user rooms.User) (rooms.Join, error) {
 	return f.Join(ctx, user, "rq")
 }
 
@@ -187,7 +188,7 @@ func TestJoinAndQuickPlay(t *testing.T) {
 	f := &fakeRooms{}
 	h := newAPI(f)
 	rec, body := call(t, h, http.MethodPost, "/api/lobby/rooms/r1/join", "good-u2", "")
-	if rec.Code != http.StatusOK || body["ticket"] != "t-u2" || body["ws_url"] != "/ws/gs-1/rooms/r1" {
+	if rec.Code != http.StatusOK || body["ticket"] != "t-u2-Name u2" || body["ws_url"] != "/ws/gs-1/rooms/r1" {
 		t.Fatalf("%d %v", rec.Code, body)
 	}
 	if rec.Header().Get("Cache-Control") != "no-store" {

@@ -33,7 +33,7 @@ func TestSignedTicketVerifies(t *testing.T) {
 	key := newKey(t)
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
 	s := NewSigner(key, fixedClock(now))
-	tok, exp, err := s.Sign("u-1", "r-1")
+	tok, exp, err := s.Sign("u-1", "Ada", "r-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestSignedTicketVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Subject != "u-1" || c.RoomID != "r-1" || len(c.ID) != 32 {
+	if c.Subject != "u-1" || c.Name != "Ada" || c.RoomID != "r-1" || len(c.ID) != 32 {
 		t.Fatalf("claims = %+v", c)
 	}
 }
@@ -55,7 +55,7 @@ func TestTicketIDsAreUnique(t *testing.T) {
 	v := NewVerifier([]ed25519.PublicKey{s.key.Public().(ed25519.PublicKey)}, time.Now)
 	seen := map[string]bool{}
 	for range 100 {
-		tok, _, err := s.Sign("u-1", "r-1")
+		tok, _, err := s.Sign("u-1", "Ada", "r-1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -77,11 +77,11 @@ func TestVerifyRejects(t *testing.T) {
 	pub := key.Public().(ed25519.PublicKey)
 	now := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
 	signer := NewSigner(key, fixedClock(now))
-	good, _, err := signer.Sign("u-1", "r-1")
+	good, _, err := signer.Sign("u-1", "Ada", "r-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, _, err := NewSigner(newKey(t), fixedClock(now)).Sign("u-1", "r-1")
+	other, _, err := NewSigner(newKey(t), fixedClock(now)).Sign("u-1", "Ada", "r-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestVerifierAcceptsEveryConfiguredKey(t *testing.T) {
 	oldKey, newKey := newKey(t), newKey(t)
 	v := NewVerifier([]ed25519.PublicKey{oldKey.Public().(ed25519.PublicKey), newKey.Public().(ed25519.PublicKey)}, time.Now)
 	for _, k := range []ed25519.PrivateKey{oldKey, newKey} {
-		tok, _, err := NewSigner(k, time.Now).Sign("u-1", "r-1")
+		tok, _, err := NewSigner(k, time.Now).Sign("u-1", "Ada", "r-1")
 		if err != nil {
 			t.Fatal(err)
 		}

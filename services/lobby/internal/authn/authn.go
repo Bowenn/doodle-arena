@@ -32,7 +32,9 @@ var ErrInvalidToken = errors.New("invalid access token")
 // Claims is what the lobby needs from a verified access token.
 type Claims struct {
 	UserID string
-	Roles  []string
+	// Name is the display name (may be empty with tokens issued before the claim existed).
+	Name  string
+	Roles []string
 }
 
 // KeySource returns the RSA public key for a key id.
@@ -54,6 +56,7 @@ func NewVerifier(issuer string, keys KeySource) *Verifier {
 type tokenClaims struct {
 	jwt.RegisteredClaims
 	Roles []string `json:"roles"`
+	Name  string   `json:"name"`
 }
 
 // Verify checks the token and returns its claims, or an error wrapping ErrInvalidToken.
@@ -80,7 +83,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {
 	if c.Roles == nil {
 		return Claims{}, fmt.Errorf("%w: roles is required", ErrInvalidToken)
 	}
-	return Claims{UserID: c.Subject, Roles: c.Roles}, nil
+	return Claims{UserID: c.Subject, Name: c.Name, Roles: c.Roles}, nil
 }
 
 // StaticKeys is a fixed key set, for tests.
