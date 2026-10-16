@@ -1,0 +1,42 @@
+# Web app (Vite + React): lint, test, build, Docker build.
+name: web
+
+on:
+  pull_request:
+    paths:
+      - web/**
+      - .github/workflows/web.yml
+      - .github/workflows/_web.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  push:
+    branches: [master]
+    paths:
+      - web/**
+      - .github/workflows/web.yml
+      - .github/workflows/_web.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let every run on master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  web:
+    uses: ./.github/workflows/_web.yml
+
+  docker:
+    uses: ./.github/workflows/_docker.yml
+    with:
+      service: web
+      context: web

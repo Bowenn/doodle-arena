@@ -1,0 +1,44 @@
+# Marketplace (Spring Boot): lint, test, Docker build.
+name: marketplace
+
+on:
+  pull_request:
+    paths:
+      - services/marketplace/**
+      - .github/workflows/marketplace.yml
+      - .github/workflows/_java.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  push:
+    branches: [master]
+    paths:
+      - services/marketplace/**
+      - .github/workflows/marketplace.yml
+      - .github/workflows/_java.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let every run on master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  java:
+    uses: ./.github/workflows/_java.yml
+    with:
+      service: marketplace
+
+  docker:
+    uses: ./.github/workflows/_docker.yml
+    with:
+      service: marketplace
+      context: services/marketplace

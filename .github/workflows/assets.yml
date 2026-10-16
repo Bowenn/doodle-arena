@@ -1,0 +1,45 @@
+# Assets service (Django): lint, test, Docker build.
+name: assets
+
+on:
+  pull_request:
+    paths:
+      - services/assets/**
+      - .github/workflows/assets.yml
+      - .github/workflows/_python.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  push:
+    branches: [master]
+    paths:
+      - services/assets/**
+      - .github/workflows/assets.yml
+      - .github/workflows/_python.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let every run on master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  python:
+    uses: ./.github/workflows/_python.yml
+    with:
+      service: assets
+      directory: services/assets
+
+  docker:
+    uses: ./.github/workflows/_docker.yml
+    with:
+      service: assets
+      context: services/assets

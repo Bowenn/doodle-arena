@@ -1,0 +1,31 @@
+# Gateway (Nginx): Docker build, which runs nginx -t on the config.
+name: gateway
+
+on:
+  pull_request:
+    paths:
+      - services/gateway/**
+      - .github/workflows/gateway.yml
+      - .github/workflows/_docker.yml
+  push:
+    branches: [master]
+    paths:
+      - services/gateway/**
+      - .github/workflows/gateway.yml
+      - .github/workflows/_docker.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let every run on master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  docker:
+    uses: ./.github/workflows/_docker.yml
+    with:
+      service: gateway
+      context: services/gateway
