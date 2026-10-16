@@ -64,7 +64,8 @@ Tracks:
 - [x] **2.1 Lobby**: rooms, the game-server registry (gRPC `Heartbeat`), `AllocateRoom`, join tickets, the room list.
   - ADR 0005 is decided (2026-10-16): Ed25519 join tickets, verify-only public keys on game servers, single-use through Redis `SET NX`.
   - Game servers send heartbeats and accept rooms through a stub `AllocateRoom`; room actors and ticket checks come in 2.2. Shared JWT fixtures (`fixtures/jwt/`) are used by auth and the lobby.
-- [ ] **2.2 Game server core**: the room actor, WebSocket handling with tickets, the round state machine, word lists, scoring, hints, the per-player token bucket, and the JSON protocol from the design doc.
+- [x] **2.2 Game server core**: the room actor, WebSocket handling with tickets, the round state machine, word lists, scoring, hints, the per-player token bucket, and the JSON protocol from the design doc.
+  - ADR 0002 is decided (2026-10-16): direct URLs `/ws/<server_id>/rooms/<room_id>`, mapped by the gateway. Access tokens and tickets carry the display name; `AllocateRoom` names the host.
 - [ ] **2.3 Web room UI**: canvas with batched strokes, guess box, scores and timer.
 - [ ] **2.4 Events out**: the stroke log upload (claim check), `RoundFinished` and `MatchFinished`.
 - [ ] **2.5 Reliability**: the Redis Stream event log with explicit `seq` IDs, snapshots, reconnect with resume, the lease and fencing token through Lua, and failover through the lobby, with two game-server instances in Compose. The humans decide ADR 0002 first.
@@ -73,8 +74,8 @@ Tracks:
 **M2 exit criteria**
 
 - [ ] A full match plays end to end with three or more browsers.
-- [ ] Test: with concurrent correct guesses, exactly one is first, and every client sees the same order.
-- [ ] Test: guessers never receive the word before the round ends.
+- [x] Test: with concurrent correct guesses, exactly one is first, and every client sees the same order (`TestConcurrentCorrectGuessesOneFirst` in `services/game-server/internal/room`, 50 runs with `-race`).
+- [x] Test: guessers never receive the word before the round ends (`TestGuessersNeverSeeWordBeforeRoundEnded`: late joiner, reconnect, chat containing the word, hints; fails when a leak is planted).
 - [ ] Test: a client that disconnects mid-round resumes without missing events.
 - [ ] Test: after a takeover, the old owner's writes are rejected by the fencing check.
 - [ ] Killing a game server mid-round moves the room to the other instance. Recovery time is recorded in the evidence log.

@@ -275,22 +275,27 @@ Notifier (authenticated with an API key):
 
 ### 6.4 WebSocket protocol
 
-The client connects to the URL from the lobby (`/ws/<server_id>/rooms/<room_id>`, ADR 0002) and sends `hello` with its join ticket and, when resuming, `last_seq`. Messages are JSON in v1, at most 64 KB each. Coordinates are normalized to 0–10000, so canvas size doesn't matter. A binary format is a Stage 6 experiment.
+The client connects to the URL from the lobby (`/ws/<server_id>/rooms/<room_id>`, ADR 0002) and sends `hello` with its join ticket and, when resuming, `last_seq`, within 10 seconds. Messages are JSON text frames shaped `{"type": ..., "data": ...}`. A client message is at most 64 KB (a server message such as `welcome` can be larger, because it carries the canvas). Coordinates are normalized to 0–10000, so canvas size doesn't matter; a point is `[x, y, t_ms]` and a batch has 1–512 points. Deadlines are Unix milliseconds. A binary format is a Stage 6 experiment. The client pings every 15 seconds; a socket idle for 60 seconds is closed.
 
 Client to server:
 
 - `hello {ticket, last_seq?}`
+- `start {}` (host only; needs 2+ connected players, in Waiting or after a match)
 - `choose_word {index}` (drawer only)
 - `stroke_batch {stroke_id, points: [[x, y, t_ms], ...], color, width, done}`
 - `undo {stroke_id}`: a player can undo only their own strokes
-- `guess {text}`
-- `ping {t}`
+- `guess {text}` (1–100 characters; outside a round it is chat)
+- `ping {t}` (answered with `pong` without involving the room)
 
-Server to client, shared room events (each wrapped as `event {seq, type, data}` and stored in the room's event log): `player_joined`, `player_left`, `round_started {drawer_ids, word_length, deadline}`, `stroke_batch`, `stroke_undone`, `hint {mask}`, `chat {user_id, text}` (wrong guesses are shown as chat), `correct_guess {user_id, order}`, `round_ended {word, scores}`, `match_ended {results}`.
+Server to client, shared room events (each wrapped as `event {seq, type, data}` and stored in the room's event log): `player_joined {user_id, name}`, `player_left {user_id}`, `player_removed {user_id}` (seat freed after the rejoin grace), `host_changed {user_id}`, `match_started {match_id, order, deadline}`, `choosing {round_no, drawer_ids, deadline}`, `round_started {round_no, drawer_ids, word_length, deadline}`, `stroke_batch {user_id, stroke_id, points, color, width, done}`, `stroke_undone {stroke_id, user_id}`, `hint {mask}`, `chat {user_id, text}` (wrong guesses are shown as chat), `correct_guess {user_id, order}`, `round_ended {round_no, word, scores, round_points}`, `match_ended {match_id, results}` (results carry `placement` with competition ranking: 1, 2, 2, 4).
 
 Server to client, private messages (no `seq`, never stored in the shared log): `welcome {user_id, view, seq}`, `word_options {words}` (drawer), `your_word {word}` (drawers), `guess_result {correct}`, `rate_limited`, `room_moved {reason}`, `error {code, message}`, `pong {t}`.
 
-`view` is built for each player from the room state, and contains the word only for drawers. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is.
+`view` is built for each player from the room state (phase, host, players with scores, the round, the hint mask and the canvas). It contains the word only after the round has ended; drawers get the word through `your_word`, the only message that carries it during a round. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is. On `welcome`, a client replaces its state and then applies events with `seq` greater than `welcome.seq`; until task 2.5 a reconnect always gets a full `welcome`.
+
+Guess rules: a guess is compared after lowercasing and keeping only the letters a–z. A guess that contains the word without being it is answered only privately (`guess_result {correct: false}`) and never broadcast, because that would show everyone the word. Drawers, and players who already guessed, can't chat while a round runs. Guesses and chat pass a per-player token bucket (5 at once, then 1 per second); a rate-limited guess gets `rate_limited` and is not processed.
+
+Close codes: 4000 bad first message, 4001 invalid or reused ticket, 4003 room full, 4004 no such room, 4008 no `hello` in time, 4009 the same player connected again elsewhere, 1003 binary frame, 1008 flooding, 1009 message too big, 1011 ticket store unavailable, 1013 too slow (the send queue filled up), 1001 server shutting down. After a close, a client asks the lobby for a new ticket (tickets are single-use) and reconnects.
 
 ## 7. Key flows
 
@@ -323,7 +328,7 @@ stateDiagram-v2
   MatchEnd --> [*]: room closes
 ```
 
-Defaults, all configurable: up to 8 players; each player draws once per match; 10 seconds to choose a word from 3 options; 80 seconds to draw; hints reveal letters at 40% and 70% of the drawing time; a round ends early when every guesser is correct. A guesser earns `max(20, 100 - 15 * (order - 1))` points, and each drawer earns 10 points per correct guesser.
+Defaults, all configurable: up to 8 players; each player draws once per match; 10 seconds to choose a word from 3 options (on timeout the first option is used); 80 seconds to draw; hints reveal letters at 40% and 70% of the drawing time (each reveals `max(1, len/4)` more, never more than half the word); a round ends early when every connected guesser is correct, or when the drawer leaves. Fixed: a 3-second countdown (Starting), 5 seconds of Reveal. A match ends early when fewer than 2 players are connected. Only the host starts a match; when the host isn't connected, hosting passes to the earliest-joined connected player. A disconnected player keeps their seat and score for 60 seconds (between matches; during a match until it ends), so `max_players` counts seats and a reconnecting player always gets back in. A room with nobody connected closes after 60 seconds and drops out of the heartbeats. A guesser earns `max(20, 100 - 15 * (order - 1))` points, and each drawer earns 10 points per correct guesser.
 
 ### 7.4 Reconnect
 

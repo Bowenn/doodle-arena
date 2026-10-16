@@ -70,9 +70,9 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 |---|---|---|---|
 | `game.ws.connections` | UpDownCounter | – | game-server |
 | `game.rooms.active` | UpDownCounter | `mode` | game-server |
-| `game.broadcast.duration` | Histogram (ms) | `event_type` | game-server |
+| `game.broadcast.duration` | Histogram (ms) | `event_type` (time to marshal an event and queue it to every local socket; it doesn't include the network write) | game-server |
 | `game.guesses` | Counter | `result` = correct, wrong, rate_limited | game-server |
-| `game.reconnects` | Counter | `result` = resumed, snapshot, failed | game-server |
+| `game.reconnects` | Counter | `result` = resumed, snapshot, failed (until task 2.5 every reconnect is a snapshot: a full `welcome`) | game-server |
 | `game.room.takeovers` | Counter | – | game-server |
 | `game.ws.slow_client_disconnects` | Counter | – | game-server |
 | `auth.logins` | Counter | `result` = success, failed | auth |
