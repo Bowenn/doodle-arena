@@ -1,13 +1,14 @@
 import logging
+import uuid
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, Depends, Query, Response
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Cookie, Depends, Header, Query, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app import cookies, refresh, users
 from app.context import AuthContext, get_context
-from app.errors import ApiError
+from app.errors import ApiError, error_response
 from app.oauth import (
     STATE_COOKIE_MAX_AGE,
     GoogleError,
@@ -16,7 +17,7 @@ from app.oauth import (
     StateError,
     safe_return_to,
 )
-from app.tokens import jwks
+from app.tokens import AccessClaims, InvalidTokenError, jwks
 
 log = logging.getLogger("auth")
 router = APIRouter(prefix="/api/auth")
@@ -98,3 +99,98 @@ def google_callback(
     cookies.clear_oauth_cookie(response, settings)
     cookies.set_refresh_cookie(response, token, settings)
     return response
+
+
+def check_origin(request: Request, ctx: AuthContext) -> None:
+    """CSRF defense in depth for cookie-authenticated POSTs, on top of SameSite=Strict.
+    Browsers always send Origin on cross-site POSTs, so a foreign Origin is refused; requests
+    without one come from non-browser clients, which can't ride a user's cookie."""
+    origin = request.headers.get("origin")
+    if origin is not None and origin != ctx.settings.public_base_url:
+        log.warning("refused cross-origin request", extra={"path": request.url.path})
+        raise ApiError(403, "ORIGIN_NOT_ALLOWED", "request from another site")
+
+
+def unauthorized_refresh(request: Request, ctx: AuthContext) -> Response:
+    response = error_response(request, 401, "REFRESH_TOKEN_INVALID", "please sign in again")
+    cookies.clear_refresh_cookie(response, ctx.settings)
+    return response
+
+
+@router.post("/refresh")
+def refresh_access_token(
+    request: Request,
+    ctx: Ctx,
+    refresh_cookie: Annotated[str | None, Cookie(alias=cookies.REFRESH_COOKIE)] = None,
+) -> Response:
+    check_origin(request, ctx)
+    if not refresh_cookie:
+        return unauthorized_refresh(request, ctx)
+
+    ttl = timedelta(days=ctx.settings.refresh_token_ttl_days)
+    with ctx.engine.begin() as conn:
+        result = refresh.rotate(conn, refresh_cookie, ctx.now(), ttl)
+        user = None
+        if result.outcome == "rotated" and result.user_id is not None:
+            user = users.get(conn, result.user_id)
+
+    if user is None or result.token is None:
+        extra = {"reason": result.outcome, "user_id": str(result.user_id or "")}
+        if result.outcome == "reuse_detected":
+            extra["family_id"] = str(result.family_id)
+            log.warning("refresh token reuse detected; family revoked", extra=extra)
+        else:
+            log.info("refresh rejected", extra=extra)
+        return unauthorized_refresh(request, ctx)
+
+    access_token, expires_in = ctx.issuer.issue(str(user.id), user.roles, ctx.now())
+    response = JSONResponse(
+        {"access_token": access_token, "token_type": "Bearer", "expires_in": expires_in},
+        headers={"Cache-Control": "no-store"},
+    )
+    cookies.set_refresh_cookie(response, result.token, ctx.settings)
+    log.info("refresh rotated", extra={"user_id": str(user.id)})
+    return response
+
+
+@router.post("/logout", status_code=204)
+def logout(
+    request: Request,
+    ctx: Ctx,
+    refresh_cookie: Annotated[str | None, Cookie(alias=cookies.REFRESH_COOKIE)] = None,
+) -> Response:
+    check_origin(request, ctx)
+    if refresh_cookie:
+        with ctx.engine.begin() as conn:
+            family_id = refresh.family_of(conn, refresh_cookie)
+            if family_id is not None:
+                refresh.revoke_family(conn, family_id, ctx.now(), "logout")
+                log.info("logged out", extra={"family_id": str(family_id)})
+    response = Response(status_code=204)
+    cookies.clear_refresh_cookie(response, ctx.settings)
+    return response
+
+
+def current_claims(ctx: Ctx, authorization: Annotated[str | None, Header()] = None) -> AccessClaims:
+    """The verified access token of the caller (Authorization: Bearer ...)."""
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise ApiError(401, "TOKEN_MISSING", "Authorization: Bearer token required")
+    try:
+        return ctx.verifier.verify(token.strip())
+    except InvalidTokenError as e:
+        raise ApiError(401, "TOKEN_INVALID", "access token is invalid or expired") from e
+
+
+@router.get("/me")
+def me(ctx: Ctx, claims: Annotated[AccessClaims, Depends(current_claims)]) -> dict[str, Any]:
+    with ctx.engine.connect() as conn:
+        user = users.get(conn, uuid.UUID(claims.user_id))
+    if user is None:
+        raise ApiError(401, "TOKEN_INVALID", "user no longer exists")
+    return {
+        "id": str(user.id),
+        "display_name": user.display_name,
+        "avatar_url": user.avatar_url,
+        "roles": user.roles,
+    }
