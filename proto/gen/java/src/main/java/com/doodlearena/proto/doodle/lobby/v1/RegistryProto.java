@@ -32,6 +32,11 @@ public final class RegistryProto extends com.google.protobuf.GeneratedFile {
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
       internal_static_doodle_lobby_v1_HeartbeatRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_doodle_lobby_v1_RoomStatus_descriptor;
+  static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_doodle_lobby_v1_RoomStatus_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
     internal_static_doodle_lobby_v1_HeartbeatResponse_descriptor;
   static final 
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
@@ -46,20 +51,26 @@ public final class RegistryProto extends com.google.protobuf.GeneratedFile {
   static {
     java.lang.String[] descriptorData = {
       "\n\036doodle/lobby/v1/registry.proto\022\017doodle" +
-      ".lobby.v1\"\237\001\n\020HeartbeatRequest\022\033\n\tserver" +
+      ".lobby.v1\"\322\001\n\020HeartbeatRequest\022\033\n\tserver" +
       "_id\030\001 \001(\tR\010serverId\022\035\n\nws_address\030\002 \001(\tR" +
       "\twsAddress\022\031\n\010room_ids\030\003 \003(\tR\007roomIds\022\030\n" +
       "\007sockets\030\004 \001(\rR\007sockets\022\032\n\010draining\030\005 \001(" +
-      "\010R\010draining\"\023\n\021HeartbeatResponse2e\n\017Regi" +
-      "stryService\022R\n\tHeartbeat\022!.doodle.lobby." +
-      "v1.HeartbeatRequest\032\".doodle.lobby.v1.He" +
-      "artbeatResponseB\340\001\n%com.doodlearena.prot" +
-      "o.doodle.lobby.v1B\rRegistryProtoP\001ZJgith" +
-      "ub.com/Bowenn/gap-project_private/proto/" +
-      "gen/go/doodle/lobby/v1;lobbyv1\242\002\003DLX\252\002\017D" +
-      "oodle.Lobby.V1\312\002\017Doodle\\Lobby\\V1\342\002\033Doodl" +
-      "e\\Lobby\\V1\\GPBMetadata\352\002\021Doodle::Lobby::" +
-      "V1b\006proto3"
+      "\010R\010draining\0221\n\005rooms\030\006 \003(\0132\033.doodle.lobb" +
+      "y.v1.RoomStatusR\005rooms\"q\n\nRoomStatus\022\027\n\007" +
+      "room_id\030\001 \001(\tR\006roomId\022\030\n\007players\030\002 \001(\rR\007" +
+      "players\0220\n\005phase\030\003 \001(\0162\032.doodle.lobby.v1" +
+      ".RoomPhaseR\005phase\"\023\n\021HeartbeatResponse*W" +
+      "\n\tRoomPhase\022\032\n\026ROOM_PHASE_UNSPECIFIED\020\000\022" +
+      "\026\n\022ROOM_PHASE_WAITING\020\001\022\026\n\022ROOM_PHASE_PL" +
+      "AYING\020\0022e\n\017RegistryService\022R\n\tHeartbeat\022" +
+      "!.doodle.lobby.v1.HeartbeatRequest\032\".doo" +
+      "dle.lobby.v1.HeartbeatResponseB\340\001\n%com.d" +
+      "oodlearena.proto.doodle.lobby.v1B\rRegist" +
+      "ryProtoP\001ZJgithub.com/Bowenn/gap-project" +
+      "_private/proto/gen/go/doodle/lobby/v1;lo" +
+      "bbyv1\242\002\003DLX\252\002\017Doodle.Lobby.V1\312\002\017Doodle\\L" +
+      "obby\\V1\342\002\033Doodle\\Lobby\\V1\\GPBMetadata\352\002\021" +
+      "Doodle::Lobby::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -70,9 +81,15 @@ public final class RegistryProto extends com.google.protobuf.GeneratedFile {
     internal_static_doodle_lobby_v1_HeartbeatRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_doodle_lobby_v1_HeartbeatRequest_descriptor,
-        new java.lang.String[] { "ServerId", "WsAddress", "RoomIds", "Sockets", "Draining", });
-    internal_static_doodle_lobby_v1_HeartbeatResponse_descriptor =
+        new java.lang.String[] { "ServerId", "WsAddress", "RoomIds", "Sockets", "Draining", "Rooms", });
+    internal_static_doodle_lobby_v1_RoomStatus_descriptor =
       getDescriptor().getMessageType(1);
+    internal_static_doodle_lobby_v1_RoomStatus_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_doodle_lobby_v1_RoomStatus_descriptor,
+        new java.lang.String[] { "RoomId", "Players", "Phase", });
+    internal_static_doodle_lobby_v1_HeartbeatResponse_descriptor =
+      getDescriptor().getMessageType(2);
     internal_static_doodle_lobby_v1_HeartbeatResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_doodle_lobby_v1_HeartbeatResponse_descriptor,

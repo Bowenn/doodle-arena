@@ -53,6 +53,7 @@ public interface HeartbeatRequestOrBuilder extends
   /**
    * <pre>
    * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+   * The same ids as in `rooms`; kept because field 3 is part of the published contract.
    * </pre>
    *
    * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -63,6 +64,7 @@ public interface HeartbeatRequestOrBuilder extends
   /**
    * <pre>
    * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+   * The same ids as in `rooms`; kept because field 3 is part of the published contract.
    * </pre>
    *
    * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -72,6 +74,7 @@ public interface HeartbeatRequestOrBuilder extends
   /**
    * <pre>
    * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+   * The same ids as in `rooms`; kept because field 3 is part of the published contract.
    * </pre>
    *
    * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -82,6 +85,7 @@ public interface HeartbeatRequestOrBuilder extends
   /**
    * <pre>
    * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+   * The same ids as in `rooms`; kept because field 3 is part of the published contract.
    * </pre>
    *
    * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -110,4 +114,53 @@ public interface HeartbeatRequestOrBuilder extends
    * @return The draining.
    */
   boolean getDraining();
+
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  java.util.List<com.doodlearena.proto.doodle.lobby.v1.RoomStatus> 
+      getRoomsList();
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  com.doodlearena.proto.doodle.lobby.v1.RoomStatus getRooms(int index);
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  int getRoomsCount();
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  java.util.List<? extends com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder> 
+      getRoomsOrBuilderList();
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder getRoomsOrBuilder(
+      int index);
 }

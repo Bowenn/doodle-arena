@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1e\x64oodle/lobby/v1/registry.proto\x12\x0f\x64oodle.lobby.v1\"\x9f\x01\n\x10HeartbeatRequest\x12\x1b\n\tserver_id\x18\x01 \x01(\tR\x08serverId\x12\x1d\n\nws_address\x18\x02 \x01(\tR\twsAddress\x12\x19\n\x08room_ids\x18\x03 \x03(\tR\x07roomIds\x12\x18\n\x07sockets\x18\x04 \x01(\rR\x07sockets\x12\x1a\n\x08\x64raining\x18\x05 \x01(\x08R\x08\x64raining\"\x13\n\x11HeartbeatResponse2e\n\x0fRegistryService\x12R\n\tHeartbeat\x12!.doodle.lobby.v1.HeartbeatRequest\x1a\".doodle.lobby.v1.HeartbeatResponseB\xe0\x01\n%com.doodlearena.proto.doodle.lobby.v1B\rRegistryProtoP\x01ZJgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1;lobbyv1\xa2\x02\x03\x44LX\xaa\x02\x0f\x44oodle.Lobby.V1\xca\x02\x0f\x44oodle\\Lobby\\V1\xe2\x02\x1b\x44oodle\\Lobby\\V1\\GPBMetadata\xea\x02\x11\x44oodle::Lobby::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1e\x64oodle/lobby/v1/registry.proto\x12\x0f\x64oodle.lobby.v1\"\xd2\x01\n\x10HeartbeatRequest\x12\x1b\n\tserver_id\x18\x01 \x01(\tR\x08serverId\x12\x1d\n\nws_address\x18\x02 \x01(\tR\twsAddress\x12\x19\n\x08room_ids\x18\x03 \x03(\tR\x07roomIds\x12\x18\n\x07sockets\x18\x04 \x01(\rR\x07sockets\x12\x1a\n\x08\x64raining\x18\x05 \x01(\x08R\x08\x64raining\x12\x31\n\x05rooms\x18\x06 \x03(\x0b\x32\x1b.doodle.lobby.v1.RoomStatusR\x05rooms\"q\n\nRoomStatus\x12\x17\n\x07room_id\x18\x01 \x01(\tR\x06roomId\x12\x18\n\x07players\x18\x02 \x01(\rR\x07players\x12\x30\n\x05phase\x18\x03 \x01(\x0e\x32\x1a.doodle.lobby.v1.RoomPhaseR\x05phase\"\x13\n\x11HeartbeatResponse*W\n\tRoomPhase\x12\x1a\n\x16ROOM_PHASE_UNSPECIFIED\x10\x00\x12\x16\n\x12ROOM_PHASE_WAITING\x10\x01\x12\x16\n\x12ROOM_PHASE_PLAYING\x10\x02\x32\x65\n\x0fRegistryService\x12R\n\tHeartbeat\x12!.doodle.lobby.v1.HeartbeatRequest\x1a\".doodle.lobby.v1.HeartbeatResponseB\xe0\x01\n%com.doodlearena.proto.doodle.lobby.v1B\rRegistryProtoP\x01ZJgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1;lobbyv1\xa2\x02\x03\x44LX\xaa\x02\x0f\x44oodle.Lobby.V1\xca\x02\x0f\x44oodle\\Lobby\\V1\xe2\x02\x1b\x44oodle\\Lobby\\V1\\GPBMetadata\xea\x02\x11\x44oodle::Lobby::V1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,10 +32,14 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'doodle.lobby.v1.registry_pb
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'\n%com.doodlearena.proto.doodle.lobby.v1B\rRegistryProtoP\001ZJgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1;lobbyv1\242\002\003DLX\252\002\017Doodle.Lobby.V1\312\002\017Doodle\\Lobby\\V1\342\002\033Doodle\\Lobby\\V1\\GPBMetadata\352\002\021Doodle::Lobby::V1'
+  _globals['_ROOMPHASE']._serialized_start=400
+  _globals['_ROOMPHASE']._serialized_end=487
   _globals['_HEARTBEATREQUEST']._serialized_start=52
-  _globals['_HEARTBEATREQUEST']._serialized_end=211
-  _globals['_HEARTBEATRESPONSE']._serialized_start=213
-  _globals['_HEARTBEATRESPONSE']._serialized_end=232
-  _globals['_REGISTRYSERVICE']._serialized_start=234
-  _globals['_REGISTRYSERVICE']._serialized_end=335
+  _globals['_HEARTBEATREQUEST']._serialized_end=262
+  _globals['_ROOMSTATUS']._serialized_start=264
+  _globals['_ROOMSTATUS']._serialized_end=377
+  _globals['_HEARTBEATRESPONSE']._serialized_start=379
+  _globals['_HEARTBEATRESPONSE']._serialized_end=398
+  _globals['_REGISTRYSERVICE']._serialized_start=489
+  _globals['_REGISTRYSERVICE']._serialized_end=590
 # @@protoc_insertion_point(module_scope)
