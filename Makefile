@@ -3,10 +3,10 @@
 
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: help up down ps logs test lint
+.PHONY: help up down ps logs test lint smoke
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc]"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke"
 
 up:
 	@./scripts/dev-up.sh
@@ -25,3 +25,6 @@ test:
 
 lint:
 	@./scripts/lint.sh $(s)
+
+smoke:
+	@./scripts/smoke.sh
