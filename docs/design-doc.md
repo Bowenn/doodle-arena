@@ -206,19 +206,19 @@ Every call has a deadline. Stage 7 may add `doodle.ai.v1` for the AI guesser.
 
 ### 6.2 Kafka event catalog
 
-Every event message starts with `EventMeta meta = 1`: `event_id` (UUID), `event_type`, `schema_version`, `occurred_at` and `producer`. Trace context travels in the Kafka `traceparent` header. Consumers dedupe on `event_id` or on a natural key.
+Every message on a topic is that topic's wrapper message: one `oneof event` with a case per event type (ADR 0004). There is no schema registry; Buf checks compatibility in CI. Every event inside a wrapper starts with `EventMeta meta = 1`: `event_id` (UUID), `event_type`, `schema_version`, `occurred_at` and `producer`. Trace context travels in the Kafka `traceparent` header. Consumers dedupe on `event_id` or on a natural key. A consumer that finds an unset or unknown `oneof` case (a newer producer) logs it, counts it, commits the offset and moves on.
 
-| Topic | Events | Producer | Consumers | Key | Stage |
-|---|---|---|---|---|---|
-| `game.rounds.v1` | `RoundFinished` | game-server | assets | `room_id` | 2 |
-| `game.matches.v1` | `MatchFinished` | game-server | marketplace, lobby | `room_id` | 2 |
-| `assets.drawings.v1` | `DrawingApproved`, `DrawingRejected` | assets | marketplace | `drawing_id` | 3 |
-| `market.listings.v1` | `ListingCreated`, `ListingCancelled` | marketplace (outbox) | assets (search, Stage 6) | `drawing_id` | 4 |
-| `market.sales.v1` | `SaleCompleted` | marketplace (outbox) | notifier, assets, analytics | `drawing_id` | 4 |
-| `market.wallet.v1` | `CoinsCredited` | marketplace (outbox) | notifier (optional) | `user_id` | 4 |
-| `notifier.dlq.v1` | `DeliveryDead` | notifier | alerting, humans | `endpoint_id` | 4 |
-| `live.guesses.v1` | `ViewerGuess` | game-server relays | analytics | `room_id` | 6 |
-| `live.top-guesses.v1` | `TopGuesses` | analytics | game-server | `room_id` | 6 |
+| Topic | Wrapper | Events | Producer | Consumers | Key | Stage |
+|---|---|---|---|---|---|---|
+| `game.rounds.v1` | `RoundEvent` | `RoundFinished` | game-server | assets | `room_id` | 2 |
+| `game.matches.v1` | `MatchEvent` | `MatchFinished` | game-server | marketplace, lobby | `room_id` | 2 |
+| `assets.drawings.v1` | `DrawingEvent` | `DrawingApproved`, `DrawingRejected` | assets | marketplace | `drawing_id` | 3 |
+| `market.listings.v1` | `ListingEvent` | `ListingCreated`, `ListingCancelled` | marketplace (outbox) | assets (search, Stage 6) | `drawing_id` | 4 |
+| `market.sales.v1` | `SaleEvent` | `SaleCompleted` | marketplace (outbox) | notifier, assets, analytics | `drawing_id` | 4 |
+| `market.wallet.v1` | `WalletEvent` | `CoinsCredited` | marketplace (outbox) | notifier (optional) | `user_id` | 4 |
+| `notifier.dlq.v1` | `DeadLetterEvent` | `DeliveryDead` | notifier | alerting, humans | `endpoint_id` | 4 |
+| `live.guesses.v1` | `ViewerGuessEvent` | `ViewerGuess` | game-server relays | analytics | `room_id` | 6 |
+| `live.top-guesses.v1` | `TopGuessesEvent` | `TopGuesses` | analytics | game-server | `room_id` | 6 |
 
 Key payload fields:
 
@@ -504,6 +504,7 @@ Releases:
 | D16 | JSON WebSocket messages in v1; binary format is a Stage 6 experiment | Easy debugging first, measured optimization later |
 | D17 | OpenTelemetry to Prometheus, Tempo and Loki, plus CloudWatch; Grafana alerting to Discord | One UI for every signal; alerts arrive where the team already is |
 | D18 | Every service verifies RS256 JWTs itself, with one audience (`doodle-api`); the gateway only routes; the Django admin bridges Google sign-in into a short session (ADR 0001) | No extra hop, no trusted headers, one identity for players and moderators |
+| D19 | Each Kafka topic carries one wrapper message with a `oneof` per event type; no schema registry, Buf only (ADR 0004) | The contract says what each topic holds and `buf breaking` checks it; no extra stateful service |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
@@ -512,7 +513,6 @@ New decisions become ADRs (`/adr`) and get a line here when accepted.
 - ADR 0002: how a WebSocket reaches the game server that owns its room. Decide in Stage 2.
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and the reward amounts (defaults are in section 7).
-- Before task 1.2: how a consumer knows which event a Kafka message holds when a topic carries two event types (`assets.drawings.v1`, `market.listings.v1`). `EventMeta` is inside the message, so it can't be read before the type is known. Options: one wrapper message per topic with a `oneof`, or an `event_type` Kafka header. Also confirm that there's no schema registry (Buf only).
 - Before task 2.1: how the lobby signs join tickets and how game servers verify them (a shared HMAC secret, or an asymmetric key that the lobby publishes).
 - Before task 2.5: the takeover protocol when a game server loses the lobby but can still reach Redis. The lobby then reassigns rooms whose lease the old server is still renewing. Does the new server wait for the lease to expire, or take it by force with a new fencing token, and what do clients do in the meantime?
 - Before task 4.3: what happens to an `IN_PROGRESS` idempotency key when the process crashes mid-request. One option is to insert the key in the same transaction as the purchase, so a crash rolls it back; another is to let `IN_PROGRESS` rows expire after a short timeout.
