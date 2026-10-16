@@ -35,6 +35,7 @@ type Server struct {
 	maxRooms  int
 	clock     room.Clock
 	metrics   *room.Metrics
+	events    room.Sink
 	log       *slog.Logger
 	ctx       context.Context // rooms run until it ends
 	wg        sync.WaitGroup
@@ -51,6 +52,7 @@ type Config struct {
 	MaxRooms  int
 	Clock     room.Clock
 	Metrics   *room.Metrics
+	Events    room.Sink // finished rounds and matches; nil: discarded
 	Log       *slog.Logger
 }
 
@@ -60,7 +62,7 @@ func New(ctx context.Context, cfg Config) *Server {
 		cfg.Clock = room.RealClock
 	}
 	return &Server{id: cfg.ID, wsAddress: cfg.WSAddress, maxRooms: cfg.MaxRooms, clock: cfg.Clock,
-		metrics: cfg.Metrics, log: cfg.Log, ctx: ctx, rooms: map[string]*room.Room{}}
+		metrics: cfg.Metrics, events: cfg.Events, log: cfg.Log, ctx: ctx, rooms: map[string]*room.Room{}}
 }
 
 var roomIDPattern = regexp.MustCompile(`^[a-z0-9]{1,64}$`)
@@ -93,7 +95,7 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 	}
 	r := room.New(room.Config{
 		ID: req.GetRoomId(), Mode: "classic", HostID: req.GetHostUserId(), Settings: settings,
-		Clock: s.clock, Log: s.log, Metrics: s.metrics,
+		Clock: s.clock, Log: s.log, Metrics: s.metrics, Events: s.events,
 	})
 	s.rooms[r.ID()] = r
 	s.wg.Go(func() {

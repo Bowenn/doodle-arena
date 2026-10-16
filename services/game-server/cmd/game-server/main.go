@@ -19,6 +19,7 @@ import (
 	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
 	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/events"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/heartbeat"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
@@ -52,6 +53,9 @@ type config struct {
 	ticketKeys     string   // comma-separated PEM files with the lobby's public keys
 	origins        []string // Origin hosts allowed to open a WebSocket
 	helloTimeout   time.Duration
+	kafkaBrokers   []string
+	s3             events.S3Config
+	roundLogs      string // bucket for stroke logs
 }
 
 func loadConfig() config {
@@ -76,6 +80,12 @@ func loadConfig() config {
 		ticketKeys:     os.Getenv("TICKET_PUBLIC_KEY_PATH"),
 		origins:        strings.Split(envOr("WS_ALLOWED_ORIGINS", "localhost:8080"), ","),
 		helloTimeout:   ws.DefaultHelloTimeout,
+		kafkaBrokers:   strings.Split(envOr("KAFKA_BROKERS", "localhost:9094"), ","),
+		s3: events.S3Config{
+			Endpoint: os.Getenv("S3_ENDPOINT"), Region: envOr("S3_REGION", "us-east-1"),
+			AccessKey: os.Getenv("S3_ACCESS_KEY"), SecretKey: os.Getenv("S3_SECRET_KEY"),
+		},
+		roundLogs: envOr("ROUND_LOGS_BUCKET", "round-logs"),
 	}
 }
 
@@ -137,11 +147,32 @@ func run(cfg config, logger *slog.Logger) error {
 		return fmt.Errorf("metrics: %w", err)
 	}
 
+	// Finished rounds and matches leave through the publisher's own goroutine; room actors
+	// only queue them. It runs until the rooms have stopped (see the shutdown below).
+	if cfg.s3.AccessKey == "" || cfg.s3.SecretKey == "" {
+		return errors.New("S3_ACCESS_KEY and S3_SECRET_KEY must be set (stroke logs go to the round-logs bucket)")
+	}
+	kafka, err := events.NewKafkaClient(cfg.kafkaBrokers)
+	if err != nil {
+		return err
+	}
+	defer kafka.Close()
+	publisher, err := events.New(events.Config{
+		Kafka: kafka, S3: events.NewS3Client(cfg.s3), Bucket: cfg.roundLogs, Log: logger, Meter: meter,
+	})
+	if err != nil {
+		return err
+	}
+	pubCtx, abortPublishing := context.WithCancel(context.Background())
+	defer abortPublishing()
+	go publisher.Run(pubCtx)
+	defer func() { publisher.Close(); abortPublishing(); <-publisher.Done() }()
+
 	// Rooms run until roomsCtx ends; on shutdown they close their sockets with 1001.
 	roomsCtx, stopRooms := context.WithCancel(context.Background())
 	defer stopRooms()
 	ctrl := control.New(roomsCtx, control.Config{
-		ID: cfg.instance, WSAddress: cfg.wsAddress, MaxRooms: cfg.maxRooms, Metrics: roomMetrics, Log: logger,
+		ID: cfg.instance, WSAddress: cfg.wsAddress, MaxRooms: cfg.maxRooms, Metrics: roomMetrics, Events: publisher, Log: logger,
 	})
 	wsHandler, err := ws.NewHandler(ws.Config{
 		ServerID: cfg.instance, Rooms: ctrl, Verifier: ticket.NewVerifier(keys, time.Now),
@@ -210,7 +241,8 @@ func run(cfg config, logger *slog.Logger) error {
 
 	// SIGTERM: stop heartbeats (the lobby stops sending rooms here within 6 seconds), stop
 	// accepting connections, close the rooms (their sockets get 1001 and can reconnect), wait
-	// for the sockets, then exit. Handing rooms to another server is task 2.5.
+	// for the sockets, publish the queued events, then exit. Handing rooms to another server is
+	// task 2.5; a match cut short by shutdown publishes nothing.
 	logger.Info("shutting down")
 	stopBeats()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -225,6 +257,15 @@ func run(cfg config, logger *slog.Logger) error {
 		logger.Warn("sockets still open at shutdown", "err", err)
 	}
 	ctrl.Wait()
+	// The rooms are gone, so nothing new is queued: publish what is left, within the deadline.
+	publisher.Close()
+	select {
+	case <-publisher.Done():
+	case <-shutdownCtx.Done():
+		logger.Warn("shutdown deadline: unpublished events dropped")
+		abortPublishing()
+		<-publisher.Done()
+	}
 	select {
 	case <-stopped:
 	case <-shutdownCtx.Done():
