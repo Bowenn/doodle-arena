@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: marketplace
+  lifecycle:
+    # On SIGTERM, in-flight requests get this long to finish.
+    timeout-per-shutdown-phase: 10s
+  main:
+    banner-mode: "off"
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+app:
+  version: ${SERVICE_VERSION:dev}
+  instance: ${SERVICE_INSTANCE_ID:${HOSTNAME:local}}
+
+logging:
+  structured:
+    format:
+      # JSON lines in the format from docs/observability.md, section 2.
+      console: com.doodlearena.marketplace.logging.JsonLogFormatter

@@ -93,6 +93,21 @@ services:
       DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
     healthcheck: *py-healthcheck
 
+  # ----------------------------------------------------------- Java services
+
+  marketplace:
+    <<: *app
+    build: ../services/marketplace
+    environment:
+      <<: *app-env
+      SERVICE_INSTANCE_ID: marketplace-1
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
   # ---------------------------------------------------------------- data stores
 
   postgres:
