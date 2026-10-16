@@ -13,19 +13,17 @@ GRAFANA="${GRAFANA:-http://localhost:3000}"
 TIMEOUT="${TIMEOUT:-60}"
 SERVICES=(lobby game-server notifier auth ai assets marketplace)
 
-trace_id="$(openssl rand -hex 16)"
-traceparent="00-${trace_id}-$(openssl rand -hex 8)-01"
-echo "trace_id $trace_id"
-
 # A refresh without a cookie: a 401 that auth logs ("refresh rejected", missing_cookie).
-# Retried on 429: right after `make smoke` the gateway's auth rate limit is still draining.
+# Retried on 429, because right after `make smoke` the gateway's auth rate limit is still
+# draining; each attempt gets a fresh trace id, so the checked trace holds only the real request.
 for _ in $(seq 10); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST \
-    -H "Origin: $GATEWAY" -H "traceparent: $traceparent" "$GATEWAY/api/auth/refresh")"
+  trace_id="$(openssl rand -hex 16)"
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST -H "Origin: $GATEWAY" \
+    -H "traceparent: 00-${trace_id}-$(openssl rand -hex 8)-01" "$GATEWAY/api/auth/refresh")"
   [[ "$code" != 429 ]] && break
   sleep 1
 done
-echo "POST /api/auth/refresh -> $code"
+echo "trace_id $trace_id: POST /api/auth/refresh -> $code"
 
 proxy() { echo "$GRAFANA/api/datasources/proxy/uid/$1"; }
 
