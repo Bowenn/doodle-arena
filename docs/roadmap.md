@@ -45,7 +45,7 @@ Tracks:
 - [x] **1.4 CI**
   - A GitHub Actions workflow per service with path filters: lint, test and Docker build.
   - `buf lint` and `buf breaking` for `proto/`.
-- [ ] **1.5 Observability baseline**
+- [x] **1.5 Observability baseline**
   - Every skeleton exports traces, metrics and logs to the collector, using the log format in `docs/observability.md`.
   - Grafana is reachable locally.
 - [ ] **1.6 Docs**
@@ -56,7 +56,7 @@ Tracks:
 - [x] `make up` starts everything, and every service's `/healthz` returns 200 through the gateway (`make smoke`).
 - [x] Google login works end to end, `/api/auth/me` returns the user, and the refresh-rotation test passes (`tests/test_refresh.py::test_refresh_rotation`; live sign-in checked 2026-10-16).
 - [x] `make proto` generates code for all three languages, and CI is green for every service (PR #4: 21/21 checks, 2026-10-16; the stale-code check was shown to fail on a hand-edited file).
-- [ ] The trace and logs of one request are visible together in Grafana.
+- [x] The trace and logs of one request are visible together in Grafana (`make telemetry-check`; checked in Grafana Explore on 2026-10-16: gateway → auth trace, "Related logs" opens the auth log line).
 - [x] ADR 0001 is Accepted.
 
 ## Stage 2: Game core (Track A, Days 2–3)
@@ -180,4 +180,4 @@ Record every number you might put on a resume or mention in an interview.
 
 | Date | What was measured | Result | How it was measured | Link (dashboard, PR, screenshot) |
 |---|---|---|---|---|
-| | | | | |
+| 2026-10-16 | End-to-end telemetry: one request through the gateway | Trace with gateway and auth spans in Tempo; auth log line with the same trace_id in Loki; all 7 services export metrics | `make telemetry-check` (also runs in CI's stack job), then Grafana Explore: Tempo trace → Related logs | Task 1.5 PR |

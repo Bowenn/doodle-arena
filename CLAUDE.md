@@ -52,6 +52,7 @@ Keep this list accurate:
 
 - `make up` / `make down`: start or stop the local stack (`infra/docker-compose.yml`). The first `make up` creates `.env` with random local passwords.
 - `make smoke`: checks every service's `/healthz` through the gateway (`http://localhost:8080/healthz/<service>`).
+- `make telemetry-check`: one request with a known trace id must reach Tempo and Loki, and every service must export metrics (Grafana: `http://localhost:3000`).
 - `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
 - `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows), `make logs s=<service>`, `make ps`.
 - CI (`.github/workflows/`) runs the same `scripts/lint.sh` and `scripts/test.sh` per service, so `make lint s=<svc> && make test s=<svc>` predicts CI. Pin new actions to a full commit SHA with the version in a comment.
