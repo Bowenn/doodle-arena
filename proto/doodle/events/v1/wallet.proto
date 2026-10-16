@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+
+// WalletEvent is the only message type on the topic market.wallet.v1 (key: user_id).
+// Produced by the marketplace through its transactional outbox; optionally consumed by the
+// notifier.
+message WalletEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // Coins were added to a player's wallet.
+    CoinsCredited coins_credited = 1;
+  }
+}
+
+// CreditReason says why coins entered a wallet.
+enum CreditReason {
+  // Not set. Treat as an error.
+  CREDIT_REASON_UNSPECIFIED = 0;
+  // The player bought a coin pack through Stripe Checkout.
+  CREDIT_REASON_STRIPE_PURCHASE = 1;
+  // A match reward, paid from MatchFinished.
+  CREDIT_REASON_REWARD = 2;
+}
+
+// CoinsCredited says coins were added to a player's wallet by a committed ledger transaction.
+message CoinsCredited {
+  // Event metadata.
+  EventMeta meta = 1;
+  // The player whose wallet was credited.
+  string user_id = 2;
+  // Coins added (always positive).
+  int64 amount = 3;
+  // Why the coins were added.
+  CreditReason reason = 4;
+  // What caused it: the Stripe Checkout session id for purchases, the match id for rewards.
+  string reference = 5;
+}

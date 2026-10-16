@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+import "google/protobuf/timestamp.proto";
+
+// SaleEvent is the only message type on the topic market.sales.v1 (key: drawing_id).
+// Produced by the marketplace through its transactional outbox; consumed by the notifier
+// (webhooks), assets (search index) and analytics (wash-trading detection).
+message SaleEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // A purchase committed: coins and ownership moved together.
+    SaleCompleted sale_completed = 1;
+  }
+}
+
+// SaleCompleted says a purchase committed. It is written to the outbox in the same Postgres
+// transaction that moved the coins and the ownership, so it exists if and only if the sale
+// happened.
+message SaleCompleted {
+  // Event metadata.
+  EventMeta meta = 1;
+  // Unique id of the sale (the ledger transaction behind it).
+  string sale_id = 2;
+  // The listing that sold. It is now closed.
+  string listing_id = 3;
+  // The drawing that changed hands.
+  string drawing_id = 4;
+  // The previous owner.
+  string seller_id = 5;
+  // The new owner.
+  string buyer_id = 6;
+  // What the buyer paid, in coins. The seller received price minus the sum of royalties.
+  int64 price = 7;
+  // Royalties paid to the drawing's authors. Empty when an author sold it.
+  repeated RoyaltyPayment royalties = 8;
+  // When the transaction committed, by the marketplace's clock.
+  google.protobuf.Timestamp completed_at = 9;
+}
+
+// RoyaltyPayment is the share of a sale paid to one author.
+message RoyaltyPayment {
+  // The author who was paid.
+  string user_id = 1;
+  // Coins paid to this author.
+  int64 amount = 2;
+}

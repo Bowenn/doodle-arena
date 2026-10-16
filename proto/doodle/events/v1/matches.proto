@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+import "doodle/game/v1/game.proto";
+import "google/protobuf/timestamp.proto";
+
+// MatchEvent is the only message type on the topic game.matches.v1 (key: room_id).
+// Produced by the game server; consumed by the marketplace (rewards) and the lobby
+// (leaderboard).
+message MatchEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // A match ended with final placements.
+    MatchFinished match_finished = 1;
+  }
+}
+
+// MatchFinished says a match ended. It carries placements but no coin amounts: the
+// marketplace decides rewards (design doc D6), with the idempotency key
+// "reward:<match_id>:<user_id>".
+message MatchFinished {
+  // Event metadata.
+  EventMeta meta = 1;
+  // Unique id of the match. Consumers deduplicate on it.
+  string match_id = 2;
+  // The room the match was played in.
+  string room_id = 3;
+  // Rule set of the match.
+  doodle.game.v1.GameMode mode = 4;
+  // When the first round started, by the game server's clock.
+  google.protobuf.Timestamp started_at = 5;
+  // When the match ended, by the game server's clock.
+  google.protobuf.Timestamp ended_at = 6;
+  // One entry per player who finished the match, ordered by placement.
+  repeated PlayerResult results = 7;
+}
+
+// PlayerResult is one player's final result in a match.
+message PlayerResult {
+  // The player.
+  string user_id = 1;
+  // Total points scored in the match.
+  uint32 score = 2;
+  // Final placement, starting at 1. Players with equal scores share a placement.
+  uint32 placement = 3;
+}

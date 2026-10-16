@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+import "google/protobuf/timestamp.proto";
+
+// RoundEvent is the only message type on the topic game.rounds.v1 (key: room_id).
+// Produced by the game server; consumed by assets.
+message RoundEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // A round ended and its stroke log is stored.
+    RoundFinished round_finished = 1;
+  }
+}
+
+// RoundFinished says a round ended. The strokes are not in the event: they are in the
+// round-logs bucket at stroke_log_key (claim check, design doc D13). Assets turns the round
+// into a drawing; its unique (match_id, round_no) makes a replayed event a no-op.
+message RoundFinished {
+  // Event metadata.
+  EventMeta meta = 1;
+  // The match this round belongs to.
+  string match_id = 2;
+  // The room the match was played in.
+  string room_id = 3;
+  // Round number within the match, starting at 1.
+  uint32 round_no = 4;
+  // The secret word. Safe to publish: the round is over.
+  string word = 5;
+  // Players who drew this round, in drawing order. The first one becomes the drawing's
+  // initial owner; all of them are authors for royalties.
+  repeated string drawer_ids = 6;
+  // Object key of the gzipped doodle.game.v1.StrokeLog in the round-logs bucket,
+  // for example "<match_id>/<round_no>.binpb.gz".
+  string stroke_log_key = 7;
+  // Number of strokes in the log, so consumers can sanity-check what they fetch.
+  uint32 stroke_count = 8;
+  // Canvas width the drawers used, in pixels. Points are normalized to 0-10000, so this only
+  // gives the aspect ratio for rendering.
+  uint32 canvas_width = 9;
+  // Canvas height the drawers used, in pixels.
+  uint32 canvas_height = 10;
+  // When the round ended, by the game server's clock.
+  google.protobuf.Timestamp ended_at = 11;
+}

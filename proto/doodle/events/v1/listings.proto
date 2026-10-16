@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+import "google/protobuf/timestamp.proto";
+
+// ListingEvent is the only message type on the topic market.listings.v1 (key: drawing_id).
+// Produced by the marketplace through its transactional outbox; consumed by assets for the
+// search index (Stage 6). A sale closes a listing too, but that arrives as SaleCompleted on
+// market.sales.v1.
+message ListingEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // A drawing was listed for sale.
+    ListingCreated listing_created = 1;
+    // The owner withdrew a listing.
+    ListingCancelled listing_cancelled = 2;
+  }
+}
+
+// ListingCreated says an owner listed a drawing. A drawing has at most one active listing.
+message ListingCreated {
+  // Event metadata.
+  EventMeta meta = 1;
+  // Unique id of the listing.
+  string listing_id = 2;
+  // The drawing for sale.
+  string drawing_id = 3;
+  // The owner who listed it.
+  string seller_id = 4;
+  // Asking price in coins (integer, never fractional).
+  int64 price = 5;
+  // When the listing was created, by the marketplace's clock.
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// ListingCancelled says the owner withdrew a listing before it sold.
+message ListingCancelled {
+  // Event metadata.
+  EventMeta meta = 1;
+  // The listing that was cancelled.
+  string listing_id = 2;
+  // The drawing it was for.
+  string drawing_id = 3;
+  // The owner who cancelled it.
+  string seller_id = 4;
+  // When it was cancelled, by the marketplace's clock.
+  google.protobuf.Timestamp cancelled_at = 5;
+}

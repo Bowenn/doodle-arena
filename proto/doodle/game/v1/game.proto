@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package doodle.game.v1;
+
+// GameMode is the rule set a room plays with. Used by the lobby, the game server and the
+// MatchFinished event.
+enum GameMode {
+  // Not set. Treat as an error.
+  GAME_MODE_UNSPECIFIED = 0;
+  // One drawer per round (two when the room has four or more players); everyone else guesses.
+  GAME_MODE_CLASSIC = 1;
+}
