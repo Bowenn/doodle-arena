@@ -290,3 +290,9 @@ main.room {
 .notice.bad {
   color: #e03131;
 }
+
+h2 button {
+  font-size: 0.875rem;
+  font-weight: normal;
+  vertical-align: middle;
+}

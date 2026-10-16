@@ -38,7 +38,7 @@ export function Room({ roomId, onLeave }: Props) {
           {status.reason}
         </p>
       )}
-      {state ? <RoomBody state={state} send={send} welcomes={welcomes} /> : <p>Joining…</p>}
+      {state ? <RoomBody state={state} send={send} welcomes={welcomes} live={status.kind === 'open'} /> : <p>Joining…</p>}
     </main>
   )
 }
@@ -75,11 +75,17 @@ function StatusLine({ status, rtt }: { status: ConnectionStatus; rtt: number | n
   )
 }
 
-type BodyProps = { state: RoomState; send: (m: ClientMessage) => boolean; welcomes: number }
+type BodyProps = {
+  state: RoomState
+  send: (m: ClientMessage) => boolean
+  welcomes: number
+  /** Whether the socket is up; a stale room can't be drawn on or guessed in. */
+  live: boolean
+}
 
-function RoomBody({ state, send, welcomes }: BodyProps) {
+function RoomBody({ state, send, welcomes, live }: BodyProps) {
   const drawing = state.phase === 'drawing'
-  const canDraw = drawing && isDrawer(state)
+  const canDraw = live && drawing && isDrawer(state)
   return (
     <div className="room-grid">
       <section className="stage">
@@ -89,7 +95,7 @@ function RoomBody({ state, send, welcomes }: BodyProps) {
       <aside className="side">
         <Scoreboard state={state} />
         <Feed state={state} />
-        <GuessBox state={state} send={send} />
+        <GuessBox state={state} send={send} live={live} />
       </aside>
     </div>
   )
@@ -171,7 +177,9 @@ function PhaseBar({ state, send }: { state: RoomState; send: (m: ClientMessage) 
 
   return (
     <div className="phase-bar">
-      <span className="round">{state.roundNo > 0 && `Round ${state.roundNo}`}</span>
+      <span className="round">
+        {state.roundNo > 0 && state.phase !== 'match_end' && `Round ${state.roundNo}`}
+      </span>
       {body}
       <Timer deadline={state.deadline} />
     </div>
@@ -244,18 +252,20 @@ function Scoreboard({ state }: { state: RoomState }) {
 }
 
 function Feed({ state }: { state: RoomState }) {
-  const end = useRef<HTMLLIElement>(null)
+  const list = useRef<HTMLUListElement>(null)
   useEffect(() => {
-    end.current?.scrollIntoView?.({ block: 'nearest' })
+    // Scroll the list itself: scrollIntoView would also scroll the page, which moves the
+    // canvas under the drawer's pointer in the middle of a stroke.
+    const el = list.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [state.feed.length])
   return (
-    <ul className="feed" aria-label="Chat">
+    <ul className="feed" aria-label="Chat" ref={list}>
       {state.feed.map((item, i) => (
         <li key={i} className={`feed-${item.kind}`}>
           {feedText(state, item)}
         </li>
       ))}
-      <li ref={end} aria-hidden="true" />
     </ul>
   )
 }
@@ -271,13 +281,16 @@ function feedText(state: RoomState, item: FeedItem): string {
   }
 }
 
-function GuessBox({ state, send }: { state: RoomState; send: (m: ClientMessage) => boolean }) {
+type GuessBoxProps = { state: RoomState; send: (m: ClientMessage) => boolean; live: boolean }
+
+function GuessBox({ state, send, live }: GuessBoxProps) {
   const [text, setText] = useState('')
   const me = state.players.find((p) => p.user_id === state.me)
   const drawing = state.phase === 'drawing'
   // The server refuses these (cannot_chat_now); the box says so up front.
-  const blocked =
+  const knowsWord =
     (drawing && (isDrawer(state) || !!me?.guessed)) || (state.phase === 'choosing' && isDrawer(state))
+  const blocked = knowsWord || !live
   const notice = useNotice(state)
 
   function submit(e: FormEvent) {
@@ -296,7 +309,7 @@ function GuessBox({ state, send }: { state: RoomState; send: (m: ClientMessage) 
       )}
       <input
         aria-label={drawing ? 'Guess' : 'Chat'}
-        placeholder={blocked ? 'You know the word' : drawing ? 'Type your guess' : 'Chat'}
+        placeholder={!live ? 'Not connected' : knowsWord ? 'You know the word' : drawing ? 'Type your guess' : 'Chat'}
         value={text}
         maxLength={MAX_GUESS_CHARS}
         disabled={blocked}

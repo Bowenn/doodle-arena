@@ -155,9 +155,17 @@ describe('Room', () => {
     expect(screen.getByText('Bob +100, Ada +10')).toBeTruthy()
   })
 
+  it('takes the drawing tools away when the connection ends', async () => {
+    const ws = await joined('a', view({ phase: 'drawing', drawer_ids: ['a'], round_no: 1, word_length: 3 }))
+    expect(screen.getByRole('toolbar')).toBeTruthy()
+    act(() => ws.onclose?.({ code: 4004 }))
+    expect(screen.queryByRole('toolbar')).toBeNull()
+  })
+
   it('shows why the connection ended', async () => {
     const ws = await joined('b')
     act(() => ws.onclose?.({ code: 4003 }))
     expect(screen.getByRole('alert').textContent).toBe('This room is full.')
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Chat' }).disabled).toBe(true)
   })
 })
