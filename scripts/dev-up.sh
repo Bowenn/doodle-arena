@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the local stack. Creates .env from .env.example on the first run, adds variables that
-# were added to .env.example since, and creates the local JWT signing key.
+# were added to .env.example since, and creates the local JWT and join-ticket signing keys.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -41,6 +41,7 @@ if grep -q '=change-me$' .env; then
 fi
 
 ./scripts/gen-jwt-key.sh
+./scripts/gen-ticket-key.sh
 
 # --renew-anon-volumes refreshes web's node_modules volume after a dependency change.
 # Data lives in named volumes, which it never touches.

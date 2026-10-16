@@ -53,8 +53,19 @@ services:
       SERVICE_INSTANCE_ID: lobby-1
       OTEL_SERVICE_NAME: lobby
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=lobby-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      # Internal gRPC port for game-server heartbeats; the gateway never routes it.
+      GRPC_PORT: "9090"
+      REDIS_ADDR: redis:6379
+      # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
+      AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
+      JWT_ISSUER: http://localhost:8080/api/auth
+      TICKET_PRIVATE_KEY_PATH: /run/secrets/ticket-private-key
+    secrets:
+      - ticket-private-key
     depends_on:
       otel-lgtm:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully
@@ -72,6 +83,11 @@ services:
       SERVICE_INSTANCE_ID: game-server-1
       OTEL_SERVICE_NAME: game-server
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=game-server-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      # Heartbeats go to the lobby; the lobby calls back on this server's GRPC_PORT.
+      GRPC_PORT: "9090"
+      LOBBY_GRPC_ADDR: lobby:9090
+      CONTROL_ADDRESS: game-server-1:9090
+      WS_ADDRESS: /ws/game-server-1
     depends_on:
       otel-lgtm:
         condition: service_healthy
@@ -92,6 +108,11 @@ services:
       SERVICE_INSTANCE_ID: game-server-2
       OTEL_SERVICE_NAME: game-server
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=game-server-2,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      # Heartbeats go to the lobby; the lobby calls back on this server's GRPC_PORT.
+      GRPC_PORT: "9090"
+      LOBBY_GRPC_ADDR: lobby:9090
+      CONTROL_ADDRESS: game-server-2:9090
+      WS_ADDRESS: /ws/game-server-2
     depends_on:
       otel-lgtm:
         condition: service_healthy
@@ -401,3 +422,6 @@ secrets:
   # Created by scripts/gen-jwt-key.sh (make up runs it). Local development only.
   jwt-private-key:
     file: ../secrets/jwt-private.pem
+  # Created by scripts/gen-ticket-key.sh (make up runs it). Only the lobby gets it (ADR 0005).
+  ticket-private-key:
+    file: ../secrets/ticket-private.pem
