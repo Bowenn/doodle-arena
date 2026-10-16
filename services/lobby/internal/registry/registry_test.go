@@ -18,9 +18,13 @@ func TestMain(m *testing.M) { redistest.Main(m) }
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
-type touched struct{ ids []string }
+type touched struct {
+	server string
+	ids    []string
+}
 
-func (t *touched) Touch(_ context.Context, ids []string) error {
+func (t *touched) Touch(_ context.Context, server string, ids []string) error {
+	t.server = server
 	t.ids = append(t.ids, ids...)
 	return nil
 }
@@ -57,7 +61,7 @@ func TestHeartbeatRegistersAndExpires(t *testing.T) {
 	if !slices.Equal(got[0].Rooms, want) {
 		t.Fatalf("rooms = %+v, want %+v", got[0].Rooms, want)
 	}
-	if !slices.Equal(rooms.ids, []string{"r1", "r2"}) {
+	if rooms.server != "game-server-1" || !slices.Equal(rooms.ids, []string{"r1", "r2"}) {
 		t.Fatalf("touched rooms = %v", rooms.ids)
 	}
 
@@ -132,7 +136,16 @@ func TestHeartbeatValidation(t *testing.T) {
 		{"no server id", &lobbyv1.HeartbeatRequest{WsAddress: "/ws", ControlAddress: "x:1"}},
 		{"server id with a key separator", &lobbyv1.HeartbeatRequest{ServerId: "a:b", WsAddress: "/ws", ControlAddress: "x:1"}},
 		{"no ws address", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", ControlAddress: "x:1"}},
+		{"ws address on another host", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "wss://evil.example/ws", ControlAddress: "x:1"}},
+		{"ws address outside /ws", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "/api/auth", ControlAddress: "x:1"}},
+		{"ws address with a protocol-relative URL", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "//evil.example/ws", ControlAddress: "x:1"}},
 		{"no control address", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "/ws"}},
+		{"control address without a port", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "/ws", ControlAddress: "game-server-1"}},
+		{"control address with a URL", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "/ws", ControlAddress: "http://x:1"}},
+		{"bad room id", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "/ws", ControlAddress: "x:1",
+			Rooms: []*lobbyv1.RoomStatus{{RoomId: "lobby:servers"}}}},
+		{"bad legacy room id", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "/ws", ControlAddress: "x:1",
+			RoomIds: []string{"../x"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

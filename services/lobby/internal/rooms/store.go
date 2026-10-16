@@ -93,12 +93,30 @@ func (s *Store) Get(ctx context.Context, id string) (Room, error) {
 	return r, nil
 }
 
-// Touch restarts the expiry of rooms that a game server still reports. Ids the lobby doesn't
-// know are ignored (EXPIRE on a missing key does nothing).
-func (s *Store) Touch(ctx context.Context, ids []string) error {
+// touchScript restarts a room's expiry only if the reporting server is the room's owner, so a
+// confused (or hostile) game server can't keep other servers' rooms alive. One key per call
+// keeps it valid on Redis Cluster.
+var touchScript = redis.NewScript(`
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local ok, room = pcall(cjson.decode, raw)
+if ok and room.server_id == ARGV[1] then
+  return redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+`)
+
+// Touch restarts the expiry of the rooms that serverID still reports and owns. Ids the lobby
+// doesn't know, or that another server owns, are ignored.
+func (s *Store) Touch(ctx context.Context, serverID string, ids []string) error {
+	ttl := int(RoomTTL / time.Second)
+	// Load the script once, so the pipeline can use EVALSHA.
+	if err := touchScript.Load(ctx, s.rdb).Err(); err != nil {
+		return fmt.Errorf("load touch script: %w", err)
+	}
 	_, err := s.rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
 		for _, id := range ids {
-			p.Expire(ctx, roomKey(id), RoomTTL)
+			touchScript.EvalSha(ctx, p, []string{roomKey(id)}, serverID, ttl)
 		}
 		return nil
 	})

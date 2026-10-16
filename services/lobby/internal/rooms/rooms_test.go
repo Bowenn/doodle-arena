@@ -470,3 +470,30 @@ func TestSettingsResolve(t *testing.T) {
 		})
 	}
 }
+
+// A heartbeat keeps a room alive only if it comes from the room's own server.
+func TestTouchOnlyRefreshesTheOwnersRooms(t *testing.T) {
+	e := newEnv(t)
+	rdb := e.store.rdb
+	ctx := t.Context()
+	if err := e.store.Save(ctx, Room{ID: "r1", ServerID: "gs-1", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	rdb.Expire(ctx, roomKey("r1"), 5*time.Second)
+
+	if err := e.store.Touch(ctx, "gs-2", []string{"r1", "unknown"}); err != nil {
+		t.Fatal(err)
+	}
+	if ttl := rdb.TTL(ctx, roomKey("r1")).Val(); ttl > 5*time.Second {
+		t.Fatalf("another server refreshed the room: ttl = %v", ttl)
+	}
+	if err := e.store.Touch(ctx, "gs-1", []string{"r1"}); err != nil {
+		t.Fatal(err)
+	}
+	if ttl := rdb.TTL(ctx, roomKey("r1")).Val(); ttl < RoomTTL-time.Minute {
+		t.Fatalf("the owner didn't refresh the room: ttl = %v", ttl)
+	}
+	if rdb.Exists(ctx, roomKey("unknown")).Val() != 0 {
+		t.Fatal("touch created a room")
+	}
+}

@@ -3,7 +3,9 @@ package registry
 import (
 	"context"
 	"log/slog"
+	"net"
 	"regexp"
+	"strconv"
 	"time"
 
 	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
@@ -13,7 +15,7 @@ import (
 
 // RoomToucher keeps the lobby's records of the rooms a server still hosts from expiring.
 type RoomToucher interface {
-	Touch(ctx context.Context, roomIDs []string) error
+	Touch(ctx context.Context, serverID string, roomIDs []string) error
 }
 
 // GRPCServer serves doodle.lobby.v1.RegistryService on the lobby's internal gRPC port.
@@ -30,15 +32,45 @@ func NewGRPCServer(reg *Registry, rooms RoomToucher, now func() time.Time, log *
 	return &GRPCServer{reg: reg, rooms: rooms, now: now, log: log}
 }
 
-var serverIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+var (
+	serverIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	// ws_address is a path on the gateway, never a full URL, so a bogus heartbeat can't send
+	// players to another host (the join response hands it to browsers).
+	wsAddressPattern = regexp.MustCompile(`^/ws(/[a-z0-9-]{1,63}){0,4}$`)
+	hostPattern      = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`)
+	roomIDPattern    = regexp.MustCompile(`^[a-z0-9]{1,64}$`)
+)
+
+// validControlAddress accepts host:port with a DNS name or IPv4 address.
+func validControlAddress(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || !hostPattern.MatchString(host) {
+		return false
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n > 0 && n < 65536
+}
 
 // Heartbeat records that a game server is alive, with its load and rooms.
 func (g *GRPCServer) Heartbeat(ctx context.Context, req *lobbyv1.HeartbeatRequest) (*lobbyv1.HeartbeatResponse, error) {
 	if !serverIDPattern.MatchString(req.GetServerId()) {
 		return nil, status.Error(codes.InvalidArgument, "server_id must be 1-63 lowercase letters, digits or dashes")
 	}
-	if req.GetWsAddress() == "" || req.GetControlAddress() == "" {
-		return nil, status.Error(codes.InvalidArgument, "ws_address and control_address are required")
+	if !wsAddressPattern.MatchString(req.GetWsAddress()) {
+		return nil, status.Error(codes.InvalidArgument, "ws_address must be a gateway path under /ws")
+	}
+	if !validControlAddress(req.GetControlAddress()) {
+		return nil, status.Error(codes.InvalidArgument, "control_address must be host:port")
+	}
+	for _, r := range req.GetRooms() {
+		if !roomIDPattern.MatchString(r.GetRoomId()) {
+			return nil, status.Error(codes.InvalidArgument, "room ids are 1-64 lowercase letters or digits")
+		}
+	}
+	for _, id := range req.GetRoomIds() {
+		if !roomIDPattern.MatchString(id) {
+			return nil, status.Error(codes.InvalidArgument, "room ids are 1-64 lowercase letters or digits")
+		}
 	}
 
 	s := Server{
@@ -77,7 +109,7 @@ func (g *GRPCServer) Heartbeat(ctx context.Context, req *lobbyv1.HeartbeatReques
 		for i, r := range s.Rooms {
 			ids[i] = r.ID
 		}
-		if err := g.rooms.Touch(ctx, ids); err != nil {
+		if err := g.rooms.Touch(ctx, s.ID, ids); err != nil {
 			// The heartbeat itself counted; the rooms are refreshed by the next one.
 			g.log.WarnContext(ctx, "rooms not refreshed", "server_id", s.ID, "err", err)
 		}
