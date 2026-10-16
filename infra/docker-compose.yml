@@ -363,8 +363,9 @@ services:
     # Collector, Prometheus, Tempo, Loki and Grafana in one container (development only).
     image: grafana/otel-lgtm:0.36.0
     environment:
-      # CI sets this to see the collector's own logs (for example a failing export to Loki).
-      ENABLE_LOGS_OTELCOL: ${OTEL_LGTM_COLLECTOR_LOGS:-false}
+      # CI sets this to see the collector's and Loki's own logs (otel-lgtm hides them by default).
+      ENABLE_LOGS_OTELCOL: ${OTEL_LGTM_COMPONENT_LOGS:-false}
+      ENABLE_LOGS_LOKI: ${OTEL_LGTM_COMPONENT_LOGS:-false}
     # The image's own check (every backend ready, Loki included), run more often than its 30 s
     # default: every service waits for it, so records never queue up behind a starting Loki.
     healthcheck:
