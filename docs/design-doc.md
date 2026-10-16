@@ -115,7 +115,7 @@ Owns the Redis key prefixes `room:*` and `rl:*`, and the bucket `round-logs`.
 - Classic mode: one drawer, or two drawers sharing a canvas when the room has four or more players. Everyone else guesses.
 - Server-authoritative timers, scoring, hint reveals and answer checks. The first correct guess is the first one the room actor processes.
 - A per-player token bucket limits guesses and chat.
-- At the end of a round, it uploads the compressed stroke log to `round-logs` and publishes `RoundFinished` with the object key. At the end of a match, it publishes `MatchFinished` with placements but no coin amounts, because the marketplace decides rewards.
+- At the end of a round, it uploads the stroke log (a gzipped `doodle.game.v1.StrokeLog` at `<match_id>/<round_no>.binpb.gz`) to `round-logs` and publishes `RoundFinished` with the object key. At the end of a match, it publishes `MatchFinished` with placements but no coin amounts, because the marketplace decides rewards.
 - At least two instances run locally, so failover can be tested. In Stage 6 the same binary also runs in a relay role for the live-stream room.
 
 ### 4.5 Assets (Django + Celery)
@@ -193,16 +193,16 @@ Locally there is one Postgres server with four databases and one database user p
 
 ## 6. Contracts
 
-Contracts live in `proto/` and change only with human approval (see `.claude/rules/contracts.md`).
+Contracts live in `proto/` and change only with human approval (see `.claude/rules/contracts.md`). `proto/README.md` explains the layout, code generation (`make proto`) and where generated code lands for each language.
 
 ### 6.1 gRPC
 
 | Service | Served by | Called by | Methods |
 |---|---|---|---|
-| `doodle.game.v1.Control` | Each game server | Lobby | `AllocateRoom(room_id, mode, settings)`, `DrainServer()` before a deploy |
-| `doodle.lobby.v1.Registry` | Lobby | Game servers | `Heartbeat(server_id, ws_address, rooms, sockets)` every 2 seconds |
+| `doodle.game.v1.ControlService` | Each game server | Lobby | `AllocateRoom(room_id, mode, settings)` (idempotent per `room_id`), `DrainServer()` before a deploy |
+| `doodle.lobby.v1.RegistryService` | Lobby | Game servers | `Heartbeat(server_id, ws_address, room_ids, sockets, draining)` every 2 seconds |
 
-Every call has a deadline. Stage 7 may add `doodle.ai.v1` for the AI guesser.
+Every call has a deadline. `AllocateRoom` returns `RESOURCE_EXHAUSTED` when the server is full and `FAILED_PRECONDITION` while it drains. Stage 7 may add `doodle.ai.v1` for the AI guesser.
 
 ### 6.2 Kafka event catalog
 
@@ -228,7 +228,7 @@ Key payload fields:
 - `SaleCompleted`: `sale_id`, `listing_id`, `drawing_id`, `seller_id`, `buyer_id`, `price`, `royalties[]` with `user_id` and `amount`, `completed_at`.
 - `CoinsCredited`: `user_id`, `amount`, `reason` (`stripe_purchase` or `reward`), `reference`.
 
-`RoundFinished` uses the claim-check pattern. A round's stroke log can be large, so the event carries only the object key, and the log itself lives in the `round-logs` bucket. This also avoids an ordering problem: if strokes travelled on their own topic, the assets service couldn't know when it had all of them.
+`RoundFinished` uses the claim-check pattern. A round's stroke log can be large, so the event carries only the object key, and the log itself lives in the `round-logs` bucket. This also avoids an ordering problem: if strokes travelled on their own topic, the assets service couldn't know when it had all of them. The object is a gzip-compressed `doodle.game.v1.StrokeLog` protobuf, so its format is versioned and checked by Buf like every other contract.
 
 ### 6.3 REST API sketch
 
