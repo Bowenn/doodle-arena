@@ -89,8 +89,10 @@ Owns the Postgres database `auth`.
 
 - Google OAuth 2.0 authorization code flow, with PKCE and a `state` parameter. It requests only the `openid profile` scopes, so Google never sends an email address.
 - Issues a short-lived JWT access token (about 15 minutes) signed with RS256, with `aud` set to `doodle-api`. Public keys are served at `/api/auth/.well-known/jwks.json`.
-- Issues an opaque refresh token in an HttpOnly cookie. Refresh tokens are stored hashed and rotated on every use. Reusing an old refresh token revokes the whole token family.
-- JWT claims: `sub` (user id), `roles` (`player`, `moderator`, `admin`), `iss`, `aud`, `iat`, `exp`.
+- Issues an opaque refresh token (32 random bytes, 30 days) in the cookie `da_refresh`: HttpOnly, SameSite=Strict, Path=`/api/auth`, and Secure in AWS. Refresh tokens are stored as SHA-256 hashes and rotated on every use. Every login starts a family. Reusing an already-used refresh token revokes the whole family.
+- `/refresh` locks the presented token (`SELECT … FOR UPDATE`), so concurrent uses of one token serialize: one wins, and the rest count as reuse. The web app therefore sends at most one refresh at a time (single-flight).
+- `/refresh` and `/logout` are cookie-authenticated POSTs. Besides SameSite=Strict, they refuse any `Origin` other than the web app's.
+- JWT claims: `sub` (user id), `roles` (`player`, `moderator`, `admin`), `iss`, `aud`, `iat`, `exp`, `jti`. The header carries `kid`, the RFC 7638 thumbprint of the signing key.
 - Stores the minimum user data: Google subject id, display name, avatar URL and roles. No email address.
 - API keys (Stage 4) for developers who register webhooks or call the public read API. Format `da_<prefix>_<secret>`, stored as the prefix plus a hash, with scopes and `last_used_at`. Other services verify keys through an internal endpoint and cache the result briefly.
 - Internal endpoints (such as `/internal/api-keys/verify`) are served on a separate internal port that the gateway never routes.
@@ -292,9 +294,10 @@ Server to client, private messages (no `seq`, never stored in the shared log): `
 
 ### 7.1 Login
 
-1. The browser opens `/api/auth/google/login` and is redirected to Google.
-2. Google redirects back to the callback. Auth creates or updates the user, sets the refresh cookie, and redirects to the web app.
-3. The web app calls `/api/auth/refresh` to get an access token and keeps it in memory.
+1. The browser opens `/api/auth/google/login?return_to=/path`. Auth creates a random `state`, an OIDC `nonce` and a PKCE verifier. It stores them in `da_oauth`: an HMAC-signed, HttpOnly, SameSite=Lax cookie that lasts 10 minutes and is scoped to the callback path. Then it redirects to Google with the S256 code challenge. `return_to` must be a local path.
+2. Google redirects back to `/api/auth/google/callback`. Auth checks the cookie and that `state` matches it, which binds the login to this browser and stops login CSRF. It exchanges the code with the verifier, then verifies Google's ID token: signature, `iss`, `aud`, `exp` and `nonce`.
+3. Auth creates or updates the user by Google subject id, starts a refresh-token family, sets `da_refresh`, clears `da_oauth`, and redirects to `return_to`.
+4. The web app calls `/api/auth/refresh` (single-flight) to get an access token, keeps it in memory only, and refreshes again a minute before it expires.
 
 ### 7.2 Create and join a room
 
