@@ -1,0 +1,220 @@
+// Package rooms creates rooms on game servers, lists public rooms and hands out join tickets
+// (design doc, sections 4.3 and 7.2).
+//
+// Redis keys (the lobby owns lobby:*):
+//
+//	lobby:room:{room_id}  string, the room as JSON. Expires RoomTTL after the owning game server
+//	                      last reported it, so finished rooms disappear on their own.
+//	lobby:rooms:public    sorted set of public room ids, scored by creation time (ms)
+package rooms
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+// RoomTTL is how long a room record outlives the last heartbeat that reported it.
+const RoomTTL = 10 * time.Minute
+
+const publicKey = "lobby:rooms:public"
+
+func roomKey(id string) string { return "lobby:room:" + id }
+
+// Settings are the host's choices for a room (design doc, section 7.3).
+type Settings struct {
+	MaxPlayers    uint32 `json:"max_players"`
+	ChooseSeconds uint32 `json:"choose_seconds"`
+	DrawSeconds   uint32 `json:"draw_seconds"`
+	WordOptions   uint32 `json:"word_options"`
+}
+
+// Room is the lobby's record of a room.
+type Room struct {
+	ID        string    `json:"id"`
+	HostID    string    `json:"host_id"`
+	Mode      string    `json:"mode"`
+	Public    bool      `json:"public"`
+	Settings  Settings  `json:"settings"`
+	ServerID  string    `json:"server_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ErrRoomNotFound means there is no such room, or it has ended.
+var ErrRoomNotFound = errors.New("room not found")
+
+// Store keeps rooms in Redis.
+type Store struct {
+	rdb redis.UniversalClient
+}
+
+// NewStore returns a room store.
+func NewStore(rdb redis.UniversalClient) *Store { return &Store{rdb: rdb} }
+
+// Save writes a room and, if it is public, adds it to the public list.
+func (s *Store) Save(ctx context.Context, r Room) error {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Errorf("encode room: %w", err)
+	}
+	_, err = s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		p.Set(ctx, roomKey(r.ID), data, RoomTTL)
+		if r.Public {
+			p.ZAdd(ctx, publicKey, redis.Z{Score: float64(r.CreatedAt.UnixMilli()), Member: r.ID})
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("save room %s: %w", r.ID, err)
+	}
+	return nil
+}
+
+// Get returns one room.
+func (s *Store) Get(ctx context.Context, id string) (Room, error) {
+	raw, err := s.rdb.Get(ctx, roomKey(id)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return Room{}, ErrRoomNotFound
+	}
+	if err != nil {
+		return Room{}, fmt.Errorf("read room %s: %w", id, err)
+	}
+	var r Room
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return Room{}, fmt.Errorf("decode room %s: %w", id, err)
+	}
+	return r, nil
+}
+
+// Touch restarts the expiry of rooms that a game server still reports. Ids the lobby doesn't
+// know are ignored (EXPIRE on a missing key does nothing).
+func (s *Store) Touch(ctx context.Context, ids []string) error {
+	_, err := s.rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
+		for _, id := range ids {
+			p.Expire(ctx, roomKey(id), RoomTTL)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("touch rooms: %w", err)
+	}
+	return nil
+}
+
+// Remove deletes a room that has ended.
+func (s *Store) Remove(ctx context.Context, id string) error {
+	_, err := s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		p.Del(ctx, roomKey(id))
+		p.ZRem(ctx, publicKey, id)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("remove room %s: %w", id, err)
+	}
+	return nil
+}
+
+// Cursor marks where a page of public rooms ended: the last room's score and id.
+type Cursor struct {
+	Score int64
+	ID    string
+}
+
+// String encodes the cursor for clients; it is opaque to them.
+func (c Cursor) String() string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(c.Score, 10) + "." + c.ID))
+}
+
+// ParseCursor decodes a cursor from String.
+func ParseCursor(s string) (Cursor, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return Cursor{}, fmt.Errorf("bad cursor: %w", err)
+	}
+	score, id, ok := strings.Cut(string(raw), ".")
+	if !ok || id == "" {
+		return Cursor{}, errors.New("bad cursor")
+	}
+	n, err := strconv.ParseInt(score, 10, 64)
+	if err != nil {
+		return Cursor{}, fmt.Errorf("bad cursor: %w", err)
+	}
+	return Cursor{Score: n, ID: id}, nil
+}
+
+// tieSlack is how many extra entries a page reads, to skip rooms created in the same
+// millisecond as the cursor's room that the previous page already returned.
+const tieSlack = 16
+
+// PublicPage returns up to n public rooms, newest first, after the cursor (nil for the first
+// page). next is nil when there are no more rooms. Ids whose record has expired are removed
+// from the list on the way.
+func (s *Store) PublicPage(ctx context.Context, after *Cursor, n int) (rooms []Room, next *Cursor, err error) {
+	maxScore := "+inf"
+	if after != nil {
+		maxScore = strconv.FormatInt(after.Score, 10)
+	}
+	entries, err := s.rdb.ZRangeArgsWithScores(ctx, redis.ZRangeArgs{
+		Key: publicKey, Start: maxScore, Stop: "-inf", ByScore: true, Rev: true, Count: int64(n + tieSlack),
+	}).Result()
+	if err != nil {
+		return nil, nil, fmt.Errorf("list public rooms: %w", err)
+	}
+	// With equal scores, Redis orders a reverse range by member, descending. Skip everything
+	// up to and including the cursor's room.
+	var ids []string
+	var scores []int64
+	for _, e := range entries {
+		id, _ := e.Member.(string)
+		score := int64(e.Score)
+		if after != nil && score == after.Score && id >= after.ID {
+			continue
+		}
+		if len(ids) == n {
+			break
+		}
+		ids = append(ids, id)
+		scores = append(scores, score)
+	}
+	if len(ids) == 0 {
+		return nil, nil, nil
+	}
+	if len(ids) == n {
+		next = &Cursor{Score: scores[n-1], ID: ids[n-1]}
+	}
+
+	keys := make([]string, len(ids))
+	for i, id := range ids {
+		keys[i] = roomKey(id)
+	}
+	vals, err := s.rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read public rooms: %w", err)
+	}
+	var gone []any
+	for i, v := range vals {
+		raw, ok := v.(string)
+		if !ok {
+			gone = append(gone, ids[i])
+			continue
+		}
+		var r Room
+		if err := json.Unmarshal([]byte(raw), &r); err != nil {
+			return nil, nil, fmt.Errorf("decode room %s: %w", ids[i], err)
+		}
+		rooms = append(rooms, r)
+	}
+	if len(gone) > 0 {
+		if err := s.rdb.ZRem(ctx, publicKey, gone...).Err(); err != nil {
+			return nil, nil, fmt.Errorf("forget expired rooms: %w", err)
+		}
+	}
+	return rooms, next, nil
+}
