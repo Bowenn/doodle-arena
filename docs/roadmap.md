@@ -28,7 +28,7 @@ Tracks:
 
 ## Stage 1: Foundations (both tracks, Day 1)
 
-- [ ] **1.1 Repo skeleton and local stack**
+- [x] **1.1 Repo skeleton and local stack**
   - Monorepo layout from `CLAUDE.md`, plus `.gitignore`, `.env.example`, a `Makefile` and `scripts/dev-up.sh`.
   - Docker Compose with Postgres (four databases, one user each), Redis, MongoDB, Kafka in KRaft mode, SeaweedFS with the buckets `round-logs` and `drawings`, and `grafana/otel-lgtm`.
   - A skeleton for every week-1 service, each in its own container with a `/healthz` endpoint.
@@ -53,7 +53,7 @@ Tracks:
 
 **M1 exit criteria**
 
-- [ ] `make up` starts everything, and every service's `/healthz` returns 200 through the gateway.
+- [x] `make up` starts everything, and every service's `/healthz` returns 200 through the gateway (`make smoke`).
 - [ ] Google login works end to end, `/api/auth/me` returns the user, and the refresh-rotation test passes.
 - [ ] `make proto` generates code for all three languages, and CI is green for every service.
 - [ ] The trace and logs of one request are visible together in Grafana.

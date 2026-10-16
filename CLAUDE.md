@@ -48,11 +48,13 @@ docs/            Design doc, roadmap, ADRs, runbooks, interview notes
 
 ## Commands
 
-Create these in Stage 1, then keep this list accurate:
+Keep this list accurate:
 
-- `make up` / `make down`: start or stop the local stack (Docker Compose).
-- `make test` runs every service's tests; `make test s=<service>` runs one.
-- `make lint`, `make proto` (regenerate code from `proto/`), `make seed`, `make logs s=<service>`.
+- `make up` / `make down`: start or stop the local stack (`infra/docker-compose.yml`). The first `make up` creates `.env` with random local passwords.
+- `make smoke`: checks every service's `/healthz` through the gateway (`http://localhost:8080/healthz/<service>`).
+- `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
+- `make lint [s=<service>]`, `make logs s=<service>`, `make ps`.
+- Planned: `make proto` (task 1.2, regenerate code from `proto/`) and `make seed` (later). Don't use them before they exist.
 
 ## Ground rules
 
@@ -102,3 +104,6 @@ Create these in Stage 1, then keep this list accurate:
 - MinIO's community edition is no longer maintained. Use SeaweedFS for S3-compatible storage locally.
 - Prefer official upstream Docker images (`postgres`, `redis`, `mongo`, `apache/kafka`, `grafana/otel-lgtm`, `chrislusf/seaweedfs`), pinned to a version tag.
 - Run Go tests with `-race`: most game-server bugs are concurrency bugs.
+- Local Postgres is published on host port 15432 (not 5432), so it doesn't clash with a Postgres installed on the host.
+- SeaweedFS has no S3 lifecycle API. The 7-day expiry on `round-logs` is a SeaweedFS TTL (`fs.configure`, in `infra/seaweedfs/create-buckets.sh`); in AWS it becomes an S3 lifecycle rule.
+- Go runtime images are distroless (no shell or curl), so the binary checks its own health: `/app healthcheck`.
