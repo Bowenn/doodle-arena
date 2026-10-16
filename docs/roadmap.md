@@ -42,7 +42,7 @@ Tracks:
   - Gateway: every route, WebSocket upgrade headers, coarse `limit_req`.
   - Web: a login page and a "logged in as" header.
   - ADR 0001 is decided (2026-10-15): each service verifies RS256 JWTs itself with `aud = doodle-api`, and the Django admin bridges Google sign-in into a session.
-- [ ] **1.4 CI**
+- [x] **1.4 CI**
   - A GitHub Actions workflow per service with path filters: lint, test and Docker build.
   - `buf lint` and `buf breaking` for `proto/`.
 - [ ] **1.5 Observability baseline**
@@ -55,7 +55,7 @@ Tracks:
 
 - [x] `make up` starts everything, and every service's `/healthz` returns 200 through the gateway (`make smoke`).
 - [x] Google login works end to end, `/api/auth/me` returns the user, and the refresh-rotation test passes (`tests/test_refresh.py::test_refresh_rotation`; live sign-in checked 2026-10-16).
-- [ ] `make proto` generates code for all three languages, and CI is green for every service.
+- [x] `make proto` generates code for all three languages, and CI is green for every service (PR #4: 21/21 checks, 2026-10-16; the stale-code check was shown to fail on a hand-edited file).
 - [ ] The trace and logs of one request are visible together in Grafana.
 - [x] ADR 0001 is Accepted.
 
