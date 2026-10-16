@@ -37,7 +37,7 @@ Tracks:
   - `make proto` generates code for Go, Java and Python. `proto/README.md` explains where it lands.
   - A script that creates the Kafka topics (for example 6 partitions each) at startup.
   - `scripts/fake-events.sh` publishes sample `RoundFinished` and `MatchFinished` events from fixtures.
-- [ ] **1.3 Auth and gateway**
+- [x] **1.3 Auth and gateway**
   - Auth: Google OAuth with PKCE and `state`, the users table (Alembic), JWT signing and JWKS, refresh-token rotation, `/me`, and pytest tests.
   - Gateway: every route, WebSocket upgrade headers, coarse `limit_req`.
   - Web: a login page and a "logged in as" header.
@@ -54,7 +54,7 @@ Tracks:
 **M1 exit criteria**
 
 - [x] `make up` starts everything, and every service's `/healthz` returns 200 through the gateway (`make smoke`).
-- [ ] Google login works end to end, `/api/auth/me` returns the user, and the refresh-rotation test passes.
+- [x] Google login works end to end, `/api/auth/me` returns the user, and the refresh-rotation test passes (`tests/test_refresh.py::test_refresh_rotation`; live sign-in checked 2026-10-16).
 - [ ] `make proto` generates code for all three languages, and CI is green for every service.
 - [ ] The trace and logs of one request are visible together in Grafana.
 - [x] ADR 0001 is Accepted.

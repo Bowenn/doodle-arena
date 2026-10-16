@@ -11,6 +11,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /srv
 COPY pyproject.toml uv.lock .python-version ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
+COPY alembic.ini ./
+COPY migrations ./migrations
 COPY app ./app
 
 RUN useradd --system --uid 10001 app

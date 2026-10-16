@@ -62,6 +62,8 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `game.reconnects` | Counter | `result` = resumed, snapshot, failed | game-server |
 | `game.room.takeovers` | Counter | – | game-server |
 | `game.ws.slow_client_disconnects` | Counter | – | game-server |
+| `auth.logins` | Counter | `result` = success, failed | auth |
+| `auth.refreshes` | Counter | `result` = rotated, reuse_detected, expired, invalid | auth |
 | `lobby.allocations` | Counter | `result` | lobby |
 | `lobby.servers.healthy` | Gauge | – | lobby |
 | `assets.pipeline.duration` | Histogram (ms) | `step` = fetch, render, upload, moderate | assets |
@@ -120,6 +122,7 @@ Starting rules (tune the thresholds after the first load test):
 | ConsumerLagGrowing | Kafka lag growing for 10 minutes for any consumer group | warning |
 | DeadLetters | `notifier.dlq.size > 0` | warning |
 | StripeSignatureFailures | More than 5 invalid signatures in 10 minutes (a wrong secret or forged requests) | warning |
+| RefreshTokenReuse | `auth.refreshes{result=reuse_detected}` above its usual rate for 10 minutes (stolen tokens, or a client that refreshes concurrently) | warning |
 | GameServerDown | `lobby.servers.healthy` below the expected count for 1 minute | critical |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`) | critical |
 
