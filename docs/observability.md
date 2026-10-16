@@ -77,8 +77,8 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `game.ws.slow_client_disconnects` | Counter | – | game-server |
 | `auth.logins` | Counter | `result` = success, failed | auth |
 | `auth.refreshes` | Counter | `result` = rotated, reuse_detected, expired, invalid | auth |
-| `lobby.allocations` | Counter | `result` | lobby |
-| `lobby.servers.healthy` | Gauge | – | lobby |
+| `lobby.allocations` | Counter | `result` = success, no_servers, exhausted (every tried server full or draining), error | lobby |
+| `lobby.servers.healthy` | Gauge | – (game servers whose heartbeat arrived in the last 6 s, draining ones included) | lobby |
 | `assets.pipeline.duration` | Histogram (ms) | `step` = fetch, render, upload, moderate | assets |
 | `assets.jobs.oldest_age` | Gauge (s) | `queue` | assets |
 | `assets.moderation` | Counter | `result` = approved, rejected, retry, manual | assets |

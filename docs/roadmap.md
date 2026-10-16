@@ -61,7 +61,9 @@ Tracks:
 
 ## Stage 2: Game core (Track A, Days 2–3)
 
-- [ ] **2.1 Lobby**: rooms, the game-server registry (gRPC `Heartbeat`), `AllocateRoom`, join tickets, the room list.
+- [x] **2.1 Lobby**: rooms, the game-server registry (gRPC `Heartbeat`), `AllocateRoom`, join tickets, the room list.
+  - ADR 0005 is decided (2026-10-16): Ed25519 join tickets, verify-only public keys on game servers, single-use through Redis `SET NX`.
+  - Game servers send heartbeats and accept rooms through a stub `AllocateRoom`; room actors and ticket checks come in 2.2. Shared JWT fixtures (`fixtures/jwt/`) are used by auth and the lobby.
 - [ ] **2.2 Game server core**: the room actor, WebSocket handling with tickets, the round state machine, word lists, scoring, hints, the per-player token bucket, and the JSON protocol from the design doc.
 - [ ] **2.3 Web room UI**: canvas with batched strokes, guess box, scores and timer.
 - [ ] **2.4 Events out**: the stroke log upload (claim check), `RoundFinished` and `MatchFinished`.
@@ -181,3 +183,5 @@ Record every number you might put on a resume or mention in an interview.
 | Date | What was measured | Result | How it was measured | Link (dashboard, PR, screenshot) |
 |---|---|---|---|---|
 | 2026-10-16 | End-to-end telemetry: one request through the gateway | Trace with gateway and auth spans in Tempo; auth log line with the same trace_id in Loki; all 7 services export metrics | `make telemetry-check` (also runs in CI's stack job), then Grafana Explore: Tempo trace → Related logs | Task 1.5 PR |
+| 2026-10-16 | Dead game server detection (registry) | Stopped `game-server-1` dropped out of the registry 4 s after `docker compose stop` (TTL 6 s after the last 2 s heartbeat); `lobby.servers.healthy` went from 2 to 1 | `docker compose stop game-server-1`, polling `EXISTS lobby:server:game-server-1`, then Prometheus via Grafana | Task 2.1 PR |
+| 2026-10-16 | Game-server registration at cold start | First successful heartbeat about 4 s after start (8 s before capping gRPC's reconnect backoff at 2 s) | Container logs: `grpc listening` to `heartbeat recovered` | Task 2.1 PR |

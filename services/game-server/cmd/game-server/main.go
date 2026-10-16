@@ -1,5 +1,5 @@
 // Command game-server runs a game server: room actors, rounds, guessing and the per-room event log.
-// In task 1.1 it only serves /healthz.
+// Task 2.1: it registers with the lobby and accepts rooms; the game itself arrives in task 2.2.
 package main
 
 import (
@@ -7,33 +7,60 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
+	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/heartbeat"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/server"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/telemetry"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const serviceName = "game-server"
 
 type config struct {
-	port     string
-	version  string
-	instance string
-	logLevel slog.Level
+	port      string
+	grpcPort  string
+	version   string
+	instance  string
+	logLevel  slog.Level
+	lobbyAddr string
+	// How the lobby and clients reach this server; both default from the instance id.
+	wsAddress      string
+	controlAddress string
+	maxRooms       int
 }
 
 func loadConfig() config {
 	host, _ := os.Hostname()
+	instance := envOr("SERVICE_INSTANCE_ID", host)
+	grpcPort := envOr("GRPC_PORT", "9090")
+	maxRooms, err := strconv.Atoi(envOr("MAX_ROOMS", "100"))
+	if err != nil || maxRooms < 1 {
+		maxRooms = 100
+	}
 	return config{
-		port:     envOr("PORT", "8080"),
-		version:  envOr("SERVICE_VERSION", "dev"),
-		instance: envOr("SERVICE_INSTANCE_ID", host),
-		logLevel: logging.ParseLevel(os.Getenv("LOG_LEVEL")),
+		port:           envOr("PORT", "8080"),
+		grpcPort:       grpcPort,
+		version:        envOr("SERVICE_VERSION", "dev"),
+		instance:       instance,
+		logLevel:       logging.ParseLevel(os.Getenv("LOG_LEVEL")),
+		lobbyAddr:      envOr("LOBBY_GRPC_ADDR", "localhost:9090"),
+		wsAddress:      envOr("WS_ADDRESS", "/ws/"+instance),
+		controlAddress: envOr("CONTROL_ADDRESS", instance+":"+grpcPort),
+		maxRooms:       maxRooms,
 	}
 }
 
@@ -84,24 +111,72 @@ func run(cfg config, logger *slog.Logger) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	serveErr := make(chan error, 1)
+	// Internal gRPC port for the lobby's ControlService calls; the gateway never routes it.
+	ctrl := control.New(cfg.instance, cfg.wsAddress, cfg.maxRooms, logger)
+	grpcSrv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	gamev1.RegisterControlServiceServer(grpcSrv, ctrl)
+	lis, err := net.Listen("tcp", ":"+cfg.grpcPort)
+	if err != nil {
+		return fmt.Errorf("grpc listen: %w", err)
+	}
+
+	lobbyConn, err := grpc.NewClient(cfg.lobbyAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		// gRPC's default reconnect backoff grows to 2 minutes. Cap it at the heartbeat interval,
+		// so a restarted lobby sees this server again within a few seconds.
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff:           backoff.Config{BaseDelay: 250 * time.Millisecond, Multiplier: 1.6, Jitter: 0.2, MaxDelay: heartbeat.Interval},
+			MinConnectTimeout: time.Second,
+		}),
+	)
+	if err != nil {
+		return fmt.Errorf("lobby client: %w", err)
+	}
+	defer lobbyConn.Close()
+	sender := heartbeat.NewSender(lobbyv1.NewRegistryServiceClient(lobbyConn), heartbeat.Identity{
+		ServerID: cfg.instance, WSAddress: cfg.wsAddress, ControlAddress: cfg.controlAddress,
+	}, ctrl, heartbeat.Interval, logger)
+	beatCtx, stopBeats := context.WithCancel(context.Background())
+	beatsDone := make(chan struct{})
+	go func() { sender.Run(beatCtx); close(beatsDone) }()
+	defer func() { stopBeats(); <-beatsDone }()
+
+	serveErr := make(chan error, 2)
 	go func() {
 		logger.Info("listening", "addr", srv.Addr, "instance", cfg.instance)
 		serveErr <- srv.ListenAndServe()
 	}()
+	go func() {
+		logger.Info("grpc listening", "addr", lis.Addr().String(), "lobby", cfg.lobbyAddr)
+		if err := grpcSrv.Serve(lis); err != nil {
+			serveErr <- fmt.Errorf("grpc: %w", err)
+		}
+	}()
 
 	select {
 	case err := <-serveErr:
+		grpcSrv.Stop()
+		_ = srv.Close()
 		return fmt.Errorf("serve: %w", err)
 	case <-ctx.Done():
 	}
 
-	// SIGTERM: stop accepting connections, let in-flight requests finish, then exit.
+	// SIGTERM: stop heartbeats (the lobby stops sending rooms here within 6 seconds), stop
+	// accepting connections, let in-flight requests finish, then exit.
 	logger.Info("shutting down")
+	stopBeats()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	stopped := make(chan struct{})
+	go func() { grpcSrv.GracefulStop(); close(stopped) }()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
+	}
+	select {
+	case <-stopped:
+	case <-shutdownCtx.Done():
+		grpcSrv.Stop()
 	}
 	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve: %w", err)

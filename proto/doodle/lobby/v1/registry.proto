@@ -16,11 +16,39 @@ message HeartbeatRequest {
   // Address clients use to reach this server's WebSocket endpoint (ADR 0002).
   string ws_address = 2;
   // Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+  // The same ids as in `rooms`; kept because field 3 is part of the published contract.
   repeated string room_ids = 3;
   // Open WebSocket connections, used as the load figure for least-loaded allocation.
   uint32 sockets = 4;
   // True while the server drains before a deploy; the lobby sends it no new rooms.
   bool draining = 5;
+  // Status of every room this server owns, so the lobby can show player counts and send
+  // quick-play players to a room with space.
+  repeated RoomStatus rooms = 6;
+  // host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+  // for example "game-server-1:9090". Internal only; the gateway never routes it.
+  string control_address = 7;
+}
+
+// RoomStatus is one room as its game server sees it, reported in every heartbeat.
+message RoomStatus {
+  // The room's id, as given in AllocateRoom.
+  string room_id = 1;
+  // Players currently connected to the room.
+  uint32 players = 2;
+  // Where the room is in its lifecycle.
+  RoomPhase phase = 3;
+}
+
+// RoomPhase is the coarse state of a room that the lobby needs; the round state machine itself
+// stays inside the game server.
+enum RoomPhase {
+  // Not reported. The lobby treats the room as waiting.
+  ROOM_PHASE_UNSPECIFIED = 0;
+  // No match is running; quick play prefers these rooms.
+  ROOM_PHASE_WAITING = 1;
+  // A match is running.
+  ROOM_PHASE_PLAYING = 2;
 }
 
 // HeartbeatResponse is empty for now; fields can be added later without breaking callers.

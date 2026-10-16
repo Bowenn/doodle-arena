@@ -21,6 +21,60 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// RoomPhase is the coarse state of a room that the lobby needs; the round state machine itself
+// stays inside the game server.
+type RoomPhase int32
+
+const (
+	// Not reported. The lobby treats the room as waiting.
+	RoomPhase_ROOM_PHASE_UNSPECIFIED RoomPhase = 0
+	// No match is running; quick play prefers these rooms.
+	RoomPhase_ROOM_PHASE_WAITING RoomPhase = 1
+	// A match is running.
+	RoomPhase_ROOM_PHASE_PLAYING RoomPhase = 2
+)
+
+// Enum value maps for RoomPhase.
+var (
+	RoomPhase_name = map[int32]string{
+		0: "ROOM_PHASE_UNSPECIFIED",
+		1: "ROOM_PHASE_WAITING",
+		2: "ROOM_PHASE_PLAYING",
+	}
+	RoomPhase_value = map[string]int32{
+		"ROOM_PHASE_UNSPECIFIED": 0,
+		"ROOM_PHASE_WAITING":     1,
+		"ROOM_PHASE_PLAYING":     2,
+	}
+)
+
+func (x RoomPhase) Enum() *RoomPhase {
+	p := new(RoomPhase)
+	*p = x
+	return p
+}
+
+func (x RoomPhase) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RoomPhase) Descriptor() protoreflect.EnumDescriptor {
+	return file_doodle_lobby_v1_registry_proto_enumTypes[0].Descriptor()
+}
+
+func (RoomPhase) Type() protoreflect.EnumType {
+	return &file_doodle_lobby_v1_registry_proto_enumTypes[0]
+}
+
+func (x RoomPhase) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RoomPhase.Descriptor instead.
+func (RoomPhase) EnumDescriptor() ([]byte, []int) {
+	return file_doodle_lobby_v1_registry_proto_rawDescGZIP(), []int{0}
+}
+
 // HeartbeatRequest is a game server's current state.
 type HeartbeatRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -29,13 +83,20 @@ type HeartbeatRequest struct {
 	// Address clients use to reach this server's WebSocket endpoint (ADR 0002).
 	WsAddress string `protobuf:"bytes,2,opt,name=ws_address,json=wsAddress,proto3" json:"ws_address,omitempty"`
 	// Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+	// The same ids as in `rooms`; kept because field 3 is part of the published contract.
 	RoomIds []string `protobuf:"bytes,3,rep,name=room_ids,json=roomIds,proto3" json:"room_ids,omitempty"`
 	// Open WebSocket connections, used as the load figure for least-loaded allocation.
 	Sockets uint32 `protobuf:"varint,4,opt,name=sockets,proto3" json:"sockets,omitempty"`
 	// True while the server drains before a deploy; the lobby sends it no new rooms.
-	Draining      bool `protobuf:"varint,5,opt,name=draining,proto3" json:"draining,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Draining bool `protobuf:"varint,5,opt,name=draining,proto3" json:"draining,omitempty"`
+	// Status of every room this server owns, so the lobby can show player counts and send
+	// quick-play players to a room with space.
+	Rooms []*RoomStatus `protobuf:"bytes,6,rep,name=rooms,proto3" json:"rooms,omitempty"`
+	// host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+	// for example "game-server-1:9090". Internal only; the gateway never routes it.
+	ControlAddress string `protobuf:"bytes,7,opt,name=control_address,json=controlAddress,proto3" json:"control_address,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HeartbeatRequest) Reset() {
@@ -103,6 +164,84 @@ func (x *HeartbeatRequest) GetDraining() bool {
 	return false
 }
 
+func (x *HeartbeatRequest) GetRooms() []*RoomStatus {
+	if x != nil {
+		return x.Rooms
+	}
+	return nil
+}
+
+func (x *HeartbeatRequest) GetControlAddress() string {
+	if x != nil {
+		return x.ControlAddress
+	}
+	return ""
+}
+
+// RoomStatus is one room as its game server sees it, reported in every heartbeat.
+type RoomStatus struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The room's id, as given in AllocateRoom.
+	RoomId string `protobuf:"bytes,1,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	// Players currently connected to the room.
+	Players uint32 `protobuf:"varint,2,opt,name=players,proto3" json:"players,omitempty"`
+	// Where the room is in its lifecycle.
+	Phase         RoomPhase `protobuf:"varint,3,opt,name=phase,proto3,enum=doodle.lobby.v1.RoomPhase" json:"phase,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RoomStatus) Reset() {
+	*x = RoomStatus{}
+	mi := &file_doodle_lobby_v1_registry_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoomStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoomStatus) ProtoMessage() {}
+
+func (x *RoomStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_doodle_lobby_v1_registry_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoomStatus.ProtoReflect.Descriptor instead.
+func (*RoomStatus) Descriptor() ([]byte, []int) {
+	return file_doodle_lobby_v1_registry_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RoomStatus) GetRoomId() string {
+	if x != nil {
+		return x.RoomId
+	}
+	return ""
+}
+
+func (x *RoomStatus) GetPlayers() uint32 {
+	if x != nil {
+		return x.Players
+	}
+	return 0
+}
+
+func (x *RoomStatus) GetPhase() RoomPhase {
+	if x != nil {
+		return x.Phase
+	}
+	return RoomPhase_ROOM_PHASE_UNSPECIFIED
+}
+
 // HeartbeatResponse is empty for now; fields can be added later without breaking callers.
 type HeartbeatResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -112,7 +251,7 @@ type HeartbeatResponse struct {
 
 func (x *HeartbeatResponse) Reset() {
 	*x = HeartbeatResponse{}
-	mi := &file_doodle_lobby_v1_registry_proto_msgTypes[1]
+	mi := &file_doodle_lobby_v1_registry_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -124,7 +263,7 @@ func (x *HeartbeatResponse) String() string {
 func (*HeartbeatResponse) ProtoMessage() {}
 
 func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_doodle_lobby_v1_registry_proto_msgTypes[1]
+	mi := &file_doodle_lobby_v1_registry_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -137,22 +276,33 @@ func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatResponse.ProtoReflect.Descriptor instead.
 func (*HeartbeatResponse) Descriptor() ([]byte, []int) {
-	return file_doodle_lobby_v1_registry_proto_rawDescGZIP(), []int{1}
+	return file_doodle_lobby_v1_registry_proto_rawDescGZIP(), []int{2}
 }
 
 var File_doodle_lobby_v1_registry_proto protoreflect.FileDescriptor
 
 const file_doodle_lobby_v1_registry_proto_rawDesc = "" +
 	"\n" +
-	"\x1edoodle/lobby/v1/registry.proto\x12\x0fdoodle.lobby.v1\"\x9f\x01\n" +
+	"\x1edoodle/lobby/v1/registry.proto\x12\x0fdoodle.lobby.v1\"\xfb\x01\n" +
 	"\x10HeartbeatRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1d\n" +
 	"\n" +
 	"ws_address\x18\x02 \x01(\tR\twsAddress\x12\x19\n" +
 	"\broom_ids\x18\x03 \x03(\tR\aroomIds\x12\x18\n" +
 	"\asockets\x18\x04 \x01(\rR\asockets\x12\x1a\n" +
-	"\bdraining\x18\x05 \x01(\bR\bdraining\"\x13\n" +
-	"\x11HeartbeatResponse2e\n" +
+	"\bdraining\x18\x05 \x01(\bR\bdraining\x121\n" +
+	"\x05rooms\x18\x06 \x03(\v2\x1b.doodle.lobby.v1.RoomStatusR\x05rooms\x12'\n" +
+	"\x0fcontrol_address\x18\a \x01(\tR\x0econtrolAddress\"q\n" +
+	"\n" +
+	"RoomStatus\x12\x17\n" +
+	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x18\n" +
+	"\aplayers\x18\x02 \x01(\rR\aplayers\x120\n" +
+	"\x05phase\x18\x03 \x01(\x0e2\x1a.doodle.lobby.v1.RoomPhaseR\x05phase\"\x13\n" +
+	"\x11HeartbeatResponse*W\n" +
+	"\tRoomPhase\x12\x1a\n" +
+	"\x16ROOM_PHASE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12ROOM_PHASE_WAITING\x10\x01\x12\x16\n" +
+	"\x12ROOM_PHASE_PLAYING\x10\x022e\n" +
 	"\x0fRegistryService\x12R\n" +
 	"\tHeartbeat\x12!.doodle.lobby.v1.HeartbeatRequest\x1a\".doodle.lobby.v1.HeartbeatResponseB\xe0\x01\n" +
 	"%com.doodlearena.proto.doodle.lobby.v1B\rRegistryProtoP\x01ZJgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1;lobbyv1\xa2\x02\x03DLX\xaa\x02\x0fDoodle.Lobby.V1\xca\x02\x0fDoodle\\Lobby\\V1\xe2\x02\x1bDoodle\\Lobby\\V1\\GPBMetadata\xea\x02\x11Doodle::Lobby::V1b\x06proto3"
@@ -169,19 +319,24 @@ func file_doodle_lobby_v1_registry_proto_rawDescGZIP() []byte {
 	return file_doodle_lobby_v1_registry_proto_rawDescData
 }
 
-var file_doodle_lobby_v1_registry_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_doodle_lobby_v1_registry_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_doodle_lobby_v1_registry_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_doodle_lobby_v1_registry_proto_goTypes = []any{
-	(*HeartbeatRequest)(nil),  // 0: doodle.lobby.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil), // 1: doodle.lobby.v1.HeartbeatResponse
+	(RoomPhase)(0),            // 0: doodle.lobby.v1.RoomPhase
+	(*HeartbeatRequest)(nil),  // 1: doodle.lobby.v1.HeartbeatRequest
+	(*RoomStatus)(nil),        // 2: doodle.lobby.v1.RoomStatus
+	(*HeartbeatResponse)(nil), // 3: doodle.lobby.v1.HeartbeatResponse
 }
 var file_doodle_lobby_v1_registry_proto_depIdxs = []int32{
-	0, // 0: doodle.lobby.v1.RegistryService.Heartbeat:input_type -> doodle.lobby.v1.HeartbeatRequest
-	1, // 1: doodle.lobby.v1.RegistryService.Heartbeat:output_type -> doodle.lobby.v1.HeartbeatResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	2, // 0: doodle.lobby.v1.HeartbeatRequest.rooms:type_name -> doodle.lobby.v1.RoomStatus
+	0, // 1: doodle.lobby.v1.RoomStatus.phase:type_name -> doodle.lobby.v1.RoomPhase
+	1, // 2: doodle.lobby.v1.RegistryService.Heartbeat:input_type -> doodle.lobby.v1.HeartbeatRequest
+	3, // 3: doodle.lobby.v1.RegistryService.Heartbeat:output_type -> doodle.lobby.v1.HeartbeatResponse
+	3, // [3:4] is the sub-list for method output_type
+	2, // [2:3] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_doodle_lobby_v1_registry_proto_init() }
@@ -194,13 +349,14 @@ func file_doodle_lobby_v1_registry_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_doodle_lobby_v1_registry_proto_rawDesc), len(file_doodle_lobby_v1_registry_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   2,
+			NumEnums:      1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_doodle_lobby_v1_registry_proto_goTypes,
 		DependencyIndexes: file_doodle_lobby_v1_registry_proto_depIdxs,
+		EnumInfos:         file_doodle_lobby_v1_registry_proto_enumTypes,
 		MessageInfos:      file_doodle_lobby_v1_registry_proto_msgTypes,
 	}.Build()
 	File_doodle_lobby_v1_registry_proto = out.File

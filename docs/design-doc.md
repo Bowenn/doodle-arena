@@ -103,9 +103,11 @@ Owns the Postgres database `auth`.
 Owns the Redis key prefix `lobby:*`.
 
 - REST: create a room, list public rooms, quick play, join a room, read the leaderboard.
-- Keeps a registry of game servers. Each game server sends a gRPC `Heartbeat` every 2 seconds with its load, and an entry expires after 6 seconds without one.
-- Allocates new rooms to the least-loaded healthy game server through gRPC `AllocateRoom`.
-- On join, returns the room's WebSocket URL and a join ticket: a signed token, valid for 60 seconds, that names the user and the room.
+- Keeps a registry of game servers. Each game server sends a gRPC `Heartbeat` every 2 seconds with its addresses, load and per-room status (players, waiting or playing), and an entry expires after 6 seconds without one. The registry gRPC port (9090) is internal.
+- Allocates new rooms to the least-loaded healthy game server through gRPC `AllocateRoom` (fewest sockets, then fewest rooms; draining servers are skipped). Each call has a 2-second deadline; if a server is full, draining or unreachable, the lobby tries the next one, up to three. A server that didn't answer is tried last for the next 10 seconds, so a server that heartbeats but can't be reached doesn't add its deadline to every create. The room is stored only after a server has taken it.
+- On join, returns the room's WebSocket URL (`<ws_address>/rooms/<room_id>`, where `ws_address` is the gateway path the game server reports, such as `/ws/game-server-1`) and a join ticket: a token signed with the lobby's Ed25519 key, valid for 60 seconds and usable once, that names the user and the room (ADR 0005). The lobby doesn't enforce `max_players`: only the game server knows whether a joining player is already in the room (a reconnect), so it decides. Quick play uses the reported counts to pick the fullest waiting room with space.
+- Redis keys: `lobby:server:{server_id}` (the last heartbeat, 6-second TTL), `lobby:servers` (set of server ids), `lobby:room:{room_id}` (the room, expiring 10 minutes after its server last reported it; only the owning server's heartbeat refreshes it), `lobby:rooms:public` (sorted set by creation time, for the room list).
+- Heartbeats aren't authenticated yet, so the lobby accepts only a `/ws…` gateway path as `ws_address` and `host:port` as `control_address`; a bogus heartbeat can't send players to another host.
 - Notices dead game servers through missed heartbeats and reassigns their rooms. Clients that reconnect get the new server's URL.
 - Consumes `MatchFinished` to update a weekly leaderboard in a Redis sorted set. `ZINCRBY` isn't idempotent, so the consumer first records the `match_id` (`SET NX` with a TTL longer than a week) and skips matches it has already seen.
 
@@ -202,7 +204,7 @@ Contracts live in `proto/` and change only with human approval (see `.claude/rul
 | Service | Served by | Called by | Methods |
 |---|---|---|---|
 | `doodle.game.v1.ControlService` | Each game server | Lobby | `AllocateRoom(room_id, mode, settings)` (idempotent per `room_id`), `DrainServer()` before a deploy |
-| `doodle.lobby.v1.RegistryService` | Lobby | Game servers | `Heartbeat(server_id, ws_address, room_ids, sockets, draining)` every 2 seconds |
+| `doodle.lobby.v1.RegistryService` | Lobby | Game servers | `Heartbeat(server_id, ws_address, control_address, rooms[], sockets, draining)` every 2 seconds; `rooms` carries each room's players and phase |
 
 Every call has a deadline. `AllocateRoom` returns `RESOURCE_EXHAUSTED` when the server is full and `FAILED_PRECONDITION` while it drains. Stage 7 may add `doodle.ai.v1` for the AI guesser.
 
@@ -245,8 +247,8 @@ Auth:
 
 Lobby:
 
-- `POST /api/lobby/rooms`, `GET /api/lobby/rooms`, `POST /api/lobby/quickplay`
-- `POST /api/lobby/rooms/{room_id}/join` returns `{ws_url, ticket}`
+- `POST /api/lobby/rooms` takes `{public, settings}` (both optional) and returns the room; `GET /api/lobby/rooms?limit=&cursor=` returns `{rooms, next_cursor}` with live player counts
+- `POST /api/lobby/rooms/{room_id}/join` and `POST /api/lobby/quickplay` return `{room_id, ws_url, ticket, expires_at}`, with `Cache-Control: no-store`
 - `GET /api/lobby/leaderboard`
 
 Assets:
@@ -326,7 +328,7 @@ Defaults, all configurable: up to 8 players; each player draws once per match; 1
 ### 7.4 Reconnect
 
 1. The client remembers the last `seq` it applied.
-2. After a disconnect, it reconnects with backoff. If the connection fails or it receives `room_moved`, it asks the lobby for the room's current URL and a new ticket first.
+2. After a disconnect, it reconnects with backoff. Tickets are single-use (ADR 0005), so before every attempt it asks the lobby for the room's current URL and a new ticket. After a failover or `room_moved`, that URL names the new server.
 3. It sends `hello {ticket, last_seq}`. The server replays every event after `last_seq` from the stream, then resends the player's private state.
 4. If `last_seq` is older than the stream's retention, the server sends a fresh `welcome` with the player's full view instead.
 
@@ -425,6 +427,7 @@ Redis keys for each room:
 | `room:{id}:snapshot` | String or hash | Full room state plus its `seq`, written at every state transition and every 200 events |
 | `room:{id}:lease` | String | The owning `server_id`, with a 5-second TTL renewed every 1.5 seconds |
 | `room:{id}:fence` | Counter | Incremented when a server takes the lease; the result is that server's fencing token |
+| `room:{id}:ticket:{ticket_id}` | String | A used join ticket, set with `SET NX` and a 60-second TTL, so each ticket works once (ADR 0005) |
 
 Writes go through a Lua script that checks the lease holder and the fencing token before it appends events or writes the snapshot. A server whose check fails stops the room immediately. The stream is trimmed to keep everything after the latest snapshot plus a margin.
 
@@ -448,7 +451,7 @@ In CAP terms, the marketplace chooses consistency during a network partition: it
 
 - Authentication: Google OAuth 2.0 with PKCE; short-lived RS256 JWT access tokens that every service verifies itself (ADR 0001); rotated refresh tokens with reuse detection; API keys for developers. Roles: `player`, `moderator`, `admin`.
 - Internal endpoints and gRPC listen on internal ports that the gateway never routes.
-- WebSockets use single-purpose join tickets that expire after 60 seconds, never a JWT in the URL.
+- WebSockets use single-use join tickets that expire after 60 seconds, never a JWT in the URL. The lobby signs them with an Ed25519 key, and game servers hold only the public key, so they can verify tickets but never mint them (ADR 0005).
 - Outgoing webhooks are signed with a per-endpoint secret and a timestamp, and never go to internal addresses (section 4.7); incoming Stripe webhooks are verified with Stripe's signature.
 - Secrets come from environment variables (`.env` locally, never committed; `.env.example` lists the names). In AWS they come from SSM Parameter Store or Secrets Manager.
 - Logs never contain secrets, tokens, API keys, email addresses or individual strokes.
@@ -513,6 +516,7 @@ Releases:
 | D17 | OpenTelemetry to Prometheus, Tempo and Loki, plus CloudWatch; Grafana alerting to Discord | One UI for every signal; alerts arrive where the team already is |
 | D18 | Every service verifies RS256 JWTs itself, with one audience (`doodle-api`); the gateway only routes; the Django admin bridges Google sign-in into a short session (ADR 0001) | No extra hop, no trusted headers, one identity for players and moderators |
 | D19 | Each Kafka topic carries one wrapper message with a `oneof` per event type; no schema registry, Buf only (ADR 0004) | The contract says what each topic holds and `buf breaking` checks it; no extra stateful service |
+| D20 | The lobby signs join tickets with Ed25519; game servers verify with the public key only; tickets last 60 seconds and are single-use through Redis `SET NX` (ADR 0005) | Only the lobby can mint tickets, rotation needs no coordinated restart, and a leaked ticket can't be replayed |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
@@ -521,7 +525,6 @@ New decisions become ADRs (`/adr`) and get a line here when accepted.
 - ADR 0002: how a WebSocket reaches the game server that owns its room. Decide in Stage 2.
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and the reward amounts (defaults are in section 7).
-- Before task 2.1: how the lobby signs join tickets and how game servers verify them (a shared HMAC secret, or an asymmetric key that the lobby publishes).
 - Before task 2.5: the takeover protocol when a game server loses the lobby but can still reach Redis. The lobby then reassigns rooms whose lease the old server is still renewing. Does the new server wait for the lease to expire, or take it by force with a new fencing token, and what do clients do in the meantime?
 - Before task 4.3: what happens to an `IN_PROGRESS` idempotency key when the process crashes mid-request. One option is to insert the key in the same transaction as the purchase, so a crash rolls it back; another is to let `IN_PROGRESS` rows expire after a short timeout.
 - Before task 4.6: royalties for co-drawn drawings. Today, when one of two co-authors sells for the first time, the other gets nothing, and only `drawer_ids[0]` ever becomes the owner. Also, when the buyer is an author, their account appears twice in the lock set, so the set must be deduplicated.

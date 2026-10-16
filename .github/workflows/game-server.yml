@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - services/game-server/**
+      - proto/gen/go/**
       - .github/workflows/game-server.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
@@ -15,6 +16,7 @@ on:
     branches: [master]
     paths:
       - services/game-server/**
+      - proto/gen/go/**
       - .github/workflows/game-server.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
@@ -42,4 +44,5 @@ jobs:
     uses: ./.github/workflows/_docker.yml
     with:
       service: game-server
-      context: services/game-server
+      context: .
+      file: services/game-server/Dockerfile

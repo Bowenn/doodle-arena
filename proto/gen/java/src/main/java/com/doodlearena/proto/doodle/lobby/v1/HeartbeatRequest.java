@@ -36,6 +36,8 @@ private static final long serialVersionUID = 0L;
     wsAddress_ = "";
     roomIds_ =
         com.google.protobuf.LazyStringArrayList.emptyList();
+    rooms_ = java.util.Collections.emptyList();
+    controlAddress_ = "";
   }
 
   public static final com.google.protobuf.Descriptors.Descriptor
@@ -157,6 +159,7 @@ private static final long serialVersionUID = 0L;
   /**
    * <pre>
    * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+   * The same ids as in `rooms`; kept because field 3 is part of the published contract.
    * </pre>
    *
    * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -169,6 +172,7 @@ private static final long serialVersionUID = 0L;
   /**
    * <pre>
    * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+   * The same ids as in `rooms`; kept because field 3 is part of the published contract.
    * </pre>
    *
    * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -180,6 +184,7 @@ private static final long serialVersionUID = 0L;
   /**
    * <pre>
    * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+   * The same ids as in `rooms`; kept because field 3 is part of the published contract.
    * </pre>
    *
    * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -192,6 +197,7 @@ private static final long serialVersionUID = 0L;
   /**
    * <pre>
    * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+   * The same ids as in `rooms`; kept because field 3 is part of the published contract.
    * </pre>
    *
    * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -233,6 +239,121 @@ private static final long serialVersionUID = 0L;
     return draining_;
   }
 
+  public static final int ROOMS_FIELD_NUMBER = 6;
+  @SuppressWarnings("serial")
+  private java.util.List<com.doodlearena.proto.doodle.lobby.v1.RoomStatus> rooms_;
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  @java.lang.Override
+  public java.util.List<com.doodlearena.proto.doodle.lobby.v1.RoomStatus> getRoomsList() {
+    return rooms_;
+  }
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  @java.lang.Override
+  public java.util.List<? extends com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder> 
+      getRoomsOrBuilderList() {
+    return rooms_;
+  }
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  @java.lang.Override
+  public int getRoomsCount() {
+    return rooms_.size();
+  }
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  @java.lang.Override
+  public com.doodlearena.proto.doodle.lobby.v1.RoomStatus getRooms(int index) {
+    return rooms_.get(index);
+  }
+  /**
+   * <pre>
+   * Status of every room this server owns, so the lobby can show player counts and send
+   * quick-play players to a room with space.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+   */
+  @java.lang.Override
+  public com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder getRoomsOrBuilder(
+      int index) {
+    return rooms_.get(index);
+  }
+
+  public static final int CONTROL_ADDRESS_FIELD_NUMBER = 7;
+  @SuppressWarnings("serial")
+  private volatile java.lang.Object controlAddress_ = "";
+  /**
+   * <pre>
+   * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+   * for example "game-server-1:9090". Internal only; the gateway never routes it.
+   * </pre>
+   *
+   * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+   * @return The controlAddress.
+   */
+  @java.lang.Override
+  public java.lang.String getControlAddress() {
+    java.lang.Object ref = controlAddress_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      controlAddress_ = s;
+      return s;
+    }
+  }
+  /**
+   * <pre>
+   * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+   * for example "game-server-1:9090". Internal only; the gateway never routes it.
+   * </pre>
+   *
+   * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+   * @return The bytes for controlAddress.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getControlAddressBytes() {
+    java.lang.Object ref = controlAddress_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      controlAddress_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -262,6 +383,12 @@ private static final long serialVersionUID = 0L;
     if (draining_ != false) {
       output.writeBool(5, draining_);
     }
+    for (int i = 0; i < rooms_.size(); i++) {
+      output.writeMessage(6, rooms_.get(i));
+    }
+    if (!com.google.protobuf.GeneratedMessage.isStringEmpty(controlAddress_)) {
+      com.google.protobuf.GeneratedMessage.writeString(output, 7, controlAddress_);
+    }
     getUnknownFields().writeTo(output);
   }
   private int computeSerializedSize_0() {
@@ -287,6 +414,18 @@ private static final long serialVersionUID = 0L;
     if (draining_ != false) {
       size += com.google.protobuf.CodedOutputStream
         .computeBoolSize(5, draining_);
+    }
+
+        {
+          final int count = rooms_.size();
+          for (int i = 0; i < count; i++) {
+            size += com.google.protobuf.CodedOutputStream
+              .computeMessageSizeNoTag(rooms_.get(i));
+          }
+          size += 1 * count;
+        }
+    if (!com.google.protobuf.GeneratedMessage.isStringEmpty(controlAddress_)) {
+      size += com.google.protobuf.GeneratedMessage.computeStringSize(7, controlAddress_);
     }
     return size;
   }
@@ -322,6 +461,10 @@ private static final long serialVersionUID = 0L;
         != other.getSockets()) return false;
     if (getDraining()
         != other.getDraining()) return false;
+    if (!getRoomsList()
+        .equals(other.getRoomsList())) return false;
+    if (!getControlAddress()
+        .equals(other.getControlAddress())) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -346,6 +489,12 @@ private static final long serialVersionUID = 0L;
     hash = (37 * hash) + DRAINING_FIELD_NUMBER;
     hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
         getDraining());
+    if (getRoomsCount() > 0) {
+      hash = (37 * hash) + ROOMS_FIELD_NUMBER;
+      hash = (53 * hash) + getRoomsList().hashCode();
+    }
+    hash = (37 * hash) + CONTROL_ADDRESS_FIELD_NUMBER;
+    hash = (53 * hash) + getControlAddress().hashCode();
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -487,6 +636,14 @@ private static final long serialVersionUID = 0L;
           com.google.protobuf.LazyStringArrayList.emptyList();
       sockets_ = 0;
       draining_ = false;
+      if (roomsBuilder_ == null) {
+        rooms_ = java.util.Collections.emptyList();
+      } else {
+        rooms_ = null;
+        roomsBuilder_.clear();
+      }
+      bitField0_ = (bitField0_ & ~0x00000020);
+      controlAddress_ = "";
       return this;
     }
 
@@ -513,9 +670,22 @@ private static final long serialVersionUID = 0L;
     @java.lang.Override
     public com.doodlearena.proto.doodle.lobby.v1.HeartbeatRequest buildPartial() {
       com.doodlearena.proto.doodle.lobby.v1.HeartbeatRequest result = new com.doodlearena.proto.doodle.lobby.v1.HeartbeatRequest(this);
+      buildPartialRepeatedFields(result);
       if (bitField0_ != 0) { buildPartial0(result); }
       onBuilt();
       return result;
+    }
+
+    private void buildPartialRepeatedFields(com.doodlearena.proto.doodle.lobby.v1.HeartbeatRequest result) {
+      if (roomsBuilder_ == null) {
+        if (((bitField0_ & 0x00000020) != 0)) {
+          rooms_ = java.util.Collections.unmodifiableList(rooms_);
+          bitField0_ = (bitField0_ & ~0x00000020);
+        }
+        result.rooms_ = rooms_;
+      } else {
+        result.rooms_ = roomsBuilder_.build();
+      }
     }
 
     private void buildPartial0(com.doodlearena.proto.doodle.lobby.v1.HeartbeatRequest result) {
@@ -535,6 +705,9 @@ private static final long serialVersionUID = 0L;
       }
       if (((from_bitField0_ & 0x00000010) != 0)) {
         result.draining_ = draining_;
+      }
+      if (((from_bitField0_ & 0x00000040) != 0)) {
+        result.controlAddress_ = controlAddress_;
       }
     }
 
@@ -575,6 +748,37 @@ private static final long serialVersionUID = 0L;
       }
       if (other.getDraining() != false) {
         setDraining(other.getDraining());
+      }
+      if (roomsBuilder_ == null) {
+        if (!other.rooms_.isEmpty()) {
+          if (rooms_.isEmpty()) {
+            rooms_ = other.rooms_;
+            bitField0_ = (bitField0_ & ~0x00000020);
+          } else {
+            ensureRoomsIsMutable();
+            rooms_.addAll(other.rooms_);
+          }
+          onChanged();
+        }
+      } else {
+        if (!other.rooms_.isEmpty()) {
+          if (roomsBuilder_.isEmpty()) {
+            roomsBuilder_.dispose();
+            roomsBuilder_ = null;
+            rooms_ = other.rooms_;
+            bitField0_ = (bitField0_ & ~0x00000020);
+            roomsBuilder_ = 
+              com.google.protobuf.GeneratedMessage.alwaysUseFieldBuilders ?
+                 internalGetRoomsFieldBuilder() : null;
+          } else {
+            roomsBuilder_.addAllMessages(other.rooms_);
+          }
+        }
+      }
+      if (!other.getControlAddress().isEmpty()) {
+        controlAddress_ = other.controlAddress_;
+        bitField0_ |= 0x00000040;
+        onChanged();
       }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
@@ -625,6 +829,24 @@ private static final long serialVersionUID = 0L;
               bitField0_ |= 0x00000010;
               break;
             } // case 40
+            case 50: {
+              com.doodlearena.proto.doodle.lobby.v1.RoomStatus m =
+                  input.readMessage(
+                      com.doodlearena.proto.doodle.lobby.v1.RoomStatus.parser(),
+                      extensionRegistry);
+              if (roomsBuilder_ == null) {
+                ensureRoomsIsMutable();
+                rooms_.add(m);
+              } else {
+                roomsBuilder_.addMessage(m);
+              }
+              break;
+            } // case 50
+            case 58: {
+              controlAddress_ = input.readStringRequireUtf8();
+              bitField0_ |= 0x00000040;
+              break;
+            } // case 58
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -837,6 +1059,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -850,6 +1073,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -861,6 +1085,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -873,6 +1098,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -886,6 +1112,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -905,6 +1132,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -923,6 +1151,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -941,6 +1170,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -956,6 +1186,7 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+     * The same ids as in `rooms`; kept because field 3 is part of the published contract.
      * </pre>
      *
      * <code>repeated string room_ids = 3 [json_name = "roomIds"];</code>
@@ -1057,6 +1288,427 @@ private static final long serialVersionUID = 0L;
     public Builder clearDraining() {
       bitField0_ = (bitField0_ & ~0x00000010);
       draining_ = false;
+      onChanged();
+      return this;
+    }
+
+    private java.util.List<com.doodlearena.proto.doodle.lobby.v1.RoomStatus> rooms_ =
+      java.util.Collections.emptyList();
+    private void ensureRoomsIsMutable() {
+      if (!((bitField0_ & 0x00000020) != 0)) {
+        rooms_ = new java.util.ArrayList<com.doodlearena.proto.doodle.lobby.v1.RoomStatus>(rooms_);
+        bitField0_ |= 0x00000020;
+       }
+    }
+
+    private com.google.protobuf.RepeatedFieldBuilder<
+        com.doodlearena.proto.doodle.lobby.v1.RoomStatus, com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder, com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder> roomsBuilder_;
+
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public java.util.List<com.doodlearena.proto.doodle.lobby.v1.RoomStatus> getRoomsList() {
+      if (roomsBuilder_ == null) {
+        return java.util.Collections.unmodifiableList(rooms_);
+      } else {
+        return roomsBuilder_.getMessageList();
+      }
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public int getRoomsCount() {
+      if (roomsBuilder_ == null) {
+        return rooms_.size();
+      } else {
+        return roomsBuilder_.getCount();
+      }
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.RoomStatus getRooms(int index) {
+      if (roomsBuilder_ == null) {
+        return rooms_.get(index);
+      } else {
+        return roomsBuilder_.getMessage(index);
+      }
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder setRooms(
+        int index, com.doodlearena.proto.doodle.lobby.v1.RoomStatus value) {
+      if (roomsBuilder_ == null) {
+        java.util.Objects.requireNonNull(value);
+        ensureRoomsIsMutable();
+        rooms_.set(index, value);
+        onChanged();
+      } else {
+        roomsBuilder_.setMessage(index, value);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder setRooms(
+        int index, com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder builderForValue) {
+      if (roomsBuilder_ == null) {
+        ensureRoomsIsMutable();
+        rooms_.set(index, builderForValue.build());
+        onChanged();
+      } else {
+        roomsBuilder_.setMessage(index, builderForValue.build());
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder addRooms(com.doodlearena.proto.doodle.lobby.v1.RoomStatus value) {
+      if (roomsBuilder_ == null) {
+        java.util.Objects.requireNonNull(value);
+        ensureRoomsIsMutable();
+        rooms_.add(value);
+        onChanged();
+      } else {
+        roomsBuilder_.addMessage(value);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder addRooms(
+        int index, com.doodlearena.proto.doodle.lobby.v1.RoomStatus value) {
+      if (roomsBuilder_ == null) {
+        java.util.Objects.requireNonNull(value);
+        ensureRoomsIsMutable();
+        rooms_.add(index, value);
+        onChanged();
+      } else {
+        roomsBuilder_.addMessage(index, value);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder addRooms(
+        com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder builderForValue) {
+      if (roomsBuilder_ == null) {
+        ensureRoomsIsMutable();
+        rooms_.add(builderForValue.build());
+        onChanged();
+      } else {
+        roomsBuilder_.addMessage(builderForValue.build());
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder addRooms(
+        int index, com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder builderForValue) {
+      if (roomsBuilder_ == null) {
+        ensureRoomsIsMutable();
+        rooms_.add(index, builderForValue.build());
+        onChanged();
+      } else {
+        roomsBuilder_.addMessage(index, builderForValue.build());
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder addAllRooms(
+        java.lang.Iterable<? extends com.doodlearena.proto.doodle.lobby.v1.RoomStatus> values) {
+      if (roomsBuilder_ == null) {
+        ensureRoomsIsMutable();
+        com.google.protobuf.AbstractMessageLite.Builder.addAll(
+            values, rooms_);
+        onChanged();
+      } else {
+        roomsBuilder_.addAllMessages(values);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder clearRooms() {
+      if (roomsBuilder_ == null) {
+        rooms_ = java.util.Collections.emptyList();
+        bitField0_ = (bitField0_ & ~0x00000020);
+        onChanged();
+      } else {
+        roomsBuilder_.clear();
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public Builder removeRooms(int index) {
+      if (roomsBuilder_ == null) {
+        ensureRoomsIsMutable();
+        rooms_.remove(index);
+        onChanged();
+      } else {
+        roomsBuilder_.remove(index);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder getRoomsBuilder(
+        int index) {
+      return internalGetRoomsFieldBuilder().getBuilder(index);
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder getRoomsOrBuilder(
+        int index) {
+      if (roomsBuilder_ == null) {
+        return rooms_.get(index);  } else {
+        return roomsBuilder_.getMessageOrBuilder(index);
+      }
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public java.util.List<? extends com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder> 
+         getRoomsOrBuilderList() {
+      if (roomsBuilder_ != null) {
+        return roomsBuilder_.getMessageOrBuilderList();
+      } else {
+        return java.util.Collections.unmodifiableList(rooms_);
+      }
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder addRoomsBuilder() {
+      return internalGetRoomsFieldBuilder().addBuilder(
+          com.doodlearena.proto.doodle.lobby.v1.RoomStatus.getDefaultInstance());
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder addRoomsBuilder(
+        int index) {
+      return internalGetRoomsFieldBuilder().addBuilder(
+          index, com.doodlearena.proto.doodle.lobby.v1.RoomStatus.getDefaultInstance());
+    }
+    /**
+     * <pre>
+     * Status of every room this server owns, so the lobby can show player counts and send
+     * quick-play players to a room with space.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.RoomStatus rooms = 6 [json_name = "rooms"];</code>
+     */
+    public java.util.List<com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder> 
+         getRoomsBuilderList() {
+      return internalGetRoomsFieldBuilder().getBuilderList();
+    }
+    private com.google.protobuf.RepeatedFieldBuilder<
+        com.doodlearena.proto.doodle.lobby.v1.RoomStatus, com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder, com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder> 
+        internalGetRoomsFieldBuilder() {
+      if (roomsBuilder_ == null) {
+        roomsBuilder_ = new com.google.protobuf.RepeatedFieldBuilder<
+            com.doodlearena.proto.doodle.lobby.v1.RoomStatus, com.doodlearena.proto.doodle.lobby.v1.RoomStatus.Builder, com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder>(
+                rooms_,
+                ((bitField0_ & 0x00000020) != 0),
+                getParentForChildren(),
+                isClean());
+        rooms_ = null;
+      }
+      return roomsBuilder_;
+    }
+
+    private java.lang.Object controlAddress_ = "";
+    /**
+     * <pre>
+     * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * </pre>
+     *
+     * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+     * @return The controlAddress.
+     */
+    public java.lang.String getControlAddress() {
+      java.lang.Object ref = controlAddress_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        controlAddress_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <pre>
+     * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * </pre>
+     *
+     * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+     * @return The bytes for controlAddress.
+     */
+    public com.google.protobuf.ByteString
+        getControlAddressBytes() {
+      java.lang.Object ref = controlAddress_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        controlAddress_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <pre>
+     * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * </pre>
+     *
+     * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+     * @param value The controlAddress to set.
+     * @return This builder for chaining.
+     */
+    public Builder setControlAddress(
+        java.lang.String value) {
+      java.util.Objects.requireNonNull(value);
+      controlAddress_ = value;
+      bitField0_ |= 0x00000040;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * </pre>
+     *
+     * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearControlAddress() {
+      controlAddress_ = getDefaultInstance().getControlAddress();
+      bitField0_ = (bitField0_ & ~0x00000040);
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * </pre>
+     *
+     * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+     * @param value The bytes for controlAddress to set.
+     * @return This builder for chaining.
+     */
+    public Builder setControlAddressBytes(
+        com.google.protobuf.ByteString value) {
+      java.util.Objects.requireNonNull(value);
+      checkByteStringIsUtf8(value);
+      controlAddress_ = value;
+      bitField0_ |= 0x00000040;
       onChanged();
       return this;
     }
