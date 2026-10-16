@@ -12,6 +12,13 @@ x-app: &app
     LOG_LEVEL: info
     DEPLOYMENT_ENVIRONMENT: local
 
+# The auth database connection, shared by auth and its migrate job.
+x-auth-db-env: &auth-db-env
+  DB_HOST: postgres
+  DB_NAME: auth
+  DB_USER: auth
+  DB_PASSWORD: ${AUTH_DB_PASSWORD:?}
+
 # Go services check their own /healthz (their runtime image has no shell).
 x-go-healthcheck: &go-healthcheck
   test: ["CMD", "/app", "healthcheck"]
@@ -64,12 +71,27 @@ services:
 
   # --------------------------------------------------------- Python services
 
+  # One-shot job: applies the auth database migrations, then exits. auth starts only after it
+  # succeeds, so replicas never race on a migration.
+  auth-migrate:
+    build: ../services/auth
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: [*app-env, *auth-db-env]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   auth:
     <<: *app
     build: ../services/auth
     environment:
-      <<: *app-env
+      <<: [*app-env, *auth-db-env]
       SERVICE_INSTANCE_ID: auth-1
+    depends_on:
+      auth-migrate:
+        condition: service_completed_successfully
     healthcheck: *py-healthcheck
 
   ai:

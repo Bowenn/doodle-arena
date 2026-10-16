@@ -5,6 +5,18 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/services.sh
 
+# Testcontainers needs the Docker CLI helpers (credential store) and the daemon socket. Docker
+# Desktop keeps both under ~/.docker and may not create /var/run/docker.sock.
+if [[ -d "$HOME/.docker/bin" ]]; then
+  export PATH="$HOME/.docker/bin:$PATH"
+fi
+if [[ -z "${DOCKER_HOST:-}" ]] && command -v docker >/dev/null; then
+  DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
+  export DOCKER_HOST
+  # Path of the socket inside Docker's VM, for Testcontainers' cleanup container.
+  export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE="${TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE:-/var/run/docker.sock}"
+fi
+
 run_one() {
   local s="$1" lang dir
   lang="$(service_lang "$s")"
