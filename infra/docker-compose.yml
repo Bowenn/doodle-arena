@@ -220,6 +220,16 @@ services:
       timeout: 10s
       retries: 30
 
+  kafka-topics:
+    image: apache/kafka:4.2.2
+    entrypoint: ["/bin/bash", "/create-topics.sh"]
+    volumes:
+      - ./kafka/create-topics.sh:/create-topics.sh:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+
   seaweedfs:
     image: chrislusf/seaweedfs:4.48
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
