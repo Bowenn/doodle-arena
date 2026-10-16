@@ -11,7 +11,8 @@ It is a portfolio project for backend internship interviews. Every technology wa
 
 - Bowen: Go services (`lobby`, `game-server`, `notifier`), the web app, local infra.
 - Will: Java services (`marketplace`, `analytics`).
-- Python services (`auth`, `assets`, `ai`): see the ownership table in `docs/design-doc.md`.
+- Python services (`auth`, `assets`, `ai`): Bowen.
+- Until Will joins, Bowen covers every service, including Will's.
 - Both may run sessions in parallel on different tracks. Stay inside the services of the current task. Ask before editing another track's service or a shared contract in `proto/`.
 
 ## Where things are documented
@@ -75,7 +76,7 @@ Create these in Stage 1, then keep this list accurate:
 ## Telemetry (every service, every feature)
 
 - Use the OpenTelemetry SDK and export OTLP to the collector (`OTEL_EXPORTER_OTLP_ENDPOINT`).
-- Write JSON logs to stdout with `timestamp`, `level`, `service`, `version`, `trace_id` and `span_id`, plus `room_id`, `match_id`, `user_id` or `drawing_id` where relevant.
+- Write JSON logs to stdout with `timestamp`, `level`, `service`, `version`, `trace_id`, `span_id` and `msg`, plus `room_id`, `match_id`, `user_id` or `drawing_id` where relevant.
 - Never log secrets, tokens, API keys, email addresses or individual strokes.
 - Propagate trace context over HTTP, gRPC and Kafka message headers.
 - Use the metric names in `docs/observability.md`. IDs such as `room_id` or `user_id` are never metric attributes.

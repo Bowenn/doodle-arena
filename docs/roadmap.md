@@ -23,7 +23,7 @@ How to use this file:
 Tracks:
 
 - Track A: Bowen (Go services, web app).
-- Track B: Will (Java services, plus the Python assets service if that ownership is confirmed).
+- Track B: Will (Java services), once he joins. Until then Bowen covers Track B as well. The Python services (auth, assets, ai) belong to Bowen.
 - Track B doesn't wait for Stage 2. Until the game server publishes real events, `scripts/fake-events.sh` (built in task 1.2) publishes `RoundFinished` and `MatchFinished` from fixtures.
 
 ## Stage 1: Foundations (both tracks, Day 1)
@@ -41,7 +41,7 @@ Tracks:
   - Auth: Google OAuth with PKCE and `state`, the users table (Alembic), JWT signing and JWKS, refresh-token rotation, `/me`, and pytest tests.
   - Gateway: every route, WebSocket upgrade headers, coarse `limit_req`.
   - Web: a login page and a "logged in as" header.
-  - The humans decide ADR 0001.
+  - ADR 0001 is decided (2026-10-15): each service verifies RS256 JWTs itself with `aud = doodle-api`, and the Django admin bridges Google sign-in into a session.
 - [ ] **1.4 CI**
   - A GitHub Actions workflow per service with path filters: lint, test and Docker build.
   - `buf lint` and `buf breaking` for `proto/`.
@@ -57,7 +57,7 @@ Tracks:
 - [ ] Google login works end to end, `/api/auth/me` returns the user, and the refresh-rotation test passes.
 - [ ] `make proto` generates code for all three languages, and CI is green for every service.
 - [ ] The trace and logs of one request are visible together in Grafana.
-- [ ] ADR 0001 is Accepted.
+- [x] ADR 0001 is Accepted.
 
 ## Stage 2: Game core (Track A, Days 2–3)
 

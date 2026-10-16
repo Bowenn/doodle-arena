@@ -14,7 +14,7 @@ Read "Marketplace data model and rules" and "Key flows" in `docs/design-doc.md` 
   3. Check the buyer's balance, write the ledger entries (buyer, seller, royalty shares), update balances, mark the listing `SOLD`, move ownership and bump its version, and append an ownership event.
   4. Insert `SaleCompleted` into the outbox in the same transaction.
 - A losing buyer gets `409 LISTING_NOT_AVAILABLE`. No coins moved, so there is nothing to refund.
-- `Idempotency-Key`: the same key with the same request returns the stored response; the same key with a different request returns `422`; a key that is still in progress returns `409`.
+- `Idempotency-Key`: the same key with the same request returns the stored response; the same key with a different request returns `422 IDEMPOTENCY_KEY_REUSED`; a key that is still in progress returns `409 IDEMPOTENCY_KEY_IN_PROGRESS`.
 - Royalties use integer math only. Follow the rounding rule in the design doc and test it.
 - The reconciliation job exports `market.ledger.imbalance` and `market.ownership.violations`. Both must always be 0.
 

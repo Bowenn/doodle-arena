@@ -7,7 +7,7 @@ paths:
 
 # Python services
 
-- Python 3.12 or newer, with dependencies managed by `uv`. Lint and format with `ruff`; type-check with `mypy` or `pyright`.
+- Python 3.14 (pinned in each service's `.python-version`), with dependencies managed by `uv`. Lint and format with `ruff`; type-check with `mypy` or `pyright`.
 - `auth` and `ai` use FastAPI with Pydantic models. `assets` uses Django (ORM and admin) with Celery workers and a Redis broker.
 - Migrations: Alembic for `auth`, Django migrations for `assets`.
 - Test with `pytest`. Integration tests use Testcontainers for Postgres, Redis, Kafka and MongoDB.

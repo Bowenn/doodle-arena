@@ -14,18 +14,38 @@ Things the humans prepare. Claude Code can install packages and write config, bu
 
 ## 2. Tools on your machine
 
-Install the current stable version of each:
+`make test` uses the host toolchains, so the first group is required from Stage 1.
 
-- Git and Docker (Docker Desktop, OrbStack or Colima)
-- Go
-- A current LTS JDK (the repo uses the Gradle wrapper, so Gradle itself isn't needed)
-- Python 3.12 or newer, and `uv`
-- Node.js LTS, with npm or pnpm
-- Buf CLI (protobuf lint and code generation)
-- k6 (load tests)
-- Stripe CLI (forwards test webhooks to your machine)
-- Stage 5: AWS CLI and Terraform
-- Optional: `grpcurl` and `kcat` for debugging
+| Tool | Version | Needed from | Notes |
+|---|---|---|---|
+| Docker (Desktop, OrbStack or Colima) with Compose | current | Stage 1 | Give the VM at least 8 GB of memory |
+| Git | current | Stage 1 | |
+| Go | 1.27.x | Stage 1 | Each module's `go.mod` pins the toolchain |
+| JDK | Temurin 25 (LTS) | Stage 1 | The Gradle wrapper (9.8.x) downloads Gradle itself |
+| Python | 3.14.x, through `uv` (0.13.x or newer) | Stage 1 | `uv` installs the pinned Python per service, from `.python-version`; no system Python is needed |
+| Node.js | 24.x LTS, with npm | Stage 1 | `.nvmrc` in `web/` |
+| Buf CLI | 1.74.x | Stage 1 | Protobuf lint, breaking-change check and code generation |
+| k6 | current | Stage 5 | Load tests |
+| Stripe CLI | current | Stage 4 | Forwards test webhooks to your machine |
+| AWS CLI and Terraform | current | Stage 5 | |
+| `grpcurl`, `kcat` | current | Optional | Debugging; `kcat` can also run as a container |
+
+### Pinned container images
+
+Images are pinned to exact tags in `infra/docker-compose.yml`. Versions were checked on 2026-10-15; bump them deliberately, in their own commit.
+
+| Component | Local image | In AWS |
+|---|---|---|
+| Postgres | `postgres:18.6-trixie` | Container, or RDS for PostgreSQL 18.6 |
+| Redis | `redis:8.10.2-trixie` | Container. ElastiCache offers no Redis 8, only Redis OSS 7.1 or Valkey 8–9, so use only commands that Redis 7 and Valkey also support (Streams, Lua, sorted sets, TTLs all qualify) |
+| MongoDB | `mongo:8.0.34` | Container, or DocumentDB with MongoDB 8.0 compatibility |
+| Kafka (KRaft) | `apache/kafka:4.2.2` | Container, or MSK 4.2 on Express brokers (MSK provisioned brokers stop at 4.1). Avoid 4.3+ features such as share groups |
+| Object storage | `chrislusf/seaweedfs:4.48` | S3 |
+| Telemetry | `grafana/otel-lgtm:0.36.0` | See ADR 0003 |
+| Gateway | `nginx:1.30.6` (with the `-otel` variant for tracing) | Container behind a load balancer |
+| Service base images | `golang:1.27`, `eclipse-temurin:25`, `python:3.14-slim`, `node:24` | Same images on ECS or EC2 |
+
+All of these images are built for both `amd64` and `arm64`, so they run on Apple silicon and on Graviton instances. If Lambda is used in Stage 7, its managed runtimes `python3.14`, `nodejs24.x`, `java25` and `provided.al2023` (for Go) all match these versions.
 
 ## 3. Accounts and secrets
 
@@ -44,7 +64,7 @@ The gateway port (8080 here) is a suggestion. Use whatever Stage 1 settles on an
 ## 4. Working as two people
 
 - Each person works on their own track (see `docs/roadmap.md`) in their own branches.
-- Pull `main` before starting a task. Merge through pull requests, and have the other person review changes to `proto/` and anything on a critical path.
+- Pull `master` (the default branch) before starting a task. Merge through pull requests, and have the other person review changes to `proto/` and anything on a critical path.
 - When you run several Claude Code sessions on one machine, give each its own git worktree so their changes don't collide.
 
 ## 5. Personal Claude Code preferences
