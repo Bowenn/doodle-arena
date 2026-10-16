@@ -103,9 +103,11 @@ Owns the Postgres database `auth`.
 Owns the Redis key prefix `lobby:*`.
 
 - REST: create a room, list public rooms, quick play, join a room, read the leaderboard.
-- Keeps a registry of game servers. Each game server sends a gRPC `Heartbeat` every 2 seconds with its load, and an entry expires after 6 seconds without one.
-- Allocates new rooms to the least-loaded healthy game server through gRPC `AllocateRoom`.
-- On join, returns the room's WebSocket URL and a join ticket: a token signed with the lobby's Ed25519 key, valid for 60 seconds and usable once, that names the user and the room (ADR 0005).
+- Keeps a registry of game servers. Each game server sends a gRPC `Heartbeat` every 2 seconds with its addresses, load and per-room status (players, waiting or playing), and an entry expires after 6 seconds without one. The registry gRPC port (9090) is internal.
+- Allocates new rooms to the least-loaded healthy game server through gRPC `AllocateRoom` (fewest sockets, then fewest rooms; draining servers are skipped). Each call has a 2-second deadline; if a server is full, draining or unreachable, the lobby tries the next one, up to three. A server that didn't answer is tried last for the next 10 seconds, so a server that heartbeats but can't be reached doesn't add its deadline to every create. The room is stored only after a server has taken it.
+- On join, returns the room's WebSocket URL (`<ws_address>/rooms/<room_id>`, where `ws_address` is the gateway path the game server reports, such as `/ws/game-server-1`) and a join ticket: a token signed with the lobby's Ed25519 key, valid for 60 seconds and usable once, that names the user and the room (ADR 0005). The lobby doesn't enforce `max_players`: only the game server knows whether a joining player is already in the room (a reconnect), so it decides. Quick play uses the reported counts to pick the fullest waiting room with space.
+- Redis keys: `lobby:server:{server_id}` (the last heartbeat, 6-second TTL), `lobby:servers` (set of server ids), `lobby:room:{room_id}` (the room, expiring 10 minutes after its server last reported it; only the owning server's heartbeat refreshes it), `lobby:rooms:public` (sorted set by creation time, for the room list).
+- Heartbeats aren't authenticated yet, so the lobby accepts only a `/ws…` gateway path as `ws_address` and `host:port` as `control_address`; a bogus heartbeat can't send players to another host.
 - Notices dead game servers through missed heartbeats and reassigns their rooms. Clients that reconnect get the new server's URL.
 - Consumes `MatchFinished` to update a weekly leaderboard in a Redis sorted set. `ZINCRBY` isn't idempotent, so the consumer first records the `match_id` (`SET NX` with a TTL longer than a week) and skips matches it has already seen.
 
@@ -202,7 +204,7 @@ Contracts live in `proto/` and change only with human approval (see `.claude/rul
 | Service | Served by | Called by | Methods |
 |---|---|---|---|
 | `doodle.game.v1.ControlService` | Each game server | Lobby | `AllocateRoom(room_id, mode, settings)` (idempotent per `room_id`), `DrainServer()` before a deploy |
-| `doodle.lobby.v1.RegistryService` | Lobby | Game servers | `Heartbeat(server_id, ws_address, room_ids, sockets, draining)` every 2 seconds |
+| `doodle.lobby.v1.RegistryService` | Lobby | Game servers | `Heartbeat(server_id, ws_address, control_address, rooms[], sockets, draining)` every 2 seconds; `rooms` carries each room's players and phase |
 
 Every call has a deadline. `AllocateRoom` returns `RESOURCE_EXHAUSTED` when the server is full and `FAILED_PRECONDITION` while it drains. Stage 7 may add `doodle.ai.v1` for the AI guesser.
 
@@ -245,8 +247,8 @@ Auth:
 
 Lobby:
 
-- `POST /api/lobby/rooms`, `GET /api/lobby/rooms`, `POST /api/lobby/quickplay`
-- `POST /api/lobby/rooms/{room_id}/join` returns `{ws_url, ticket}`
+- `POST /api/lobby/rooms` takes `{public, settings}` (both optional) and returns the room; `GET /api/lobby/rooms?limit=&cursor=` returns `{rooms, next_cursor}` with live player counts
+- `POST /api/lobby/rooms/{room_id}/join` and `POST /api/lobby/quickplay` return `{room_id, ws_url, ticket, expires_at}`, with `Cache-Control: no-store`
 - `GET /api/lobby/leaderboard`
 
 Assets:

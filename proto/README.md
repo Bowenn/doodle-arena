@@ -43,7 +43,7 @@ make test s=proto       # the same checks without regenerating
 
 Hand-written files under `gen/`, which `make proto` keeps: `gen/go/go.mod` and `go.sum`, `gen/java/build.gradle.kts` and `settings.gradle.kts`, and `gen/python/pyproject.toml`, `uv.lock` and `tests/`.
 
-Service Docker builds use each service's own folder as the build context today, so they can't see `gen/` yet. The first service that imports contracts (task 2.1) moves the compose build contexts to the repo root.
+Docker builds of services that import contracts (lobby and game-server so far) use the repository root as the build context, so they can copy `gen/go`. A `Dockerfile.dockerignore` next to each such Dockerfile sends only `proto/gen/go` and the service's own folder. Other services still build from their own folder and move to the root when they first import contracts.
 
 ## Looking at events
 
