@@ -66,6 +66,7 @@ def google_callback(
         login = LoginState.from_cookie(oauth_cookie, settings.oauth_state_secret)
     except StateError as e:
         log.warning("login failed", extra={"reason": "state_cookie", "detail": str(e)})
+        ctx.metrics.login("failed")
         raise ApiError(400, "OAUTH_STATE_INVALID", "login expired or was started elsewhere") from e
 
     if error:
@@ -76,6 +77,7 @@ def google_callback(
         return response
     if not code or not state or state != login.state:
         log.warning("login failed", extra={"reason": "state_mismatch"})
+        ctx.metrics.login("failed")
         raise ApiError(400, "OAUTH_STATE_INVALID", "login expired or was started elsewhere")
 
     try:
@@ -83,9 +85,11 @@ def google_callback(
         identity = ctx.google.verify_id_token(id_token, login.nonce)
     except GoogleError as e:
         log.error("login failed", extra={"reason": "google_unavailable", "detail": str(e)})
+        ctx.metrics.login("failed")
         raise ApiError(502, "GOOGLE_UNAVAILABLE", "could not reach Google; try again") from e
     except IdTokenError as e:
         log.warning("login failed", extra={"reason": "id_token_invalid", "detail": str(e)})
+        ctx.metrics.login("failed")
         raise ApiError(400, "ID_TOKEN_INVALID", "Google's answer could not be verified") from e
 
     ttl = timedelta(days=settings.refresh_token_ttl_days)
@@ -93,6 +97,7 @@ def google_callback(
         user = users.upsert_from_google(conn, identity)
         token = refresh.start_family(conn, user.id, ctx.now(), ttl)
     log.info("login succeeded", extra={"user_id": str(user.id)})
+    ctx.metrics.login("success")
 
     response = RedirectResponse(f"{settings.public_base_url}{login.return_to}", status_code=302)
     response.headers["Cache-Control"] = "no-store"
@@ -125,6 +130,8 @@ def refresh_access_token(
 ) -> Response:
     check_origin(request, ctx)
     if not refresh_cookie:
+        log.info("refresh rejected", extra={"reason": "missing_cookie"})
+        ctx.metrics.refresh("invalid")
         return unauthorized_refresh(request, ctx)
 
     ttl = timedelta(days=ctx.settings.refresh_token_ttl_days)
@@ -139,8 +146,12 @@ def refresh_access_token(
         if result.outcome == "reuse_detected":
             extra["family_id"] = str(result.family_id)
             log.warning("refresh token reuse detected; family revoked", extra=extra)
+            ctx.metrics.refresh("reuse_detected")
         else:
+            if result.outcome == "rotated":  # the token was valid, but its user is gone
+                extra["reason"] = "user_missing"
             log.info("refresh rejected", extra=extra)
+            ctx.metrics.refresh("expired" if result.outcome == "expired" else "invalid")
         return unauthorized_refresh(request, ctx)
 
     access_token, expires_in = ctx.issuer.issue(str(user.id), user.roles, ctx.now())
@@ -150,6 +161,7 @@ def refresh_access_token(
     )
     cookies.set_refresh_cookie(response, result.token, ctx.settings)
     log.info("refresh rotated", extra={"user_id": str(user.id)})
+    ctx.metrics.refresh("rotated")
     return response
 
 

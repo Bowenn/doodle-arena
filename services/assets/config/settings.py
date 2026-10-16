@@ -8,9 +8,8 @@ import socket
 
 from pydantic_settings import BaseSettings
 
+from config import SERVICE_NAME, telemetry
 from config.logs import logging_config
-
-SERVICE_NAME = "assets"
 
 
 class Env(BaseSettings):
@@ -56,4 +55,4 @@ DATABASES = {
 USE_TZ = True
 TIME_ZONE = "UTC"
 
-LOGGING = logging_config(SERVICE_NAME, env.service_version, env.log_level)
+LOGGING = logging_config(SERVICE_NAME, env.service_version, env.log_level, telemetry.enabled())

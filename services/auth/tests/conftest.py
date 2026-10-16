@@ -13,6 +13,8 @@ from alembic.config import Config
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from sqlalchemy import Engine, text
 
 from app.db import make_engine
@@ -62,7 +64,16 @@ def google() -> Iterator[FakeGoogle]:
 
 
 @pytest.fixture
-def client(db: Engine, key_file: str, google: FakeGoogle) -> Iterator[TestClient]:
+def metric_reader() -> InMemoryMetricReader:
+    """Collects the metrics the app records during one test. (Outside tests they go to the
+    global meter provider, which is a no-op without a collector.)"""
+    return InMemoryMetricReader()
+
+
+@pytest.fixture
+def client(
+    db: Engine, key_file: str, google: FakeGoogle, metric_reader: InMemoryMetricReader
+) -> Iterator[TestClient]:
     """The auth app on a real, empty database, with Google mocked."""
     settings = Settings(
         jwt_private_key_path=key_file,
@@ -70,7 +81,8 @@ def client(db: Engine, key_file: str, google: FakeGoogle) -> Iterator[TestClient
         google_client_secret=CLIENT_SECRET,
         oauth_state_secret="state-secret-" + "x" * 30,
     )
-    ctx = build_context(settings, engine=db, http=httpx.Client())
+    meter = MeterProvider(metric_readers=[metric_reader]).get_meter("auth")
+    ctx = build_context(settings, engine=db, http=httpx.Client(), meter=meter)
     with TestClient(create_app(settings, ctx), base_url="http://localhost:8080") as c:
         yield c
 
