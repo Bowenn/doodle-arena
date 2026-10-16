@@ -36,7 +36,7 @@ The lobby signs tickets with its Ed25519 private key. Game servers hold only the
 Option B: the lobby signs join tickets with an Ed25519 private key, and game servers verify them with the public key only.
 
 - **Claims:** a ticket names the user and the room, has a unique ticket id, and is valid for 60 seconds.
-- **Single use:** before accepting a ticket, the game server records its id in Redis with `SET NX` and a 60-second TTL (as long as the ticket can live). If the key already exists, the ticket was used before, and the connection is rejected. A leaked ticket is therefore worth nothing once its owner has connected, and a replay within the 60 seconds fails.
+- **Single use:** before accepting a ticket, the game server records its id in Redis with `SET NX` and a TTL as long as the ticket can still be accepted: `exp` plus the verifier's 5-second clock-skew leeway, minus now, so at most 65 seconds (refined in task 2.2; a flat 60 seconds would expire 5 seconds before the ticket stops verifying). If the key already exists, the ticket was used before, and the connection is rejected. A leaked ticket is therefore worth nothing once its owner has connected, and a replay within the 60 seconds fails.
 - **Rejected: Option A**, because every game server could mint tickets for any user and room, and rotating the shared secret means updating every service at once.
 
 ## Consequences

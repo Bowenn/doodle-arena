@@ -81,7 +81,7 @@ Until Will joins the project, Bowen covers every service, including marketplace 
 - Serves `/healthz` for itself and `/healthz/<service>` for every service, including each game-server instance (used by `make smoke`). These are restricted to internal traffic in AWS.
 - Only routes; it doesn't verify tokens (ADR 0001). It strips any client-supplied `X-User-*` and `X-Roles` headers, and never routes to a service's internal port.
 - Locally, the whole system is one origin, `http://localhost:8080`: the gateway also proxies the Vite dev server for the web app, so there is no CORS and the refresh cookie is first-party. TLS terminates at the gateway (or the load balancer in front of it) only in AWS.
-- How a WebSocket reaches the game server that owns its room is open: see ADR 0002.
+- WebSockets use `/ws/<server_id>/rooms/<room_id>`: an explicit map sends each `server_id` to its game-server instance, and unknown ids get 404 (ADR 0002).
 
 ### 4.2 Auth (FastAPI)
 
@@ -275,7 +275,7 @@ Notifier (authenticated with an API key):
 
 ### 6.4 WebSocket protocol
 
-The client connects to the URL from the lobby (the exact path depends on ADR 0002) and sends `hello` with its join ticket and, when resuming, `last_seq`. Messages are JSON in v1, at most 64 KB each. Coordinates are normalized to 0–10000, so canvas size doesn't matter. A binary format is a Stage 6 experiment.
+The client connects to the URL from the lobby (`/ws/<server_id>/rooms/<room_id>`, ADR 0002) and sends `hello` with its join ticket and, when resuming, `last_seq`. Messages are JSON in v1, at most 64 KB each. Coordinates are normalized to 0–10000, so canvas size doesn't matter. A binary format is a Stage 6 experiment.
 
 Client to server:
 
@@ -427,7 +427,7 @@ Redis keys for each room:
 | `room:{id}:snapshot` | String or hash | Full room state plus its `seq`, written at every state transition and every 200 events |
 | `room:{id}:lease` | String | The owning `server_id`, with a 5-second TTL renewed every 1.5 seconds |
 | `room:{id}:fence` | Counter | Incremented when a server takes the lease; the result is that server's fencing token |
-| `room:{id}:ticket:{ticket_id}` | String | A used join ticket, set with `SET NX` and a 60-second TTL, so each ticket works once (ADR 0005) |
+| `room:{id}:ticket:{ticket_id}` | String | A used join ticket, set with `SET NX` and a TTL that outlives the ticket (at most 65 seconds), so each ticket works once (ADR 0005) |
 
 Writes go through a Lua script that checks the lease holder and the fencing token before it appends events or writes the snapshot. A server whose check fails stops the room immediately. The stream is trimmed to keep everything after the latest snapshot plus a margin.
 
@@ -517,12 +517,12 @@ Releases:
 | D18 | Every service verifies RS256 JWTs itself, with one audience (`doodle-api`); the gateway only routes; the Django admin bridges Google sign-in into a short session (ADR 0001) | No extra hop, no trusted headers, one identity for players and moderators |
 | D19 | Each Kafka topic carries one wrapper message with a `oneof` per event type; no schema registry, Buf only (ADR 0004) | The contract says what each topic holds and `buf breaking` checks it; no extra stateful service |
 | D20 | The lobby signs join tickets with Ed25519; game servers verify with the public key only; tickets last 60 seconds and are single-use through Redis `SET NX` (ADR 0005) | Only the lobby can mint tickets, rotation needs no coordinated restart, and a leaked ticket can't be replayed |
+| D21 | WebSockets connect to `/ws/<server_id>/rooms/<room_id>`, a direct URL from the lobby that the gateway maps to the instance (ADR 0002) | Always agrees with the lobby's view of the owner; consistent hashing would save no lobby call because tickets are single-use |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 15. Open questions
 
-- ADR 0002: how a WebSocket reaches the game server that owns its room. Decide in Stage 2.
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and the reward amounts (defaults are in section 7).
 - Before task 2.5: the takeover protocol when a game server loses the lobby but can still reach Redis. The lobby then reassigns rooms whose lease the old server is still renewing. Does the new server wait for the lease to expire, or take it by force with a new fencing token, and what do clients do in the meantime?
