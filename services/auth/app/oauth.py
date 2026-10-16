@@ -127,7 +127,9 @@ class GoogleClient:
         self.redirect_uri = redirect_uri
         self.http = http
         self._jwks: dict[str, Any] = {}
-        self._jwks_fetched_at = 0.0
+        # None until the first fetch. Not 0.0: time.monotonic() counts from boot, so shortly after
+        # boot "now - 0.0" is under the refetch interval and the first fetch would never happen.
+        self._jwks_fetched_at: float | None = None
 
     def authorize_url(self, login: LoginState) -> str:
         params = {
@@ -195,9 +197,11 @@ class GoogleClient:
         if not isinstance(kid, str):
             raise jwt.InvalidTokenError("ID token has no kid")
         # Google rotates keys; refetch on an unknown kid, at most once a minute.
-        if kid not in self._jwks and time.monotonic() - self._jwks_fetched_at > 60:
+        now = time.monotonic()
+        stale = self._jwks_fetched_at is None or now - self._jwks_fetched_at > 60
+        if kid not in self._jwks and stale:
             self._jwks = self._fetch_jwks()
-            self._jwks_fetched_at = time.monotonic()
+            self._jwks_fetched_at = now
         if kid not in self._jwks:
             raise jwt.InvalidTokenError("ID token signed by an unknown Google key")
         return self._jwks[kid]
