@@ -48,12 +48,12 @@ jobs:
         run: |
           docker compose -f infra/docker-compose.yml --env-file .env ps -a
           docker compose -f infra/docker-compose.yml --env-file .env logs --no-color --tail=200
-      - name: Show otel-lgtm warnings and errors
+      - name: Show Loki's own log lines
         if: failure()
         run: |
-          docker compose -f infra/docker-compose.yml --env-file .env logs --no-color otel-lgtm |
-            grep -iE 'level=(warn|error)|shutting|stopping|panic|"error"' |
-            grep -v 'logproto.Pusher/Push' | head -60 || true
+          # Loki logs in logfmt (lines start with level=); the collector's lines don't.
+          docker compose -f infra/docker-compose.yml --env-file .env logs --no-color --no-log-prefix otel-lgtm |
+            grep -E '^level=' | grep -v 'logproto.Pusher/Push' | head -120 || true
       - name: make down
         if: always()
         run: docker compose -f infra/docker-compose.yml --env-file .env down -v --remove-orphans
