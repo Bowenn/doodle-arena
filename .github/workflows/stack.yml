@@ -38,6 +38,8 @@ jobs:
         run: make up
       - name: make smoke
         run: make smoke
+      - name: make telemetry-check (trace, logs and metrics reach Grafana)
+        run: make telemetry-check
       - name: Show containers and logs
         if: failure()
         run: |
