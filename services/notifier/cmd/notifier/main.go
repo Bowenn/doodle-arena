@@ -15,6 +15,7 @@ import (
 
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/server"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/telemetry"
 )
 
 const serviceName = "notifier"
@@ -52,9 +53,23 @@ func main() {
 		os.Exit(healthcheck(cfg.port))
 	}
 
-	logger := logging.New(os.Stdout, serviceName, cfg.version, cfg.logLevel)
-	if err := run(cfg, logger); err != nil {
-		logger.Error("exiting", "err", err)
+	shutdownTelemetry, err := telemetry.Setup(context.Background())
+	logger := logging.New(os.Stdout, serviceName, cfg.version, cfg.logLevel, telemetry.Enabled())
+	if err != nil {
+		logger.Error("telemetry setup failed", "err", err)
+		os.Exit(1)
+	}
+	runErr := run(cfg, logger)
+	if runErr != nil {
+		logger.Error("exiting", "err", runErr)
+	}
+	// Flush the last spans, metrics and logs after the server has drained.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := shutdownTelemetry(ctx); err != nil {
+		logger.Error("telemetry shutdown failed", "err", err)
+	}
+	if runErr != nil {
 		os.Exit(1)
 	}
 }

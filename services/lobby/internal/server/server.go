@@ -4,6 +4,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Info identifies this process in health responses.
@@ -13,8 +15,9 @@ type Info struct {
 	Instance string `json:"instance"`
 }
 
-// NewHandler returns the service's HTTP routes.
-func NewHandler(info Info) http.Handler {
+// NewHandler returns the service's HTTP routes, traced with OpenTelemetry (a server span per
+// request, continuing the caller's traceparent). Health checks are not traced.
+func NewHandler(info Info, opts ...otelhttp.Option) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -23,5 +26,9 @@ func NewHandler(info Info) http.Handler {
 			Info
 		}{"ok", info})
 	})
-	return mux
+
+	opts = append([]otelhttp.Option{
+		otelhttp.WithFilter(func(r *http.Request) bool { return r.URL.Path != "/healthz" }),
+	}, opts...)
+	return otelhttp.NewHandler(mux, "http.server", opts...)
 }
