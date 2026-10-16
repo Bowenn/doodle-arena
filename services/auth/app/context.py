@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from fastapi import Request
 from sqlalchemy import Engine
 
+from app.oauth import GoogleClient
 from app.settings import Settings
 from app.tokens import TokenIssuer, TokenVerifier
 
@@ -21,6 +22,8 @@ class AuthContext:
     engine: Engine
     issuer: TokenIssuer
     verifier: TokenVerifier
+    # None when no Google client is configured; sign-in then returns 503.
+    google: GoogleClient | None
     now: Callable[[], datetime] = utc_now
 
 

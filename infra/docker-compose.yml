@@ -90,6 +90,12 @@ services:
       <<: [*app-env, *auth-db-env]
       SERVICE_INSTANCE_ID: auth-1
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt-private-key
+      # Empty Google credentials keep the stack running; sign-in then returns 503.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      OAUTH_STATE_SECRET: ${OAUTH_STATE_SECRET:?}
+      PUBLIC_BASE_URL: http://localhost:8080
+      COOKIE_SECURE: "false"
     secrets:
       - jwt-private-key
     depends_on:
