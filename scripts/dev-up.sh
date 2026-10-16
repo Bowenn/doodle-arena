@@ -29,6 +29,17 @@ else
   done < .env.example
 fi
 
+# A .env copied by hand from .env.example still holds placeholders; give them random values.
+# Real values (anything other than "change-me") are left alone.
+if grep -q '=change-me$' .env; then
+  echo "Replacing change-me placeholders in .env with random values"
+  tmp="$(mktemp)"
+  while IFS= read -r line; do fill "$line"; done < .env > "$tmp"
+  cat "$tmp" > .env
+  rm -f "$tmp"
+  chmod 600 .env
+fi
+
 ./scripts/gen-jwt-key.sh
 
 # --renew-anon-volumes refreshes web's node_modules volume after a dependency change.
