@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - services/lobby/**
+      - fixtures/jwt/**
       - proto/gen/go/**
       - .github/workflows/lobby.yml
       - .github/workflows/_go.yml
@@ -16,6 +17,7 @@ on:
     branches: [master]
     paths:
       - services/lobby/**
+      - fixtures/jwt/**
       - proto/gen/go/**
       - .github/workflows/lobby.yml
       - .github/workflows/_go.yml

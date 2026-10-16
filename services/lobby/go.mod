@@ -5,6 +5,7 @@ go 1.27
 toolchain go1.27.2
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	go.opentelemetry.io/contrib/bridges/otelslog v0.21.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.72.0
