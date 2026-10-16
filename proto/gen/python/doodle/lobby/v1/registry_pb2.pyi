@@ -17,20 +17,22 @@ ROOM_PHASE_WAITING: RoomPhase
 ROOM_PHASE_PLAYING: RoomPhase
 
 class HeartbeatRequest(_message.Message):
-    __slots__ = ("server_id", "ws_address", "room_ids", "sockets", "draining", "rooms")
+    __slots__ = ("server_id", "ws_address", "room_ids", "sockets", "draining", "rooms", "control_address")
     SERVER_ID_FIELD_NUMBER: _ClassVar[int]
     WS_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     ROOM_IDS_FIELD_NUMBER: _ClassVar[int]
     SOCKETS_FIELD_NUMBER: _ClassVar[int]
     DRAINING_FIELD_NUMBER: _ClassVar[int]
     ROOMS_FIELD_NUMBER: _ClassVar[int]
+    CONTROL_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     server_id: str
     ws_address: str
     room_ids: _containers.RepeatedScalarFieldContainer[str]
     sockets: int
     draining: bool
     rooms: _containers.RepeatedCompositeFieldContainer[RoomStatus]
-    def __init__(self, server_id: _Optional[str] = ..., ws_address: _Optional[str] = ..., room_ids: _Optional[_Iterable[str]] = ..., sockets: _Optional[int] = ..., draining: _Optional[bool] = ..., rooms: _Optional[_Iterable[_Union[RoomStatus, _Mapping]]] = ...) -> None: ...
+    control_address: str
+    def __init__(self, server_id: _Optional[str] = ..., ws_address: _Optional[str] = ..., room_ids: _Optional[_Iterable[str]] = ..., sockets: _Optional[int] = ..., draining: _Optional[bool] = ..., rooms: _Optional[_Iterable[_Union[RoomStatus, _Mapping]]] = ..., control_address: _Optional[str] = ...) -> None: ...
 
 class RoomStatus(_message.Message):
     __slots__ = ("room_id", "players", "phase")

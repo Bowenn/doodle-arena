@@ -91,9 +91,12 @@ type HeartbeatRequest struct {
 	Draining bool `protobuf:"varint,5,opt,name=draining,proto3" json:"draining,omitempty"`
 	// Status of every room this server owns, so the lobby can show player counts and send
 	// quick-play players to a room with space.
-	Rooms         []*RoomStatus `protobuf:"bytes,6,rep,name=rooms,proto3" json:"rooms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Rooms []*RoomStatus `protobuf:"bytes,6,rep,name=rooms,proto3" json:"rooms,omitempty"`
+	// host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+	// for example "game-server-1:9090". Internal only; the gateway never routes it.
+	ControlAddress string `protobuf:"bytes,7,opt,name=control_address,json=controlAddress,proto3" json:"control_address,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HeartbeatRequest) Reset() {
@@ -166,6 +169,13 @@ func (x *HeartbeatRequest) GetRooms() []*RoomStatus {
 		return x.Rooms
 	}
 	return nil
+}
+
+func (x *HeartbeatRequest) GetControlAddress() string {
+	if x != nil {
+		return x.ControlAddress
+	}
+	return ""
 }
 
 // RoomStatus is one room as its game server sees it, reported in every heartbeat.
@@ -273,7 +283,7 @@ var File_doodle_lobby_v1_registry_proto protoreflect.FileDescriptor
 
 const file_doodle_lobby_v1_registry_proto_rawDesc = "" +
 	"\n" +
-	"\x1edoodle/lobby/v1/registry.proto\x12\x0fdoodle.lobby.v1\"\xd2\x01\n" +
+	"\x1edoodle/lobby/v1/registry.proto\x12\x0fdoodle.lobby.v1\"\xfb\x01\n" +
 	"\x10HeartbeatRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1d\n" +
 	"\n" +
@@ -281,7 +291,8 @@ const file_doodle_lobby_v1_registry_proto_rawDesc = "" +
 	"\broom_ids\x18\x03 \x03(\tR\aroomIds\x12\x18\n" +
 	"\asockets\x18\x04 \x01(\rR\asockets\x12\x1a\n" +
 	"\bdraining\x18\x05 \x01(\bR\bdraining\x121\n" +
-	"\x05rooms\x18\x06 \x03(\v2\x1b.doodle.lobby.v1.RoomStatusR\x05rooms\"q\n" +
+	"\x05rooms\x18\x06 \x03(\v2\x1b.doodle.lobby.v1.RoomStatusR\x05rooms\x12'\n" +
+	"\x0fcontrol_address\x18\a \x01(\tR\x0econtrolAddress\"q\n" +
 	"\n" +
 	"RoomStatus\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x18\n" +

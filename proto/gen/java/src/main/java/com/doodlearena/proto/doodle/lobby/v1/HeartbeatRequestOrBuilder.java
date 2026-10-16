@@ -163,4 +163,26 @@ public interface HeartbeatRequestOrBuilder extends
    */
   com.doodlearena.proto.doodle.lobby.v1.RoomStatusOrBuilder getRoomsOrBuilder(
       int index);
+
+  /**
+   * <pre>
+   * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+   * for example "game-server-1:9090". Internal only; the gateway never routes it.
+   * </pre>
+   *
+   * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+   * @return The controlAddress.
+   */
+  java.lang.String getControlAddress();
+  /**
+   * <pre>
+   * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+   * for example "game-server-1:9090". Internal only; the gateway never routes it.
+   * </pre>
+   *
+   * <code>string control_address = 7 [json_name = "controlAddress"];</code>
+   * @return The bytes for controlAddress.
+   */
+  com.google.protobuf.ByteString
+      getControlAddressBytes();
 }

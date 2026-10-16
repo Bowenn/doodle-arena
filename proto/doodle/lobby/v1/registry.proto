@@ -25,6 +25,9 @@ message HeartbeatRequest {
   // Status of every room this server owns, so the lobby can show player counts and send
   // quick-play players to a room with space.
   repeated RoomStatus rooms = 6;
+  // host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
+  // for example "game-server-1:9090". Internal only; the gateway never routes it.
+  string control_address = 7;
 }
 
 // RoomStatus is one room as its game server sees it, reported in every heartbeat.
