@@ -497,3 +497,31 @@ func TestTouchOnlyRefreshesTheOwnersRooms(t *testing.T) {
 		t.Fatal("touch created a room")
 	}
 }
+
+// A server that heartbeats but doesn't answer is skipped for a while, so it doesn't add its
+// deadline to every create.
+func TestUnreachableServerIsTriedLast(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false) // least loaded, but unreachable
+	e.beat(t, "gs-2", 5, false)
+	e.alloc.answers["gs-1:9090"] = status.Error(codes.Unavailable, "connection refused")
+
+	for range 3 {
+		if _, err := e.svc.Create(t.Context(), "u-host", true, Settings{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"gs-1:9090", "gs-2:9090", "gs-2:9090", "gs-2:9090"}
+	if !slices.Equal(e.alloc.calls, want) {
+		t.Fatalf("calls = %v, want %v", e.alloc.calls, want)
+	}
+
+	// After the cooldown it gets another chance.
+	e.clock.add(suspectFor + time.Second)
+	e.alloc.calls = nil
+	delete(e.alloc.answers, "gs-1:9090")
+	room, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil || room.ServerID != "gs-1" {
+		t.Fatalf("room = %+v, err = %v", room, err)
+	}
+}

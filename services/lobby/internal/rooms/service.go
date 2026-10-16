@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
@@ -40,6 +41,9 @@ const (
 	// next heartbeat is at most 2 s away). After that, a room its live server doesn't report
 	// has ended.
 	reportGrace = 30 * time.Second
+	// suspectFor is how long Create skips a server whose AllocateRoom failed in transport
+	// (unreachable or timed out), unless no other server is left.
+	suspectFor = 10 * time.Second
 	// quickPlayScan is how many public rooms quick play looks at before creating a new one.
 	quickPlayScan = 60
 )
@@ -87,6 +91,13 @@ type Service struct {
 	log         *slog.Logger
 	tracer      trace.Tracer
 	allocations metric.Int64Counter
+
+	// suspect holds game servers that heartbeat but didn't answer AllocateRoom, until when
+	// to skip them. Without it, such a server never gets rooms, so it stays the least loaded
+	// and every create would wait out its deadline first. Per lobby process, on purpose: it
+	// is a latency optimisation, not shared state.
+	mu      sync.Mutex
+	suspect map[string]time.Time
 }
 
 // NewService wires the room service. Metrics and spans go to the global OpenTelemetry
@@ -100,7 +111,7 @@ func NewService(store *Store, servers Servers, alloc Allocator, tickets TicketSi
 	}
 	return &Service{
 		store: store, servers: servers, alloc: alloc, tickets: tickets, now: now, log: log,
-		tracer: otel.Tracer("lobby"), allocations: allocations,
+		tracer: otel.Tracer("lobby"), allocations: allocations, suspect: make(map[string]time.Time),
 	}, nil
 }
 
@@ -159,7 +170,7 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 		s.count(ctx, "error")
 		return Room{}, err
 	}
-	candidates := registry.Candidates(all)
+	candidates := s.withoutSuspects(registry.Candidates(all))
 	if len(candidates) == 0 {
 		s.count(ctx, "no_servers")
 		s.log.WarnContext(ctx, "no game server for a new room", "room_id", room.ID, "user_id", hostID, "registered", len(all))
@@ -194,11 +205,36 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 			// Full or draining: an answer, not a fault.
 		default:
 			result = "error"
+			s.markSuspect(srv.ID)
 		}
 		s.log.WarnContext(ctx, "allocation failed, trying the next server", "room_id", room.ID, "server_id", srv.ID, "err", err)
 	}
 	s.count(ctx, result)
 	return Room{}, ErrNoServers
+}
+
+// withoutSuspects moves suspect servers to the end, keeping the order otherwise, so they are
+// tried only if every healthy-looking server fails first.
+func (s *Service) withoutSuspects(candidates []registry.Server) []registry.Server {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	var ok, suspect []registry.Server
+	for _, c := range candidates {
+		if until, found := s.suspect[c.ID]; found && now.Before(until) {
+			suspect = append(suspect, c)
+			continue
+		}
+		delete(s.suspect, c.ID)
+		ok = append(ok, c)
+	}
+	return append(ok, suspect...)
+}
+
+func (s *Service) markSuspect(serverID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.suspect[serverID] = s.now().Add(suspectFor)
 }
 
 func (s *Service) allocateOn(ctx context.Context, srv registry.Server, req *gamev1.AllocateRoomRequest) (err error) {
