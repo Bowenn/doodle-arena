@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// EventMeta is field 1 of every event, whatever topic it travels on (ADR 0004).
+// Producers fill it in when they create the event; consumers use it to deduplicate and to log.
+message EventMeta {
+  // Unique id of this event (UUID v4). At-least-once delivery means consumers can see the
+  // same event twice; they deduplicate on this id or on a natural key.
+  string event_id = 1;
+  // The event's message name, for example "RoundFinished". Matches the wrapper's oneof case,
+  // so logs and dead-letter records stay readable without decoding the wrapper.
+  string event_type = 2;
+  // Version of this event's schema, starting at 1. Bumped only when the meaning of existing
+  // fields changes in a way consumers must handle.
+  uint32 schema_version = 3;
+  // When the event happened, by the producer's clock.
+  google.protobuf.Timestamp occurred_at = 4;
+  // Name of the producing service, for example "game-server" or "marketplace".
+  string producer = 5;
+}

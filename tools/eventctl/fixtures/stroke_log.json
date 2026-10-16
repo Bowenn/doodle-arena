@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "roomId": "r_demo",
+  "roundNo": 1,
+  "canvasWidth": 800,
+  "canvasHeight": 600,
+  "strokes": [
+    {
+      "strokeId": "s1",
+      "userId": "u_alice",
+      "color": "#1f2937",
+      "width": 60,
+      "points": [
+        { "x": 4300, "y": 8500, "tMs": 0 },
+        { "x": 4600, "y": 3000, "tMs": 180 },
+        { "x": 5400, "y": 3000, "tMs": 320 },
+        { "x": 5700, "y": 8500, "tMs": 500 },
+        { "x": 4300, "y": 8500, "tMs": 640 }
+      ],
+      "serverReceivedMs": 1300
+    },
+    {
+      "strokeId": "s2",
+      "userId": "u_alice",
+      "color": "#dc2626",
+      "width": 60,
+      "points": [
+        { "x": 4400, "y": 4600, "tMs": 0 },
+        { "x": 5600, "y": 4600, "tMs": 150 },
+        { "x": 5600, "y": 5600, "tMs": 300 },
+        { "x": 4400, "y": 5600, "tMs": 450 }
+      ],
+      "undone": true,
+      "serverReceivedMs": 2600
+    },
+    {
+      "strokeId": "s3",
+      "userId": "u_alice",
+      "color": "#f59e0b",
+      "width": 30,
+      "points": [
+        { "x": 5000, "y": 2600, "tMs": 0 },
+        { "x": 8500, "y": 1500, "tMs": 200 },
+        { "x": 8500, "y": 3700, "tMs": 400 },
+        { "x": 5000, "y": 2600, "tMs": 600 }
+      ],
+      "serverReceivedMs": 4100
+    }
+  ]
+}

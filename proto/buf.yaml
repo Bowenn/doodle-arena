@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+    # Every message, field, enum, oneof, service and RPC must have a comment
+    # (.claude/rules/contracts.md).
+    - COMMENTS
+breaking:
+  use:
+    - FILE

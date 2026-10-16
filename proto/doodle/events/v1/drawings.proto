@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+
+// DrawingEvent is the only message type on the topic assets.drawings.v1 (key: drawing_id).
+// Produced by assets after moderation; consumed by the marketplace.
+message DrawingEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // The drawing passed moderation and can be owned and traded.
+    DrawingApproved drawing_approved = 1;
+    // The drawing failed moderation and is never minted.
+    DrawingRejected drawing_rejected = 2;
+  }
+}
+
+// DecisionSource says who made a moderation decision.
+enum DecisionSource {
+  // Not set. Treat as an error.
+  DECISION_SOURCE_UNSPECIFIED = 0;
+  // The AI service decided.
+  DECISION_SOURCE_AI = 1;
+  // A human moderator decided in the Django admin review queue.
+  DECISION_SOURCE_MODERATOR = 2;
+}
+
+// DrawingApproved says a drawing passed moderation. The marketplace mints it: it creates the
+// ownership row for initial_owner_id with INSERT ... ON CONFLICT DO NOTHING and records the
+// authors for royalties.
+message DrawingApproved {
+  // Event metadata.
+  EventMeta meta = 1;
+  // Unique id of the drawing.
+  string drawing_id = 2;
+  // The match the drawing came from.
+  string match_id = 3;
+  // The round within that match.
+  uint32 round_no = 4;
+  // Everyone who drew it, in drawing order. Royalties are split between them.
+  repeated string author_ids = 5;
+  // Who owns the drawing when it is minted: the first author.
+  string initial_owner_id = 6;
+  // Hex SHA-256 of the full-size PNG. Identical images share storage.
+  string sha256 = 7;
+  // Object key of the full-size PNG in the drawings bucket ("sha256/<hash>.png").
+  string image_key = 8;
+  // Object key of the thumbnail in the drawings bucket.
+  string thumb_key = 9;
+  // Who approved it.
+  DecisionSource approved_by = 10;
+}
+
+// DrawingRejected says a drawing failed moderation. The marketplace never mints it.
+message DrawingRejected {
+  // Event metadata.
+  EventMeta meta = 1;
+  // Unique id of the drawing.
+  string drawing_id = 2;
+  // The match the drawing came from.
+  string match_id = 3;
+  // The round within that match.
+  uint32 round_no = 4;
+  // Everyone who drew it, in drawing order.
+  repeated string author_ids = 5;
+  // Who rejected it.
+  DecisionSource rejected_by = 6;
+  // Short machine-readable reason, for example "moderation:unsafe" or "manual:spam".
+  string reason = 7;
+}

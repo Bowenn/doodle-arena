@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+import "google/protobuf/timestamp.proto";
+
+// DeadLetterEvent is the only message type on the topic notifier.dlq.v1 (key: endpoint_id).
+// Produced by the notifier; read by alerting and by humans.
+message DeadLetterEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // A webhook delivery used up all of its attempts.
+    DeliveryDead delivery_dead = 1;
+  }
+}
+
+// DeliveryDead says a webhook delivery failed on every attempt and was marked DEAD.
+message DeliveryDead {
+  // Event metadata.
+  EventMeta meta = 1;
+  // The delivery row in the notifier's database.
+  string delivery_id = 2;
+  // The developer's webhook endpoint.
+  string endpoint_id = 3;
+  // event_id of the event the webhook carried (for example a SaleCompleted).
+  string source_event_id = 4;
+  // event_type of that event.
+  string source_event_type = 5;
+  // How many attempts were made.
+  uint32 attempts = 6;
+  // HTTP status of the last attempt, or 0 when there was no response (timeout or connection
+  // error).
+  int32 last_status_code = 7;
+  // Short description of the last failure. Never contains secrets or response bodies.
+  string last_error = 8;
+  // When the first attempt was made.
+  google.protobuf.Timestamp first_attempt_at = 9;
+  // When the delivery was marked DEAD.
+  google.protobuf.Timestamp dead_at = 10;
+}

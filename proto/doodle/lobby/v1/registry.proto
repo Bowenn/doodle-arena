@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package doodle.lobby.v1;
+
+// RegistryService is served by the lobby and called by every game server.
+service RegistryService {
+  // Heartbeat reports that a game server is alive, every 2 seconds. A server whose heartbeat
+  // stops for 6 seconds is treated as dead, and its rooms are allocated elsewhere.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+// HeartbeatRequest is a game server's current state.
+message HeartbeatRequest {
+  // Stable id of the game server, for example "game-server-1".
+  string server_id = 1;
+  // Address clients use to reach this server's WebSocket endpoint (ADR 0002).
+  string ws_address = 2;
+  // Rooms this server currently owns. Lets the lobby reassign them if the server dies.
+  repeated string room_ids = 3;
+  // Open WebSocket connections, used as the load figure for least-loaded allocation.
+  uint32 sockets = 4;
+  // True while the server drains before a deploy; the lobby sends it no new rooms.
+  bool draining = 5;
+}
+
+// HeartbeatResponse is empty for now; fields can be added later without breaking callers.
+message HeartbeatResponse {}

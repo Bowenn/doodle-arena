@@ -1,0 +1,30 @@
+# Code generation for `make proto`. Plugins run remotely on the Buf Schema Registry and are
+# pinned, so every machine produces identical output. Bump a version in its own commit, and
+# keep the runtime libraries in gen/*/ in step:
+#   protoc 36.2   -> protobuf-java 4.36.2, Python protobuf 7.36.2
+#   grpc-java     -> io.grpc 1.85.0;  grpc (Python) -> grpcio 1.84.0;  grpc-go 1.84.0
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/Bowenn/gap-project_private/proto/gen/go
+    - file_option: java_package_prefix
+      value: com.doodlearena.proto
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.12
+    out: gen/go
+    opt: paths=source_relative
+  - remote: buf.build/grpc/go:v1.6.2
+    out: gen/go
+    opt: paths=source_relative
+  - remote: buf.build/protocolbuffers/java:v36.2
+    out: gen/java/src/main/java
+  - remote: buf.build/grpc/java:v1.85.0
+    out: gen/java/src/main/java
+  - remote: buf.build/protocolbuffers/python:v36.2
+    out: gen/python
+  - remote: buf.build/protocolbuffers/pyi:v36.2
+    out: gen/python
+  - remote: buf.build/grpc/python:v1.84.0
+    out: gen/python

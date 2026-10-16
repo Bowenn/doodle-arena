@@ -14,6 +14,7 @@ run_one() {
     go) (cd "$dir" && go test -race ./...) ;;
     python) (cd "$dir" && uv run --frozen pytest) ;;
     java) (cd "$dir" && ./gradlew --quiet test) ;;
+    proto) ./scripts/proto.sh check ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm test) ;;
   esac
 }

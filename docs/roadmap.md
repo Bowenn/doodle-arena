@@ -32,7 +32,7 @@ Tracks:
   - Monorepo layout from `CLAUDE.md`, plus `.gitignore`, `.env.example`, a `Makefile` and `scripts/dev-up.sh`.
   - Docker Compose with Postgres (four databases, one user each), Redis, MongoDB, Kafka in KRaft mode, SeaweedFS with the buckets `round-logs` and `drawings`, and `grafana/otel-lgtm`.
   - A skeleton for every week-1 service, each in its own container with a `/healthz` endpoint.
-- [ ] **1.2 Contracts**
+- [x] **1.2 Contracts**
   - Buf setup. `doodle.events.v1` with `EventMeta` and every week-1 event, plus `doodle.game.v1` and `doodle.lobby.v1`.
   - `make proto` generates code for Go, Java and Python. `proto/README.md` explains where it lands.
   - A script that creates the Kafka topics (for example 6 partitions each) at startup.

@@ -54,7 +54,9 @@ Keep this list accurate:
 - `make smoke`: checks every service's `/healthz` through the gateway (`http://localhost:8080/healthz/<service>`).
 - `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
 - `make lint [s=<service>]`, `make logs s=<service>`, `make ps`.
-- Planned: `make proto` (task 1.2, regenerate code from `proto/`) and `make seed` (later). Don't use them before they exist.
+- `make proto`: lint `proto/`, regenerate Go, Java and Python code into `proto/gen/`, and build it. `make test s=proto` checks without regenerating.
+- `scripts/fake-events.sh [-match-id <id>] [-dry-run]`: publish a fake `RoundFinished` and `MatchFinished` (and upload the stroke log). Read events back with `(cd tools/eventctl && go run . decode -topic <topic> -n <k>)`.
+- Planned: `make seed` (later). Don't use it before it exists.
 
 ## Ground rules
 

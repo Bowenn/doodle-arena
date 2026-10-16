@@ -18,6 +18,7 @@ run_one() {
       (cd "$dir" && uv run --frozen ruff check . && uv run --frozen ruff format --check . && uv run --frozen mypy .)
       ;;
     java) (cd "$dir" && ./gradlew --quiet compileJava compileTestJava) ;;
+    proto) ./scripts/proto.sh check ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm run lint) ;;
   esac
 }

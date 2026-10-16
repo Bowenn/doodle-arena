@@ -1,0 +1,10 @@
+{
+  "roundFinished": {
+    "roomId": "r_demo",
+    "roundNo": 1,
+    "word": "lighthouse",
+    "drawerIds": ["u_alice"],
+    "canvasWidth": 800,
+    "canvasHeight": 600
+  }
+}
