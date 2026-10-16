@@ -46,6 +46,12 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Bugs the end-to-end check caught.** Its request first got rate-limited by the gateway (`make smoke` had just drained the bucket), which proves the limit works but hid the trace; the fix retries with a fresh trace id per attempt. And the Python SDK exported no metrics from services without traffic. Adding process runtime metrics gives every service a heartbeat (`target_info`), the way Go and the JVM already had.
 - **Cardinality and noise.** No IDs in metric attributes (one series per room would melt Prometheus). Health checks and dev-server assets aren't traced, because they'd bury real traffic. The exception is the Java agent, which has no simple path filter, so marketplace's health check produces a small trace every few seconds until tail sampling (Stage 6) drops it.
 
+### 1.6 README
+
+- **The README was tested like code.** A fresh clone of the branch followed the quick start word for word, under a separate Compose project, so fresh volumes and no shared state: `cp .env.example .env`, `make up`, `make smoke`, `make telemetry-check`. Everything passed in about 45 seconds of startup. Docs that nobody runs rot; the check found a real gap before anyone hit it.
+- **The gap: a hand-made `.env` kept placeholder passwords.** The natural first step, copying `.env.example` to add Google credentials, left literal `change-me` values, because the start script only generated secrets when it created `.env` itself. It now replaces any remaining placeholder and never touches real values, and running it twice changes nothing.
+- **What goes in the README and what doesn't.** It answers "what is this, how do I run it, where do I read more" in a few minutes, and links to the design doc, roadmap and ADRs for depth. The troubleshooting section holds the real gotchas from Stage 1 (port 15432, `redirect_uri_mismatch`, Loki refusing writes on a full disk), because those cost hours to find.
+
 ## Stage 2: Game core
 
 ## Stage 3: Drawing lifecycle
