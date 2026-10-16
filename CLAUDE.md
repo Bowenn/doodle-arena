@@ -53,7 +53,8 @@ Keep this list accurate:
 - `make up` / `make down`: start or stop the local stack (`infra/docker-compose.yml`). The first `make up` creates `.env` with random local passwords.
 - `make smoke`: checks every service's `/healthz` through the gateway (`http://localhost:8080/healthz/<service>`).
 - `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
-- `make lint [s=<service>]`, `make logs s=<service>`, `make ps`.
+- `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows), `make logs s=<service>`, `make ps`.
+- CI (`.github/workflows/`) runs the same `scripts/lint.sh` and `scripts/test.sh` per service, so `make lint s=<svc> && make test s=<svc>` predicts CI. Pin new actions to a full commit SHA with the version in a comment.
 - `make proto`: lint `proto/`, regenerate Go, Java and Python code into `proto/gen/`, and build it. `make test s=proto` checks without regenerating.
 - `scripts/fake-events.sh [-match-id <id>] [-dry-run]`: publish a fake `RoundFinished` and `MatchFinished` (and upload the stroke log). Read events back with `(cd tools/eventctl && go run . decode -topic <topic> -n <k>)`.
 - Planned: `make seed` (later). Don't use it before it exists.
