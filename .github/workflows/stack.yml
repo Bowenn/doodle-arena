@@ -30,6 +30,9 @@ jobs:
     name: make up and make smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      # Show otel-lgtm's collector logs, so a failed export (for example to Loki) is visible.
+      OTEL_LGTM_COLLECTOR_LOGS: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -51,6 +51,8 @@ services:
       OTEL_SERVICE_NAME: lobby
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=lobby-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
+      otel-lgtm:
+        condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully
     healthcheck: *go-healthcheck
@@ -65,6 +67,8 @@ services:
       OTEL_SERVICE_NAME: game-server
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=game-server-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
+      otel-lgtm:
+        condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully
       seaweedfs-buckets:
@@ -80,6 +84,8 @@ services:
       OTEL_SERVICE_NAME: game-server
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=game-server-2,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
+      otel-lgtm:
+        condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully
       seaweedfs-buckets:
@@ -95,6 +101,8 @@ services:
       OTEL_SERVICE_NAME: notifier
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=notifier-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
+      otel-lgtm:
+        condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully
     healthcheck: *go-healthcheck
@@ -131,6 +139,8 @@ services:
     secrets:
       - jwt-private-key
     depends_on:
+      otel-lgtm:
+        condition: service_healthy
       auth-migrate:
         condition: service_completed_successfully
     healthcheck: *py-healthcheck
@@ -143,6 +153,9 @@ services:
       SERVICE_INSTANCE_ID: ai-1
       OTEL_SERVICE_NAME: ai
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=ai-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
     healthcheck: *py-healthcheck
 
   assets:
@@ -159,6 +172,8 @@ services:
       DB_USER: assets
       DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
     depends_on:
+      otel-lgtm:
+        condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully
       seaweedfs-buckets:
@@ -176,6 +191,8 @@ services:
       OTEL_SERVICE_NAME: marketplace
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=marketplace-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
+      otel-lgtm:
+        condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully
     healthcheck:
@@ -192,7 +209,8 @@ services:
     build: ../services/gateway
     restart: unless-stopped
     depends_on:
-      - otel-lgtm
+      otel-lgtm:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8080:80"
     healthcheck:
@@ -344,6 +362,16 @@ services:
   otel-lgtm:
     # Collector, Prometheus, Tempo, Loki and Grafana in one container (development only).
     image: grafana/otel-lgtm:0.36.0
+    environment:
+      # CI sets this to see the collector's own logs (for example a failing export to Loki).
+      ENABLE_LOGS_OTELCOL: ${OTEL_LGTM_COLLECTOR_LOGS:-false}
+    # The image's own check (every backend ready, Loki included), run more often than its 30 s
+    # default: every service waits for it, so records never queue up behind a starting Loki.
+    healthcheck:
+      test: ["CMD", "/otel-lgtm/docker/healthcheck.sh"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
     volumes:
       - lgtm-data:/data
     ports:
