@@ -57,6 +57,16 @@ type Out struct {
 	Except string // with To == "": skip this player (they get a welcome instead)
 	Type   string // "event" for shared events, otherwise a private message type
 	Data   any    // protocol.Event for shared events
+	Seq    int64  // for a welcome: the seq it is current up to, so older events are skipped
+}
+
+// RoundStats describe the last finished round, for logs.
+type RoundStats struct {
+	RoundNo  int
+	Word     string
+	Strokes  int
+	Correct  int
+	DrawerID string
 }
 
 type player struct {
@@ -108,6 +118,8 @@ type Game struct {
 	canvas       []canvasBatch
 	canvasPoints int
 
+	lastRound RoundStats
+
 	seq    int64
 	log    []protocol.Event
 	out    []Out
@@ -145,8 +157,8 @@ func (g *Game) MatchID() string { return g.matchID }
 // RoundNo is the current round's number within the match.
 func (g *Game) RoundNo() int { return g.roundNo }
 
-// Word is the current round's word. Only the actor's logs use it, after the round ends.
-func (g *Game) Word() string { return g.word }
+// LastRound describes the last finished round. Its word is for logs after the round ended.
+func (g *Game) LastRound() RoundStats { return g.lastRound }
 
 // Connected counts players with an open connection.
 func (g *Game) Connected() int {
@@ -186,7 +198,8 @@ func (g *Game) Join(now time.Time, uid, name string) error {
 	}
 	g.empty = time.Time{}
 	g.fixHost()
-	g.send(uid, "welcome", map[string]any{"user_id": uid, "view": g.ViewFor(uid), "seq": g.seq})
+	g.out = append(g.out, Out{To: uid, Type: "welcome", Seq: g.seq,
+		Data: map[string]any{"user_id": uid, "view": g.ViewFor(uid), "seq": g.seq}})
 	g.sendPrivate(uid)
 	return nil
 }
@@ -506,6 +519,7 @@ func (g *Game) endRoundIfAllGuessed(now time.Time) {
 }
 
 func (g *Game) endRound(now time.Time) {
+	g.lastRound = RoundStats{RoundNo: g.roundNo, Word: g.word, Strokes: len(g.canvas), Correct: g.correct, DrawerID: g.drawer}
 	g.phase = PhaseReveal
 	g.deadline = now.Add(RevealFor)
 	g.emit("round_ended", map[string]any{
