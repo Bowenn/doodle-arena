@@ -1,0 +1,133 @@
+# Local stack for Doodle Arena. Start it with `make up` (scripts/dev-up.sh).
+# Image versions are pinned on purpose; see docs/setup.md before bumping one.
+# Data stores publish ports on 127.0.0.1 only, for debugging from the host.
+
+name: doodle-arena
+
+services:
+  # ---------------------------------------------------------------- data stores
+
+  postgres:
+    image: postgres:18.6-trixie
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make up to create .env}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?}
+      ASSETS_DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
+      MARKETPLACE_DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD:?}
+      NOTIFIER_DB_PASSWORD: ${NOTIFIER_DB_PASSWORD:?}
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/<major>/, so mount the parent.
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # 15432 on the host, so a Postgres installed on the host (5432) doesn't clash.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8.10.2-trixie
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mongo:
+    image: mongo:8.0.34
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?}
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "127.0.0.1:27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  kafka:
+    image: apache/kafka:4.2.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are created explicitly (task 1.2), never by a typo in a producer.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "127.0.0.1:9094:9094"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs/entrypoint.sh:/entrypoint.sh:ro
+    ports:
+      - "127.0.0.1:8333:8333"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9333/cluster/status"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  seaweedfs-buckets:
+    image: chrislusf/seaweedfs:4.48
+    entrypoint: ["/bin/sh", "/create-buckets.sh"]
+    volumes:
+      - ./seaweedfs/create-buckets.sh:/create-buckets.sh:ro
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    restart: "no"
+
+  # ------------------------------------------------------------- observability
+
+  otel-lgtm:
+    # Collector, Prometheus, Tempo, Loki and Grafana in one container (development only).
+    image: grafana/otel-lgtm:0.36.0
+    volumes:
+      - lgtm-data:/data
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+
+volumes:
+  postgres-data:
+  redis-data:
+  mongo-data:
+  kafka-data:
+  seaweedfs-data:
+  lgtm-data:
