@@ -11,8 +11,8 @@ import (
 // Publish results, the result attribute of game.events.published.
 const (
 	resultSuccess = "success"
-	resultFailed  = "failed"  // retried until the job's deadline, then given up
-	resultDropped = "dropped" // the queue was full, or the server was shutting down
+	resultFailed  = "failed"  // retried until the job's deadline, then given up; it stays in the outbox
+	resultDropped = "dropped" // the queue was full, or the server was shutting down; it stays in the outbox
 )
 
 type metrics struct {

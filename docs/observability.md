@@ -78,7 +78,9 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `game.reconnects` | Counter | `result` = resumed (missed events replayed), snapshot (a full `welcome`), failed (a join with `last_seq` that the room refused or never reached, for example a full room or one that just stopped) | game-server |
 | `game.room.takeovers` | Counter | – (rooms this server restored from another owner's state) | game-server |
 | `game.ws.slow_client_disconnects` | Counter | – | game-server |
-| `game.events.published` | Counter | `topic`, `result` = success, failed (retried until the 2-minute deadline), dropped (queue full, or shutting down) | game-server |
+| `game.events.published` | Counter | `topic`, `result` = success, failed (retried until the 2-minute deadline), dropped (queue full, or shutting down). A failed or dropped event stays in its room's outbox and is queued again | game-server |
+| `game.outbox.pending` | Gauge | – (outbox entries older than a minute in this server's rooms: finished rounds and matches not yet in Kafka; ADR 0009) | game-server |
+| `game.outbox.requeued` | Counter | `reason` = takeover (left by the previous owner), stale (this server's, failed or dropped) | game-server |
 | `game.events.queued` | UpDownCounter | – (finished rounds and matches waiting for the publisher) | game-server |
 | `game.events.publish.duration` | Histogram (ms) | `topic` (for rounds it includes the stroke-log upload; retries included) | game-server |
 | `auth.logins` | Counter | `result` = success, failed | auth |
@@ -138,6 +140,7 @@ Starting rules (tune the thresholds after the first load test):
 | Alert | Condition | Severity |
 |---|---|---|
 | LedgerImbalance | `market.ledger.imbalance != 0` | critical |
+| OutboxStuck | `game.outbox.pending > 0` for 10 minutes (Kafka or S3 down, or an entry that can't be published; rewards and drawings are waiting) | warning |
 | OwnershipViolation | `market.ownership.violations > 0` | critical |
 | SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
 | HighErrorRate | Server errors above 1% of requests for 5 minutes, per service | warning |
