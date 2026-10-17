@@ -53,6 +53,17 @@ type Room struct {
 	Settings  Settings  `json:"settings"`
 	ServerID  string    `json:"server_id"`
 	CreatedAt time.Time `json:"created_at"`
+	// PlacedAt is when the room was put on ServerID (created or moved): the server has a few
+	// seconds from then before its heartbeats must report the room.
+	PlacedAt time.Time `json:"placed_at"`
+}
+
+// placedAt is when the room was put on its current server (older records: created).
+func (r Room) placedAt() time.Time {
+	if r.PlacedAt.IsZero() {
+		return r.CreatedAt
+	}
+	return r.PlacedAt
 }
 
 // ErrRoomNotFound means there is no such room, or it has ended.
@@ -89,13 +100,37 @@ func (s *Store) Save(ctx context.Context, r Room) error {
 	return nil
 }
 
-// Move records that a room now lives on r.ServerID instead of from.
+// moveScript writes the moved room only if it still lives on the server the move started
+// from: a stale reassignment pass can't overwrite a newer placement.
+var moveScript = redis.NewScript(`
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local ok, room = pcall(cjson.decode, raw)
+if not ok or room.server_id ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[3], 'PX', ARGV[4])
+if ARGV[1] ~= ARGV[2] then redis.call('SREM', KEYS[2], ARGV[5]) end
+redis.call('SADD', KEYS[3], ARGV[5])
+redis.call('SADD', KEYS[4], ARGV[2])
+return 1
+`)
+
+// ErrMovedMeanwhile means another reassignment moved the room first.
+var ErrMovedMeanwhile = errors.New("room was moved meanwhile")
+
+// Move records that a room now lives on r.ServerID instead of from, if it still lives on from.
 func (s *Store) Move(ctx context.Context, r Room, from string) error {
-	if err := s.Save(ctx, r); err != nil {
-		return err
+	data, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Errorf("encode room: %w", err)
 	}
-	if from != "" && from != r.ServerID {
-		return s.Unindex(ctx, from, r.ID)
+	n, err := moveScript.Run(ctx, s.rdb,
+		[]string{roomKey(r.ID), serverRoomsKey(from), serverRoomsKey(r.ServerID), hostsKey},
+		from, r.ServerID, data, RoomTTL.Milliseconds(), r.ID).Int()
+	if err != nil {
+		return fmt.Errorf("move room %s: %w", r.ID, err)
+	}
+	if n == 0 {
+		return ErrMovedMeanwhile
 	}
 	return nil
 }

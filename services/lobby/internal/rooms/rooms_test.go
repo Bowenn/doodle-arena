@@ -747,3 +747,38 @@ func TestOnlyOneLobbyHoldsTheReassignerLock(t *testing.T) {
 		t.Fatal("the holder couldn't extend its lock")
 	}
 }
+
+// A stale pass can't overwrite a newer placement, and a just-moved room gets its own grace.
+func TestMoveIsCompareAndSetAndRestartsTheGrace(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	r, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := r
+	moved.ServerID = "gs-2"
+	if err := e.store.Move(t.Context(), moved, "gs-1"); err != nil {
+		t.Fatal(err)
+	}
+	stale := r
+	stale.ServerID = "gs-3"
+	if err := e.store.Move(t.Context(), stale, "gs-1"); !errors.Is(err, ErrMovedMeanwhile) {
+		t.Fatalf("stale move: err = %v", err)
+	}
+	if got, _ := e.store.Get(t.Context(), r.ID); got.ServerID != "gs-2" {
+		t.Fatalf("room on %s after a stale move", got.ServerID)
+	}
+
+	// Moved onto gs-2 just now: gs-2 hasn't reported it yet, but it isn't moved again.
+	e.clock.add(time.Hour)
+	moved.PlacedAt = e.clock.now()
+	if err := e.store.Move(t.Context(), moved, "gs-2"); err != nil {
+		t.Fatal(err)
+	}
+	e.beat(t, "gs-2", 0, false)
+	e.alloc.calls = nil
+	if err := e.svc.Reassign(t.Context()); err != nil || len(e.alloc.calls) != 0 {
+		t.Fatalf("a freshly placed room was reassigned: %v %v", e.alloc.calls, err)
+	}
+}

@@ -99,6 +99,8 @@ type Service struct {
 	tracer      trace.Tracer
 	allocations metric.Int64Counter
 	reassigns   metric.Int64Counter
+	// lockHolder re-checks the reassigner lock before each move (RunReassigner sets it).
+	lockHolder func(context.Context) bool
 
 	// suspect holds game servers that heartbeat but didn't answer AllocateRoom, until when
 	// to skip them. Without it, such a server never gets rooms, so it stays the least loaded
@@ -173,9 +175,10 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 	if err != nil {
 		return Room{}, err
 	}
+	now := s.now().UTC()
 	room = Room{
 		ID: newRoomID(), HostID: hostID, Mode: ModeClassic, Public: public,
-		Settings: settings, CreatedAt: s.now().UTC(),
+		Settings: settings, CreatedAt: now, PlacedAt: now,
 	}
 	span.SetAttributes(attribute.String("room_id", room.ID))
 
@@ -314,7 +317,7 @@ func (s *Service) join(ctx context.Context, user User, roomID string) (Join, err
 	if err != nil {
 		return Join{}, err
 	}
-	if _, ok := srv.Room(room.ID); !ok && s.now().Sub(room.CreatedAt) > reportGrace {
+	if _, ok := srv.Room(room.ID); !ok && s.now().Sub(room.placedAt()) > reportGrace {
 		// Its server no longer runs it: the reassigner moves it (or finds it ended).
 		return Join{}, ErrRoomUnavailable
 	}
@@ -355,7 +358,7 @@ func (s *Service) List(ctx context.Context, after *Cursor, n int) ([]Listing, *C
 		}
 		st, reported := srv.Room(r.ID)
 		if !reported {
-			if s.now().Sub(r.CreatedAt) > reportGrace {
+			if s.now().Sub(r.placedAt()) > reportGrace {
 				continue
 			}
 			st = registry.Room{ID: r.ID, Phase: registry.PhaseWaiting}

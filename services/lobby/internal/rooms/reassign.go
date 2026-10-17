@@ -19,7 +19,8 @@ import (
 const (
 	ReassignEvery = 2 * time.Second
 	reassignLock  = "lobby:reassigner"
-	lockTTL       = 5 * time.Second
+	lockTTL       = 10 * time.Second // longer than a pass may run (passTimeout)
+	passTimeout   = 2 * ReassignEvery
 )
 
 // Reassign makes one pass over every room the index knows: rooms of a server whose heartbeats
@@ -56,9 +57,12 @@ func (s *Service) Reassign(ctx context.Context) error {
 				return err
 			}
 			if alive {
-				if _, reported := srv.Room(id); reported || s.now().Sub(r.CreatedAt) <= reportGrace {
+				if _, reported := srv.Room(id); reported || s.now().Sub(r.placedAt()) <= reportGrace {
 					continue
 				}
+			}
+			if s.lockHolder != nil && !s.lockHolder(ctx) {
+				return errors.New("reassigner lock lost")
 			}
 			s.reassign(ctx, r, all, alive)
 		}
@@ -84,7 +88,13 @@ func (s *Service) reassign(ctx context.Context, r Room, all []registry.Server, h
 		switch status.Code(err) {
 		case grpccodes.OK:
 			r.ServerID = srv.ID
-			if err := s.store.Move(ctx, r, from); err != nil {
+			r.PlacedAt = s.now().UTC()
+			err := s.store.Move(ctx, r, from)
+			if errors.Is(err, ErrMovedMeanwhile) {
+				s.log.WarnContext(ctx, "room moved by another pass meanwhile", "room_id", r.ID, "from_server_id", from)
+				return
+			}
+			if err != nil {
 				s.log.ErrorContext(ctx, "moved room not saved", "room_id", r.ID, "server_id", srv.ID, "err", err)
 				s.countReassign(ctx, "failed")
 				return
@@ -127,9 +137,10 @@ func (s *Service) RunReassigner(ctx context.Context, rdb redis.UniversalClient, 
 		if !holdLock(ctx, rdb, instance) {
 			continue
 		}
-		pctx, cancel := context.WithTimeout(ctx, ReassignEvery*4)
+		pctx, cancel := context.WithTimeout(ctx, passTimeout)
+		s.lockHolder = func(ctx context.Context) bool { return holdLock(ctx, rdb, instance) }
 		if err := s.Reassign(pctx); err != nil {
-			s.log.WarnContext(ctx, "reassignment pass failed", "err", err)
+			s.log.WarnContext(ctx, "reassignment pass stopped", "err", err)
 		}
 		cancel()
 	}
