@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -184,6 +185,44 @@ func TestResumeReplaysExactlyTheMissedEvents(t *testing.T) {
 	if other[len(other)-1].Seq != evs[len(evs)-1].Seq {
 		t.Fatal("the resumed client is not in step with the room")
 	}
+	assertResumedLast(t, back, evs[len(evs)-1].Seq)
+}
+
+// assertResumedLast checks that conn's last message is resumed {seq} (ADR 0008), and its only one.
+func assertResumedLast(t *testing.T, conn *fakeConn, seq int64) {
+	t.Helper()
+	all := conn.all()
+	if len(all) == 0 || all[len(all)-1].Type != "resumed" || len(conn.private("resumed")) != 1 {
+		t.Fatalf("want exactly one resumed, last; got %d messages", len(all))
+	}
+	var data struct {
+		Seq int64 `json:"seq"`
+	}
+	if err := json.Unmarshal(all[len(all)-1].Data, &data); err != nil || data.Seq != seq {
+		t.Fatalf("resumed = %s, want seq %d", all[len(all)-1].Data, seq)
+	}
+}
+
+// A socket that died silently: the room still thinks the player is connected, and the client
+// resumes with nothing missed. It used to get no message at all, so its handshake timer fired
+// on a working socket; now it gets resumed.
+func TestResumeWithNothingMissedIsAnswered(t *testing.T) {
+	h := newHarness(t, "a", DefaultSettings, nil)
+	a := h.join("a")
+	h.join("b")
+	h.sync()
+	evs := a.events("") // b's own join came in its welcome; a saw it as the latest event
+	lastSeen := evs[len(evs)-1].Seq
+
+	back := &fakeConn{uid: "b"}
+	if err := h.room.Join(context.Background(), back, "Name b", lastSeen); err != nil {
+		t.Fatal(err)
+	}
+	h.sync()
+	if got := back.all(); len(got) != 1 {
+		t.Fatalf("got %d messages, want only resumed", len(got))
+	}
+	assertResumedLast(t, back, lastSeen)
 }
 
 func TestResumeFarBehindGetsAWelcome(t *testing.T) {
@@ -203,8 +242,8 @@ func TestResumeFarBehindGetsAWelcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.sync()
-	if len(back.private("welcome")) != 1 {
-		t.Fatal("over the replay cap, a full welcome is expected")
+	if len(back.private("welcome")) != 1 || len(back.private("resumed")) != 0 {
+		t.Fatal("over the replay cap, a full welcome (and no resumed) is expected")
 	}
 }
 
@@ -217,13 +256,24 @@ func TestRestoredRoomResumesItsPlayers(t *testing.T) {
 	h.join("b")
 	h.join("c")
 	drawer, word := h.startDrawing("a")
+	h.sync()
+	var guessers []string
+	for _, uid := range []string{"a", "b", "c"} {
+		if uid != drawer {
+			guessers = append(guessers, uid)
+		}
+	}
+	// One guesser saw nothing after the round started: it resumes on B from there, so B has
+	// to replay the stroke and the chat from what it restored.
+	behind, behindSeq := guessers[0], lastSeq(h.conns[guessers[0]])
 	h.input(drawer, protocol.StrokeBatch{StrokeID: "s1", Points: [][]int{{1, 2, 3}}, Color: "#000000", Width: 2})
+	h.input(guessers[1], protocol.Guess{Text: "is it a hat"})
 	h.sync()
 	lastSeen := map[string]int64{}
 	for uid, c := range h.conns {
-		evs := c.events("")
-		lastSeen[uid] = evs[len(evs)-1].Seq
+		lastSeen[uid] = lastSeq(c)
 	}
+	lastSeen[behind] = behindSeq
 	snap, events := d.state()
 
 	// Server B rebuilds the room 3 s later (server A is gone).
@@ -239,7 +289,9 @@ func TestRestoredRoomResumesItsPlayers(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-b.Done() })
 
 	conns := map[string]*fakeConn{}
-	for _, uid := range []string{"a", "b", "c"} {
+	// The guesser who was behind comes back last, so nothing follows its resumed.
+	order := append(slices.DeleteFunc([]string{"a", "b", "c"}, func(u string) bool { return u == behind }), behind)
+	for _, uid := range order {
 		conns[uid] = &fakeConn{uid: uid}
 		if err := b.Join(context.Background(), conns[uid], "Name "+uid, lastSeen[uid]); err != nil {
 			t.Fatal(err)
@@ -251,6 +303,30 @@ func TestRestoredRoomResumesItsPlayers(t *testing.T) {
 	for uid, c := range conns {
 		if len(c.private("welcome")) != 0 {
 			t.Fatalf("%s got a welcome instead of a resume", uid)
+		}
+	}
+	// The guesser who was behind gets exactly what it missed, then resumed, and never the word.
+	replayed := conns[behind].events("")
+	if len(replayed) == 0 || replayed[0].Seq != behindSeq+1 {
+		t.Fatalf("replay on B starts at %v, want seq %d", replayed, behindSeq+1)
+	}
+	types := map[string]int{}
+	for i, ev := range replayed {
+		if i > 0 && ev.Seq != replayed[i-1].Seq+1 {
+			t.Fatalf("gap or duplicate in the replay on B: %d after %d", ev.Seq, replayed[i-1].Seq)
+		}
+		types[ev.Type]++
+	}
+	if types["stroke_batch"] != 1 || types["chat"] != 1 {
+		t.Fatalf("replayed on B: %v, want the stroke and the chat", types)
+	}
+	assertResumedLast(t, conns[behind], b.game.Seq())
+	if len(conns[behind].private("your_word")) != 0 || len(conns[behind].private("word_options")) != 0 {
+		t.Fatal("a guesser got a drawer's private message after the takeover")
+	}
+	for _, m := range conns[behind].all() {
+		if containsWord(m.raw, word) {
+			t.Fatalf("the replay on B leaked the word: %s", m.raw)
 		}
 	}
 	// The drawer gets its word again; the canvas and the round's deadline survived.

@@ -142,6 +142,23 @@ private static final long serialVersionUID = 0L;
     return result == null ? com.doodlearena.proto.doodle.lobby.v1.RoomPhase.UNRECOGNIZED : result;
   }
 
+  public static final int SEATS_FIELD_NUMBER = 4;
+  private int seats_ = 0;
+  /**
+   * <pre>
+   * Seats held: connected players plus those within their rejoin grace (and, during a match,
+   * every player who joined it). The room is full when seats reaches max_players. 0 means not
+   * reported (an older game server): the lobby then uses players.
+   * </pre>
+   *
+   * <code>uint32 seats = 4 [json_name = "seats"];</code>
+   * @return The seats.
+   */
+  @java.lang.Override
+  public int getSeats() {
+    return seats_;
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -165,6 +182,9 @@ private static final long serialVersionUID = 0L;
     if (phase_ != com.doodlearena.proto.doodle.lobby.v1.RoomPhase.ROOM_PHASE_UNSPECIFIED.getNumber()) {
       output.writeEnum(3, phase_);
     }
+    if (seats_ != 0) {
+      output.writeUInt32(4, seats_);
+    }
     getUnknownFields().writeTo(output);
   }
   private int computeSerializedSize_0() {
@@ -179,6 +199,10 @@ private static final long serialVersionUID = 0L;
     if (phase_ != com.doodlearena.proto.doodle.lobby.v1.RoomPhase.ROOM_PHASE_UNSPECIFIED.getNumber()) {
       size += com.google.protobuf.CodedOutputStream
         .computeEnumSize(3, phase_);
+    }
+    if (seats_ != 0) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeUInt32Size(4, seats_);
     }
     return size;
   }
@@ -209,6 +233,8 @@ private static final long serialVersionUID = 0L;
     if (getPlayers()
         != other.getPlayers()) return false;
     if (phase_ != other.phase_) return false;
+    if (getSeats()
+        != other.getSeats()) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -226,6 +252,8 @@ private static final long serialVersionUID = 0L;
     hash = (53 * hash) + getPlayers();
     hash = (37 * hash) + PHASE_FIELD_NUMBER;
     hash = (53 * hash) + phase_;
+    hash = (37 * hash) + SEATS_FIELD_NUMBER;
+    hash = (53 * hash) + getSeats();
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -364,6 +392,7 @@ private static final long serialVersionUID = 0L;
       roomId_ = "";
       players_ = 0;
       phase_ = 0;
+      seats_ = 0;
       return this;
     }
 
@@ -406,6 +435,9 @@ private static final long serialVersionUID = 0L;
       if (((from_bitField0_ & 0x00000004) != 0)) {
         result.phase_ = phase_;
       }
+      if (((from_bitField0_ & 0x00000008) != 0)) {
+        result.seats_ = seats_;
+      }
     }
 
     @java.lang.Override
@@ -430,6 +462,9 @@ private static final long serialVersionUID = 0L;
       }
       if (other.phase_ != 0) {
         setPhaseValue(other.getPhaseValue());
+      }
+      if (other.getSeats() != 0) {
+        setSeats(other.getSeats());
       }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
@@ -470,6 +505,11 @@ private static final long serialVersionUID = 0L;
               bitField0_ |= 0x00000004;
               break;
             } // case 24
+            case 32: {
+              seats_ = input.readUInt32();
+              bitField0_ |= 0x00000008;
+              break;
+            } // case 32
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -691,6 +731,56 @@ private static final long serialVersionUID = 0L;
     public Builder clearPhase() {
       bitField0_ = (bitField0_ & ~0x00000004);
       phase_ = 0;
+      onChanged();
+      return this;
+    }
+
+    private int seats_ ;
+    /**
+     * <pre>
+     * Seats held: connected players plus those within their rejoin grace (and, during a match,
+     * every player who joined it). The room is full when seats reaches max_players. 0 means not
+     * reported (an older game server): the lobby then uses players.
+     * </pre>
+     *
+     * <code>uint32 seats = 4 [json_name = "seats"];</code>
+     * @return The seats.
+     */
+    @java.lang.Override
+    public int getSeats() {
+      return seats_;
+    }
+    /**
+     * <pre>
+     * Seats held: connected players plus those within their rejoin grace (and, during a match,
+     * every player who joined it). The room is full when seats reaches max_players. 0 means not
+     * reported (an older game server): the lobby then uses players.
+     * </pre>
+     *
+     * <code>uint32 seats = 4 [json_name = "seats"];</code>
+     * @param value The seats to set.
+     * @return This builder for chaining.
+     */
+    public Builder setSeats(int value) {
+
+      seats_ = value;
+      bitField0_ |= 0x00000008;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * Seats held: connected players plus those within their rejoin grace (and, during a match,
+     * every player who joined it). The room is full when seats reaches max_players. 0 means not
+     * reported (an older game server): the lobby then uses players.
+     * </pre>
+     *
+     * <code>uint32 seats = 4 [json_name = "seats"];</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearSeats() {
+      bitField0_ = (bitField0_ & ~0x00000008);
+      seats_ = 0;
       onChanged();
       return this;
     }

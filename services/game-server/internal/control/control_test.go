@@ -260,6 +260,40 @@ func TestTakeoverAcrossServers(t *testing.T) {
 	}
 }
 
+// gs-1 lost r1 to gs-2, and the lobby gives it back to gs-1 before gs-1's lease keeper has
+// noticed. The old copy must not count as "already running": gs-1 checks its lease, stops the
+// old copy and takes the room again with a new token.
+func TestAllocateRoomTakesBackARoomItLost(t *testing.T) {
+	rdb := redistest.New(t)
+	store := roomstore.New(rdb)
+	a, b := storedServer(t, "gs-1", store), storedServer(t, "gs-2", store)
+	ctx := t.Context()
+	onA, onB := req("r1"), req("r1")
+	onA.ServerId, onB.ServerId = "gs-1", "gs-2"
+
+	if _, err := a.AllocateRoom(ctx, onA); err != nil {
+		t.Fatal(err)
+	}
+	old := a.Room("r1")
+	if _, err := b.AllocateRoom(ctx, onB); err != nil {
+		t.Fatal(err)
+	}
+	// Right away, within gs-1's renew interval.
+	if _, err := a.AllocateRoom(ctx, onA); err != nil {
+		t.Fatal(err)
+	}
+	now := a.Room("r1")
+	if now == nil || now == old || now.Token() != 3 {
+		t.Fatalf("gs-1 answered with its old copy (token %d), want a new one with token 3", old.Token())
+	}
+	select {
+	case <-old.Done():
+	default:
+		t.Fatal("the old copy is still running")
+	}
+	eventually(t, "gs-2 fenced", func() bool { return b.Room("r1") == nil })
+}
+
 func TestEndedRoomIsNotRestored(t *testing.T) {
 	rdb := redistest.New(t)
 	store := roomstore.New(rdb)

@@ -10,14 +10,16 @@ It's a portfolio project for backend internship interviews, so depth, correctnes
 
 ## Status
 
-**Milestone M1 (foundations) is done.** Today the stack gives you:
+**Milestones M1 (foundations) and M2 (game core) are done.** Today the stack gives you:
 
+- **A playable game:** rooms and quick play in the lobby, live rounds over WebSockets with an authoritative game server, two drawers on one canvas from four players, hints, scoring and a weekly leaderboard.
+- **Reliability:** one owner per room with a lease and fencing tokens, resume without missing events, and failover to the other game server within about 6.5 s of a kill (the [evidence log](docs/roadmap.md#evidence-log) has the measurements).
 - **Every service** runs in Docker Compose behind one Nginx gateway, and CI checks each one (lint, tests, Docker build).
 - **Google sign-in** works: RS256 access tokens with JWKS, and rotating refresh tokens with reuse detection.
 - **Contracts:** shared protobuf contracts for Kafka events and gRPC, with generated code for Go, Java and Python.
 - **Telemetry:** traces, metrics and logs from every service in Grafana, with logs linked to their traces.
 
-The game itself, the drawing pipeline and the marketplace are still skeletons. They're built in Stages 2–4 of the [roadmap](docs/roadmap.md).
+The drawing pipeline and the marketplace are still skeletons. They're built in Stages 3–4 of the [roadmap](docs/roadmap.md).
 
 ## Architecture
 
@@ -35,6 +37,7 @@ flowchart TB
   assets <-->|events| kafka
   market <-->|events| kafka
   kafka --> notifier
+  kafka -->|matches| lobby
   assets -->|HTTP| ai["AI service<br/>FastAPI"]
 ```
 
@@ -44,8 +47,8 @@ The gateway and every service send traces, metrics and logs over OTLP to one col
 |---|---|---|---|
 | gateway | Nginx | Reverse proxy, rate limits, tracing | `localhost:8080` |
 | auth | Python, FastAPI | Google OAuth 2.0 with PKCE, JWT, refresh rotation | `/api/auth/` |
-| lobby | Go | Rooms, game-server registry, allocation | `/api/lobby/` |
-| game-server | Go | Rounds, guessing, per-room event log, failover | `/ws/` (Stage 2) |
+| lobby | Go | Rooms, quick play, game-server registry, allocation, weekly leaderboard | `/api/lobby/` |
+| game-server | Go, 2 instances | Rounds, guessing, per-room event log, failover | `/ws/<server_id>/rooms/<room_id>` |
 | assets | Python, Django + Celery | Render, store and moderate drawings; replays | `/api/assets/`, `/admin/` |
 | marketplace | Java, Spring Boot | Coin ledger, ownership, listings, Stripe | `/api/market/` |
 | notifier | Go | Signed outgoing webhooks with retries | `/api/notifier/` |
@@ -105,6 +108,8 @@ Data stores: PostgreSQL (one database per service), Redis, MongoDB, Kafka (KRaft
 | `make proto` | Lint `proto/` and regenerate Go, Java and Python code |
 | `make logs s=<service>`, `make ps` | Follow a service's logs, list containers |
 | `./scripts/fake-events.sh` | Publish a fake finished round and match to Kafka |
+| `uv run --project services/auth --with websockets python scripts/drills/failover.py kill\|pause [n]` | Failover drill: bots play, the room's game server is killed or paused, and the drill measures the resume |
+| `node scripts/drills/web-seats.mts [room_id]` | Extra players running the web app's own client in Node; with no room id, a bot-only match (dev tokens from `mint_tokens.py`) |
 
 ## Repository layout
 

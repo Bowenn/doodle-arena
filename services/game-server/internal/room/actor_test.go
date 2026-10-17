@@ -3,6 +3,7 @@ package room
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -179,6 +180,27 @@ func (h *harness) join(uid string) *fakeConn {
 	}
 	h.conns[uid] = c
 	return c
+}
+
+// resume reconnects uid on a new socket with the last seq it saw: a real resume (replay and
+// resumed), not a welcome.
+func (h *harness) resume(uid string, lastSeq int64) *fakeConn {
+	h.t.Helper()
+	c := &fakeConn{uid: uid}
+	if err := h.room.Join(context.Background(), c, "Name "+uid, lastSeq); err != nil {
+		h.t.Fatalf("resume %s: %v", uid, err)
+	}
+	h.conns[uid] = c
+	return c
+}
+
+// lastSeq is the seq of the last shared event c received.
+func lastSeq(c *fakeConn) int64 {
+	evs := c.events("")
+	if len(evs) == 0 {
+		return 0
+	}
+	return evs[len(evs)-1].Seq
 }
 
 func (h *harness) input(uid string, m protocol.ClientMsg) {
@@ -405,7 +427,15 @@ func TestGuessersNeverSeeWordBeforeRoundEnded(t *testing.T) {
 			}
 		}
 		g1, g2 := guessers[0], guessers[1]
+		h.sync()
+		seen := lastSeq(h.conns[g1])
 		h.input(g1, protocol.Guess{Text: "is it " + strings.ToUpper(w.Word) + "s?"}) // contains the word
+		// g1 drops and resumes from before its own guess: the replay is checked too.
+		h.room.Leave(h.conns[g1])
+		h.sync()
+		resumed := h.resume(g1, seen)
+		history[g1] = append(history[g1], resumed)
+		marks[resumed] = 0
 		if round == 1 {
 			e := h.join("e") // late joiner mid-round
 			history["e"] = []*fakeConn{e}
@@ -415,7 +445,10 @@ func TestGuessersNeverSeeWordBeforeRoundEnded(t *testing.T) {
 		history[g2] = append(history[g2], reconnected)
 		marks[reconnected] = 0
 		h.advance(DefaultSettings.Draw * 75 / 100) // both hints
-		h.advance(DefaultSettings.Draw)            // time is up
+		if len(resumed.private("welcome")) != 0 || len(resumed.private("resumed")) != 1 {
+			t.Fatalf("round %d: %s's reconnect with last_seq %d wasn't a resume", round, g1, seen)
+		}
+		h.advance(DefaultSettings.Draw) // time is up
 
 		for uid, cs := range history {
 			if slices.Contains(drawers, uid) {
@@ -461,9 +494,16 @@ func TestReplacedSocket(t *testing.T) {
 	if len(h.conns["b"].events("player_left")) != 0 || len(newer.events("match_started")) != 0 {
 		t.Fatal("a replaced socket still acted for its player")
 	}
-	if got := h.room.Summary(); got.Players != 2 || got.Playing {
+	if got := h.room.Summary(); got.Players != 2 || got.Seats != 2 || got.Playing {
 		t.Fatalf("summary = %+v", got)
 	}
+	// A player who leaves keeps their seat through the rejoin grace (ADR 0008).
+	h.room.Leave(h.conns["b"])
+	h.sync()
+	if got := h.room.Summary(); got.Players != 1 || got.Seats != 2 {
+		t.Fatalf("after b left: summary = %+v, want 1 player in 2 seats", got)
+	}
+	h.join("b")
 	h.input("a", protocol.Start{})
 	h.sync()
 	if !h.room.Summary().Playing {
@@ -539,6 +579,53 @@ func TestShutdownClosesSockets(t *testing.T) {
 	<-r.Done()
 	if c.closed != 1001 {
 		t.Fatalf("close code = %d, want 1001", c.closed)
+	}
+}
+
+// game.reconnects counts each resume by how it went, including the refused ones.
+func TestReconnectMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	m, err := NewMetrics(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("t"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := DefaultSettings
+	s.MaxPlayers = 2
+	h := newHarness(t, "a", s, m)
+	a := h.join("a")
+	h.join("b")
+	h.sync()
+	evs := a.events("")
+	lastSeen := evs[len(evs)-1].Seq
+
+	// a comes back with what it saw: resumed.
+	if err := h.room.Join(context.Background(), &fakeConn{uid: "a"}, "Name a", lastSeen); err != nil {
+		t.Fatal(err)
+	}
+	// z claims a seq but holds no seat in a full room: refused, failed.
+	if err := h.room.Join(context.Background(), &fakeConn{uid: "z"}, "Name z", lastSeen); !errors.Is(err, ErrRoomFull) {
+		t.Fatalf("err = %v, want ErrRoomFull", err)
+	}
+	h.sync()
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, mt := range sm.Metrics {
+			if mt.Name != "game.reconnects" {
+				continue
+			}
+			for _, dp := range mt.Data.(metricdata.Sum[int64]).DataPoints {
+				v, _ := dp.Attributes.Value(attribute.Key("result"))
+				got[v.AsString()] = dp.Value
+			}
+		}
+	}
+	if got["resumed"] != 1 || got["failed"] != 1 || got["snapshot"] != 0 {
+		t.Fatalf("reconnects = %v, want 1 resumed and 1 failed", got)
 	}
 }
 

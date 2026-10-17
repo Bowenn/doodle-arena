@@ -159,6 +159,35 @@ describe('RoomConnection', () => {
     expect(last().sent[0]).toEqual({ type: 'hello', data: { ticket: 'ticket-2', last_seq: 4 } })
   })
 
+  it('stays connected after a resume that missed nothing (resumed is the only answer)', async () => {
+    await connected(3)
+    last().drop(1006)
+    await vi.advanceTimersByTimeAsync(500)
+    last().open()
+    expect(last().sent[0]).toEqual({ type: 'hello', data: { ticket: 'ticket-2', last_seq: 3 } })
+    last().receive({ type: 'resumed', data: { seq: 3 } })
+
+    // Past the handshake deadline, answering the liveness pings as a healthy server would.
+    for (let waited = 0; waited <= HANDSHAKE_TIMEOUT_MS; waited += PING_INTERVAL_MS) {
+      await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS)
+      last().receive({ type: 'pong', data: { t: clock } })
+    }
+    expect(FakeSocket.all).toHaveLength(2)
+    expect(last().closedWith).toBeNull()
+    expect(statuses.at(-1)).toEqual({ kind: 'open' })
+  })
+
+  it('resyncs when resumed says the server is ahead', async () => {
+    await connected(3)
+    const first = last()
+    first.receive(chat(4))
+    first.receive({ type: 'resumed', data: { seq: 6 } }) // 5 and 6 never arrived
+    expect(first.closedWith).toBe(1000)
+    await vi.advanceTimersByTimeAsync(0)
+    last().open()
+    expect(last().sent[0]).toEqual({ type: 'hello', data: { ticket: 'ticket-2', last_seq: 4 } })
+  })
+
   it('backs off exponentially up to the cap, then gives up', async () => {
     await connected()
     const delays: number[] = []

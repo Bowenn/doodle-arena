@@ -433,7 +433,7 @@ func TestListHidesUnreportedRoomsAndDeadServers(t *testing.T) {
 func TestQuickPlayJoinsTheFullestWaitingRoomWithSpace(t *testing.T) {
 	e := newEnv(t)
 	e.beat(t, "gs-1", 0, false)
-	ids := make([]string, 4)
+	ids := make([]string, 5)
 	for i := range ids {
 		r, err := e.svc.Create(t.Context(), "u-host", true, Settings{MaxPlayers: 4})
 		if err != nil {
@@ -446,6 +446,8 @@ func TestQuickPlayJoinsTheFullestWaitingRoomWithSpace(t *testing.T) {
 		registry.Room{ID: ids[1], Players: 4, Phase: registry.PhaseWaiting}, // full
 		registry.Room{ID: ids[2], Players: 3, Phase: registry.PhasePlaying}, // match running
 		registry.Room{ID: ids[3], Players: 2, Phase: registry.PhaseWaiting}, // the one
+		// 3 connected, but the 4th seat is held by a player who stepped away (ADR 0008).
+		registry.Room{ID: ids[4], Players: 3, Seats: 4, Phase: registry.PhaseWaiting},
 	)
 	j, err := e.svc.QuickPlay(t.Context(), User{ID: "u-1"})
 	if err != nil {

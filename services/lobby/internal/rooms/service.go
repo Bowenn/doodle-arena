@@ -84,7 +84,8 @@ type Join struct {
 // Listing is a public room with its live status.
 type Listing struct {
 	Room
-	Players uint32
+	Players uint32 // connected
+	Seats   uint32 // held, connected or not: what decides whether the room is full
 	Phase   registry.Phase
 }
 
@@ -180,7 +181,7 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 		ID: newRoomID(), HostID: hostID, Mode: ModeClassic, Public: public,
 		Settings: settings, CreatedAt: now, PlacedAt: now,
 	}
-	span.SetAttributes(attribute.String("room_id", room.ID))
+	span.SetAttributes(attribute.String("room.id", room.ID))
 
 	all, err := s.servers.Servers(ctx)
 	if err != nil {
@@ -271,7 +272,7 @@ func (s *Service) markSuspect(serverID string) {
 
 func (s *Service) allocateOn(ctx context.Context, srv registry.Server, req *gamev1.AllocateRoomRequest) (err error) {
 	ctx, span := s.tracer.Start(ctx, "lobby.allocate_room", trace.WithAttributes(
-		attribute.String("room_id", req.GetRoomId()), attribute.String("server_id", srv.ID)))
+		attribute.String("room.id", req.GetRoomId()), attribute.String("server_id", srv.ID)))
 	defer func() { endSpan(span, err) }()
 	ctx, cancel := context.WithTimeout(ctx, allocateTimeout)
 	defer cancel()
@@ -299,7 +300,7 @@ func (s *Service) count(ctx context.Context, result string) {
 // check capacity here: only the game server knows whether the player is already in the room
 // (a reconnect), so it enforces max_players itself.
 func (s *Service) Join(ctx context.Context, user User, roomID string) (j Join, err error) {
-	ctx, span := s.tracer.Start(ctx, "lobby.join_room", trace.WithAttributes(attribute.String("room_id", roomID)))
+	ctx, span := s.tracer.Start(ctx, "lobby.join_room", trace.WithAttributes(attribute.String("room.id", roomID)))
 	defer func() { endSpan(span, err) }()
 	return s.join(ctx, user, roomID)
 }
@@ -363,7 +364,7 @@ func (s *Service) List(ctx context.Context, after *Cursor, n int) ([]Listing, *C
 			}
 			st = registry.Room{ID: r.ID, Phase: registry.PhaseWaiting}
 		}
-		out = append(out, Listing{Room: r, Players: st.Players, Phase: st.Phase})
+		out = append(out, Listing{Room: r, Players: st.Players, Seats: st.Held(), Phase: st.Phase})
 	}
 	return out, next, nil
 }
@@ -383,7 +384,9 @@ func (s *Service) QuickPlay(ctx context.Context, user User) (j Join, err error) 
 		}
 		for i := range page {
 			l := page[i]
-			if l.Phase == registry.PhaseWaiting && l.Players < l.Settings.MaxPlayers &&
+			// Full means seats, not connected players: a player who stepped away keeps theirs,
+			// and the game server would refuse the joiner (4003).
+			if l.Phase == registry.PhaseWaiting && l.Seats < l.Settings.MaxPlayers &&
 				(best == nil || l.Players > best.Players) {
 				best = &l
 			}

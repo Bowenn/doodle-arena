@@ -47,8 +47,9 @@ const (
 	guessPerSecond = 1
 )
 
-// eventLogSize is how many recent shared events the room keeps in memory. Task 2.5 replaces
-// this with the Redis Stream room:{id}:events.
+// eventLogSize is how many recent shared events the room keeps in memory, for replays to
+// resuming clients. The durable log is the Redis Stream room:{id}:events (package roomstore);
+// a new owner refills this buffer from it.
 const eventLogSize = 1024
 
 // Out is one message the room wants delivered.
@@ -239,6 +240,10 @@ func (g *Game) presentDrawer(now time.Time, except string) string {
 }
 
 // Connected counts players with an open connection.
+// Seated counts the players holding a seat: connected, within their rejoin grace, or (during
+// a match) anyone who joined it. It is what Join compares with max_players.
+func (g *Game) Seated() int { return len(g.players) }
+
 func (g *Game) Connected() int {
 	n := 0
 	for _, p := range g.players {
@@ -288,6 +293,12 @@ func (g *Game) Join(now time.Time, uid, name string, resume bool) error {
 			Data: map[string]any{"user_id": uid, "view": g.ViewFor(uid), "seq": g.seq}})
 	}
 	g.sendPrivate(uid)
+	if resume {
+		// The last message of every resume (ADR 0008): after the replay, this join's own events
+		// and the private state, so the client knows it is caught up, and can check seq. Without
+		// it, a resume with nothing missed got no answer at all.
+		g.send(uid, "resumed", map[string]any{"seq": g.seq})
+	}
 	return nil
 }
 

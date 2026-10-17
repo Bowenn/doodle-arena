@@ -44,7 +44,7 @@ func TestHeartbeatRegistersAndExpires(t *testing.T) {
 
 	req := beat("game-server-1", 3)
 	req.Rooms = []*lobbyv1.RoomStatus{
-		{RoomId: "r1", Players: 2, Phase: lobbyv1.RoomPhase_ROOM_PHASE_PLAYING},
+		{RoomId: "r1", Players: 2, Seats: 3, Phase: lobbyv1.RoomPhase_ROOM_PHASE_PLAYING},
 		{RoomId: "r2", Players: 0},
 	}
 	if _, err := srv.Heartbeat(ctx, req); err != nil {
@@ -57,7 +57,7 @@ func TestHeartbeatRegistersAndExpires(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "game-server-1" || got[0].ControlAddress != "game-server-1:9090" || got[0].Sockets != 3 {
 		t.Fatalf("servers = %+v", got)
 	}
-	want := []Room{{"r1", 2, PhasePlaying}, {"r2", 0, PhaseWaiting}}
+	want := []Room{{ID: "r1", Players: 2, Seats: 3, Phase: PhasePlaying}, {ID: "r2", Phase: PhaseWaiting}}
 	if !slices.Equal(got[0].Rooms, want) {
 		t.Fatalf("rooms = %+v, want %+v", got[0].Rooms, want)
 	}

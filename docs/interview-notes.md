@@ -154,6 +154,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Refuse, don't strip, when the tool can't do "all".** nginx can clear named headers but can't match them by pattern, so "strip every `X-User-*`" was really three names. A six-line njs function (the module already ships in the official image) flags any `X-User-*` or `X-Roles` header, and the gateway answers 400. Rejecting fails closed and is easy to test with curl; silently dropping would hide a misbehaving client.
 - **An audit is worth doing against your own docs.** Each of these was a place where the docs claimed more than the code did. Comparing the two found them, and running the M2 tests repeatedly (`-count=10`) also found a test that only passed on its first run in a process.
 
+### Review fixes (after M2)
+
+- **Connected isn't the same as seated.** Quick play compared connected players with `max_players`, but a player who steps away keeps their seat for the rejoin grace, so the lobby could send someone to a full room. The fix reports what the game server actually enforces (`len(players)`) as an additive proto field, `RoomStatus.seats`; an older server sends 0 and the lobby falls back to the connected count, so the rollout needs no ordering.
+- **Every request deserves an answer.** A resume with nothing missed, from a socket the server still counted as open, got no message at all, and the client's handshake timer abandoned a working connection. Now every resume ends with `resumed {seq}`. That also gives the client something to check: if the server's seq is ahead of what it applied, events went missing and it resyncs.
+- **Ask the source of truth, not the cache.** `AllocateRoom` answered "already running" from the server's in-memory map, even when the room had just lost its lease and was about to close. It now checks the lease in Redis first, stops the stale copy (waiting with the lock released) and takes the room again with a new fencing token.
+- **Single-flight has a scope.** The refresh was single-flight per tab, but the refresh cookie is per origin, so two tabs refreshing at once looked like token theft and logged the user out. A Web Lock makes the critical section match the shared resource. The same theme: a zero score still created a leaderboard entry, because `ZINCRBY key 0 member` creates the member.
+- **Tests should prove the claim in the roadmap.** The takeover-resume test resumed every client from its latest seq, so nothing was replayed, and the word-leak test's "reconnect" was really a fresh welcome. Both now go through a real replay. Each new behaviour test was checked against the old code (mutation spot checks), so it fails without the fix.
+
 ## Stage 3: Drawing lifecycle
 
 ## Stage 4: Economy

@@ -38,7 +38,7 @@ func (f *fakeLobby) count() int {
 type fixedStatus struct{}
 
 func (fixedStatus) Status() ([]control.Room, bool) {
-	return []control.Room{{ID: "r1", Players: 2, Playing: true}, {ID: "r2"}}, true
+	return []control.Room{{ID: "r1", Players: 2, Seats: 3, Playing: true}, {ID: "r2"}}, true
 }
 
 func TestSenderBeatsUntilCancelled(t *testing.T) {
@@ -88,6 +88,9 @@ func TestSenderBeatsUntilCancelled(t *testing.T) {
 	if len(b.GetRooms()) != 2 || b.GetRooms()[0].GetPhase() != lobbyv1.RoomPhase_ROOM_PHASE_PLAYING ||
 		b.GetRooms()[1].GetPhase() != lobbyv1.RoomPhase_ROOM_PHASE_WAITING || b.GetSockets() != 2 {
 		t.Fatalf("rooms = %v, sockets = %d", b.GetRooms(), b.GetSockets())
+	}
+	if r1 := b.GetRooms()[0]; r1.GetPlayers() != 2 || r1.GetSeats() != 3 {
+		t.Fatalf("r1 = %v, want 2 players in 3 seats", r1)
 	}
 	if len(b.GetRoomIds()) != 2 {
 		t.Fatalf("room_ids = %v", b.GetRoomIds())

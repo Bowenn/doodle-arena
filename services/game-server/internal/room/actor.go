@@ -84,7 +84,8 @@ const commitTimeout = 2 * time.Second
 
 // Summary is what heartbeats report about a room.
 type Summary struct {
-	Players int
+	Players int // connected
+	Seats   int // held, connected or not (Game.Seated)
 	Playing bool
 	Closed  bool
 }
@@ -114,6 +115,7 @@ type (
 		name    string
 		lastSeq int64
 		reply   chan error
+		trace   context.Context // the connection's span, so the room's log lines link to it
 	}
 	leaveIn  struct{ conn Conn }
 	clientIn struct {
@@ -139,16 +141,18 @@ type Room struct {
 	events  Sink
 	tracer  trace.Tracer
 
-	conns     map[string]Conn // actor only
+	conns     map[string]Conn            // actor only
+	traces    map[string]context.Context // actor only: each connection's span, for its log lines
 	armedFor  time.Time
 	stopTimer func() bool
 	summary   atomic.Pointer[Summary]
 
 	durable     Durable
 	token       int64
-	fresh       bool  // a new room: its first snapshot must be written before anything
-	lastSnapSeq int64 // seq of the latest snapshot written
-	moved       bool  // set by fencedIn
+	fenced      atomic.Bool // the lease was lost: the room is stopping, or has stopped
+	fresh       bool        // a new room: its first snapshot must be written before anything
+	lastSnapSeq int64       // seq of the latest snapshot written
+	moved       bool        // set by fencedIn
 }
 
 // New creates a room, or rebuilds one from cfg.Restore; start it with Run.
@@ -166,7 +170,7 @@ func New(cfg Config) (*Room, error) {
 	r := &Room{
 		id: cfg.ID, mode: cfg.Mode, inbox: make(chan any, 256), done: make(chan struct{}),
 		clock: cfg.Clock, log: cfg.Log.With("room_id", cfg.ID), metrics: cfg.Metrics, events: cfg.Events,
-		tracer: otel.Tracer("game-server"), conns: map[string]Conn{}, durable: cfg.Durable,
+		tracer: otel.Tracer("game-server"), conns: map[string]Conn{}, traces: map[string]context.Context{}, durable: cfg.Durable,
 		token: cfg.Token,
 	}
 	if cfg.Restore != nil {
@@ -187,11 +191,16 @@ func New(cfg Config) (*Room, error) {
 // Fence tells the room that its lease was taken over. It never blocks: if the inbox is full,
 // the lease keeper finds the lease lost again on its next round.
 func (r *Room) Fence() {
+	r.fenced.Store(true)
 	select {
 	case r.inbox <- fencedIn{}:
 	default:
 	}
 }
+
+// Fenced reports that the room lost its lease (Fence, or a write the store refused as moved).
+// Safe from any goroutine.
+func (r *Room) Fenced() bool { return r.fenced.Load() }
 
 // ID is the room's id.
 func (r *Room) ID() string { return r.id }
@@ -206,20 +215,27 @@ func (r *Room) Summary() Summary { return *r.summary.Load() }
 // Done is closed when the actor has stopped.
 func (r *Room) Done() <-chan struct{} { return r.done }
 
-// Join adds conn's player to the room and waits until the welcome is queued.
+// Join adds conn's player to the room. It returns once the actor has accepted the join; the
+// replay is sent by then, and the welcome (or resumed) follows in the same step's flush.
 func (r *Room) Join(ctx context.Context, conn Conn, name string, lastSeq int64) error {
 	reply := make(chan error, 1)
-	if err := r.enqueue(ctx, joinIn{conn: conn, name: name, lastSeq: lastSeq, reply: reply}); err != nil {
-		return err
+	in := joinIn{conn: conn, name: name, lastSeq: lastSeq, reply: reply,
+		trace: trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))}
+	err := r.enqueue(ctx, in)
+	if err == nil {
+		select {
+		case err = <-reply:
+			return err // the actor counted a refused resume itself
+		case <-r.done:
+			err = ErrClosed
+		case <-ctx.Done():
+			err = ctx.Err()
+		}
 	}
-	select {
-	case err := <-reply:
-		return err
-	case <-r.done:
-		return ErrClosed
-	case <-ctx.Done():
-		return ctx.Err()
+	if lastSeq > 0 {
+		r.metrics.reconnect(in.trace, "failed")
 	}
+	return err
 }
 
 // Input passes a client message to the room. It blocks while the inbox is full, which slows
@@ -305,6 +321,7 @@ func (r *Room) Run(ctx context.Context) {
 // it can). Nothing that wasn't stored was sent to anyone.
 func (r *Room) stop(err error) {
 	if errors.Is(err, ErrMoved) {
+		r.fenced.Store(true)
 		r.log.Warn("room taken over by another server: stopping", "match_id", r.game.MatchID())
 		for _, c := range r.conns {
 			c.Send(protocol.Marshal("room_moved", map[string]string{"reason": "takeover"}))
@@ -346,6 +363,9 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 			}
 		}
 		if err := r.game.Join(now, uid, in.name, resume); err != nil {
+			if in.lastSeq > 0 {
+				r.metrics.reconnect(ctx, "failed")
+			}
 			in.reply <- err
 			return
 		}
@@ -353,6 +373,7 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 			old.Close(protocol.CloseReplaced, "connected again elsewhere")
 		}
 		r.conns[uid] = in.conn
+		r.traces[uid] = in.trace
 		// The missed events go first; this step's own events follow in flush, in seq order.
 		for _, ev := range replay {
 			in.conn.Send(protocol.Marshal("event", ev))
@@ -363,7 +384,7 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 		case in.lastSeq > 0:
 			r.metrics.reconnect(ctx, "snapshot")
 		}
-		r.log.Info("player joined", "user_id", uid, "replaced", old != nil && old != in.conn,
+		r.log.InfoContext(in.trace, "player joined", "user_id", uid, "replaced", old != nil && old != in.conn,
 			"resumed", resume, "replayed", len(replay))
 		in.reply <- nil
 	case leaveIn:
@@ -371,9 +392,10 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 		if r.conns[uid] != in.conn {
 			return // an old, replaced socket
 		}
-		delete(r.conns, uid)
 		r.game.Leave(now, uid)
-		r.log.Info("player left", "user_id", uid)
+		r.log.InfoContext(r.traces[uid], "player left", "user_id", uid)
+		delete(r.conns, uid)
+		delete(r.traces, uid)
 	case clientIn:
 		uid := in.conn.UserID()
 		if r.conns[uid] != in.conn {
@@ -461,8 +483,8 @@ func (r *Room) lifecycle(ev protocol.Event) {
 	attrs := []attribute.KeyValue{attribute.String("room.id", r.id), attribute.String("match.id", g.MatchID())}
 	switch ev.Type {
 	case "match_started":
-		r.log.Info("match started", "match_id", g.MatchID(), "players", g.Connected())
-		r.span("game.match.start", attrs)
+		ctx := r.span("game.match.start", attrs)
+		r.log.InfoContext(ctx, "match started", "match_id", g.MatchID(), "players", g.Connected())
 	case "round_started":
 		r.span("game.round.start", append(attrs, attribute.Int("round.no", g.RoundNo())))
 	case "match_ended":
@@ -478,18 +500,18 @@ func (r *Room) finish(f Finished) {
 	switch {
 	case f.Round != nil:
 		fr := *f.Round
-		// The word is logged only now that everyone has seen it.
-		r.log.Info("round finished", "match_id", fr.MatchID, "round_no", fr.RoundNo, "word", fr.Word,
-			"stroke_batches", len(fr.Canvas), "correct", fr.Correct, "user_id", fr.DrawerIDs[0])
 		ctx := r.span("game.round.end", []attribute.KeyValue{attribute.String("room.id", r.id),
 			attribute.String("match.id", fr.MatchID), attribute.Int("round.no", fr.RoundNo)})
+		// The word is logged only now that everyone has seen it.
+		r.log.InfoContext(ctx, "round finished", "match_id", fr.MatchID, "round_no", fr.RoundNo, "word", fr.Word,
+			"stroke_batches", len(fr.Canvas), "correct", fr.Correct, "user_id", fr.DrawerIDs[0])
 		r.events.RoundFinished(ctx, fr)
 	case f.Match != nil:
 		fm := *f.Match
 		fm.Mode = r.mode
-		r.log.Info("match finished", "match_id", fm.MatchID, "rounds", fm.Rounds, "players", len(fm.Results))
 		ctx := r.span("game.match.end", []attribute.KeyValue{attribute.String("room.id", r.id),
 			attribute.String("match.id", fm.MatchID), attribute.Int("match.rounds", fm.Rounds)})
+		r.log.InfoContext(ctx, "match finished", "match_id", fm.MatchID, "rounds", fm.Rounds, "players", len(fm.Results))
 		r.events.MatchFinished(ctx, fm)
 	}
 }
@@ -502,7 +524,7 @@ func (r *Room) span(name string, attrs []attribute.KeyValue) context.Context {
 }
 
 func (r *Room) publish() {
-	s := Summary{Players: r.game.Connected(), Playing: r.game.Phase().Playing()}
+	s := Summary{Players: r.game.Connected(), Seats: r.game.Seated(), Playing: r.game.Phase().Playing()}
 	if *r.summary.Load() != s {
 		r.summary.Store(&s)
 	}

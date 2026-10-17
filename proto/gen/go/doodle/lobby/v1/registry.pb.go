@@ -186,7 +186,11 @@ type RoomStatus struct {
 	// Players currently connected to the room.
 	Players uint32 `protobuf:"varint,2,opt,name=players,proto3" json:"players,omitempty"`
 	// Where the room is in its lifecycle.
-	Phase         RoomPhase `protobuf:"varint,3,opt,name=phase,proto3,enum=doodle.lobby.v1.RoomPhase" json:"phase,omitempty"`
+	Phase RoomPhase `protobuf:"varint,3,opt,name=phase,proto3,enum=doodle.lobby.v1.RoomPhase" json:"phase,omitempty"`
+	// Seats held: connected players plus those within their rejoin grace (and, during a match,
+	// every player who joined it). The room is full when seats reaches max_players. 0 means not
+	// reported (an older game server): the lobby then uses players.
+	Seats         uint32 `protobuf:"varint,4,opt,name=seats,proto3" json:"seats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -242,6 +246,13 @@ func (x *RoomStatus) GetPhase() RoomPhase {
 	return RoomPhase_ROOM_PHASE_UNSPECIFIED
 }
 
+func (x *RoomStatus) GetSeats() uint32 {
+	if x != nil {
+		return x.Seats
+	}
+	return 0
+}
+
 // HeartbeatResponse is empty for now; fields can be added later without breaking callers.
 type HeartbeatResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -292,12 +303,13 @@ const file_doodle_lobby_v1_registry_proto_rawDesc = "" +
 	"\asockets\x18\x04 \x01(\rR\asockets\x12\x1a\n" +
 	"\bdraining\x18\x05 \x01(\bR\bdraining\x121\n" +
 	"\x05rooms\x18\x06 \x03(\v2\x1b.doodle.lobby.v1.RoomStatusR\x05rooms\x12'\n" +
-	"\x0fcontrol_address\x18\a \x01(\tR\x0econtrolAddress\"q\n" +
+	"\x0fcontrol_address\x18\a \x01(\tR\x0econtrolAddress\"\x87\x01\n" +
 	"\n" +
 	"RoomStatus\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x18\n" +
 	"\aplayers\x18\x02 \x01(\rR\aplayers\x120\n" +
-	"\x05phase\x18\x03 \x01(\x0e2\x1a.doodle.lobby.v1.RoomPhaseR\x05phase\"\x13\n" +
+	"\x05phase\x18\x03 \x01(\x0e2\x1a.doodle.lobby.v1.RoomPhaseR\x05phase\x12\x14\n" +
+	"\x05seats\x18\x04 \x01(\rR\x05seats\"\x13\n" +
 	"\x11HeartbeatResponse*W\n" +
 	"\tRoomPhase\x12\x1a\n" +
 	"\x16ROOM_PHASE_UNSPECIFIED\x10\x00\x12\x16\n" +

@@ -129,6 +129,9 @@ Tracks:
 - [ ] **5.3 First measurements**: a k6 load test with many small rooms, and a kill test of a game server mid-round. Record the numbers.
 - [ ] **5.4 Frontend performance**: Lighthouse CI and Core Web Vitals reporting.
 - [ ] **5.5 Hardening**: one deliberate refactor of agent-written code, fixing flaky tests, and a README with the architecture diagram and how to run everything.
+  - From the Stage 1–2 review (2026-10-17): `DrainServer` hands rooms to another server instead of letting them fail over after a shutdown (the proto already promises it).
+  - From the review: per-service credentials outside Postgres, Redis ACL users per key prefix and a SeaweedFS identity per bucket, so data ownership is enforced, not just a convention.
+  - From the review: the leaderboard script touches `lobby:lb:seen:*` and `lobby:leaderboard:*` without a shared hash tag, so it needs one before Redis runs in cluster mode.
 
 **M5 exit criteria (MVP)**
 

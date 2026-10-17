@@ -8,7 +8,10 @@
 //	lobby:rooms:public    sorted set of public room ids, scored by creation time (ms)
 //	lobby:server_rooms:{server_id}  set of the room ids placed on that game server, so the
 //	                      reassigner finds a dead server's rooms (its heartbeat is gone too)
-//	lobby:room_hosts      set of server ids that have rooms
+//	lobby:room_hosts      set of server ids that have (or recently had) rooms; an id is dropped
+//	                      lazily, when Hosts finds its server_rooms set empty
+//	lobby:reassigner      lock (reassign.go): the lobby instance that runs reassignment passes,
+//	                      10 s TTL, taken or extended every 2 s
 package rooms
 
 import (

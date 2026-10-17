@@ -109,7 +109,11 @@ func (s *Store) Apply(ctx context.Context, m Match) (bool, error) {
 	args := make([]any, 0, 2+2*len(m.Results))
 	args = append(args, int64(SeenTTL/time.Second), int64(WeekTTL/time.Second))
 	for _, r := range m.Results {
-		args = append(args, r.UserID, r.Score)
+		// A zero adds nothing, and ZINCRBY would still make the player an entry: someone who
+		// scored nothing this week has no place on the board (me is null).
+		if r.Score != 0 {
+			args = append(args, r.UserID, r.Score)
+		}
 	}
 	n, err := applyScript.Run(ctx, s.rdb, []string{seenKey(m.ID), weekKey(Week(m.EndedAt))}, args...).Int()
 	if err != nil {

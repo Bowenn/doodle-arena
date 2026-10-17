@@ -86,7 +86,7 @@ func (g *GRPCServer) Heartbeat(ctx context.Context, req *lobbyv1.HeartbeatReques
 		if r.GetPhase() == lobbyv1.RoomPhase_ROOM_PHASE_PLAYING {
 			phase = PhasePlaying
 		}
-		s.Rooms = append(s.Rooms, Room{ID: r.GetRoomId(), Players: r.GetPlayers(), Phase: phase})
+		s.Rooms = append(s.Rooms, Room{ID: r.GetRoomId(), Players: r.GetPlayers(), Seats: r.GetSeats(), Phase: phase})
 	}
 	// A server that only fills the older room_ids field: rooms without status.
 	if len(s.Rooms) == 0 {

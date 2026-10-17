@@ -28,7 +28,7 @@ import (
 // Timeouts and limits.
 const (
 	DefaultHelloTimeout = 10 * time.Second
-	idleTimeout         = 60 * time.Second // clients ping every 15 s
+	idleTimeout         = 60 * time.Second // the web client pings every 5 s
 	writeTimeout        = 10 * time.Second
 	sendQueue           = 256 // messages; a client this far behind is closed as slow (> room's 200-event replay)
 	floodBurst          = 100 // messages per socket, before the per-player guess limit
@@ -160,7 +160,8 @@ func (h *Handler) serve(ctx context.Context, c *websocket.Conn, roomID string) {
 	span.End()
 	log = log.With("user_id", pc.uid)
 
-	h.readLoop(ctx, c, pc, rm, log)
+	// The connection's span (ended, but its ids still link log lines to the connect trace).
+	h.readLoop(spanCtx, c, pc, rm, log)
 	rm.Leave(pc)
 	pc.closeWith(websocket.StatusNormalClosure, "")
 	<-pc.writerDone
@@ -217,7 +218,7 @@ func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, l
 
 	pc := newPlayerConn(h.base, c, t.UserID, func() {
 		h.slow.Add(context.Background(), 1)
-		log.Warn("slow client disconnected", "user_id", t.UserID)
+		log.WarnContext(ctx, "slow client disconnected", "user_id", t.UserID)
 	})
 	switch err := rm.Join(ctx, pc, t.Name, hello.LastSeq); {
 	case errors.Is(err, room.ErrRoomFull):
@@ -248,7 +249,7 @@ func (h *Handler) readLoop(ctx context.Context, c *websocket.Conn, pc *playerCon
 			return
 		}
 		if !flood.Allow(time.Now()) {
-			log.Warn("socket flooding, closed")
+			log.WarnContext(ctx, "socket flooding, closed")
 			pc.closeWith(closePolicy, "too many messages")
 			return
 		}

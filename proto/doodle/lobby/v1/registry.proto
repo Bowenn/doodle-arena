@@ -38,6 +38,10 @@ message RoomStatus {
   uint32 players = 2;
   // Where the room is in its lifecycle.
   RoomPhase phase = 3;
+  // Seats held: connected players plus those within their rejoin grace (and, during a match,
+  // every player who joined it). The room is full when seats reaches max_players. 0 means not
+  // reported (an older game server): the lobby then uses players.
+  uint32 seats = 4;
 }
 
 // RoomPhase is the coarse state of a room that the lobby needs; the round state machine itself
