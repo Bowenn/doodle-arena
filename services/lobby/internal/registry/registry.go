@@ -41,9 +41,14 @@ const (
 // Room is one room as its game server last reported it.
 type Room struct {
 	ID      string `json:"id"`
-	Players uint32 `json:"players"`
-	Phase   Phase  `json:"phase"`
+	Players uint32 `json:"players"` // connected
+	// Seats held, connected or not (ADR 0008); 0 from a game server that doesn't report it.
+	Seats uint32 `json:"seats,omitempty"`
+	Phase Phase  `json:"phase"`
 }
+
+// Held is how many seats are taken: Seats, or Players from a server that doesn't report seats.
+func (r Room) Held() uint32 { return max(r.Seats, r.Players) }
 
 // Server is a game server's last heartbeat.
 type Server struct {

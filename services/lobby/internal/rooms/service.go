@@ -84,7 +84,8 @@ type Join struct {
 // Listing is a public room with its live status.
 type Listing struct {
 	Room
-	Players uint32
+	Players uint32 // connected
+	Seats   uint32 // held, connected or not: what decides whether the room is full
 	Phase   registry.Phase
 }
 
@@ -363,7 +364,7 @@ func (s *Service) List(ctx context.Context, after *Cursor, n int) ([]Listing, *C
 			}
 			st = registry.Room{ID: r.ID, Phase: registry.PhaseWaiting}
 		}
-		out = append(out, Listing{Room: r, Players: st.Players, Phase: st.Phase})
+		out = append(out, Listing{Room: r, Players: st.Players, Seats: st.Held(), Phase: st.Phase})
 	}
 	return out, next, nil
 }
@@ -383,7 +384,9 @@ func (s *Service) QuickPlay(ctx context.Context, user User) (j Join, err error) 
 		}
 		for i := range page {
 			l := page[i]
-			if l.Phase == registry.PhaseWaiting && l.Players < l.Settings.MaxPlayers &&
+			// Full means seats, not connected players: a player who stepped away keeps theirs,
+			// and the game server would refuse the joiner (4003).
+			if l.Phase == registry.PhaseWaiting && l.Seats < l.Settings.MaxPlayers &&
 				(best == nil || l.Players > best.Players) {
 				best = &l
 			}
