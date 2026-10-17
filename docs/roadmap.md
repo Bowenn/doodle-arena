@@ -73,6 +73,7 @@ Tracks:
 - [x] **2.5 Reliability**: the Redis Stream event log with explicit `seq` IDs, snapshots, reconnect with resume, the lease and fencing token through Lua, and failover through the lobby, with two game-server instances in Compose. The humans decide ADR 0002 first.
   - ADR 0007 is decided (2026-10-16): forced takeover with fencing tokens. Write-then-broadcast, snapshots at phase changes plus in-phase events on restore, resume by replay, and a lobby reassigner. Drill: `scripts/drills/failover.py kill|pause`.
 - [ ] **2.6 Shared canvas and leaderboard**: two drawers per round with own-stroke undo; a weekly leaderboard built from `MatchFinished`.
+  - 2.6b, the weekly leaderboard, is done (decided 2026-10-16: rank by the sum of match scores per ISO week, names from a lobby name cache, no contract change). The lobby consumes `game.matches.v1` as group `lobby-leaderboard`, counts each match once with one Lua script (`SET NX` on the `match_id`, then `ZINCRBY`), and serves `GET /api/lobby/leaderboard`; the web app has a `/leaderboard` page. 2.6a (the shared canvas) is a separate PR.
 
 **M2 exit criteria**
 
