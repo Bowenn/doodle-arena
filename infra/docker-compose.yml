@@ -267,6 +267,10 @@ services:
   gateway:
     build: ../services/gateway
     restart: unless-stopped
+    environment:
+      # Rendered into nginx.conf at start (the gateway has no OTEL_* settings of its own).
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      SERVICE_INSTANCE_ID: gateway-1
     depends_on:
       otel-lgtm:
         condition: service_healthy

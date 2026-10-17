@@ -1,5 +1,9 @@
 # Doodle Arena gateway: reverse proxy for every service (design doc, section 4.1).
 # The gateway only routes. Each service verifies JWTs itself (ADR 0001).
+#
+# A template: at start, the image's entrypoint renders it to /etc/nginx/nginx.conf with
+# SERVICE_VERSION and SERVICE_INSTANCE_ID from the environment (only SERVICE_* names
+# are substituted, so nginx's own $variables stay as they are).
 
 # OpenTelemetry tracing (ships in the official image's -otel variant).
 load_module modules/ngx_otel_module.so;
@@ -25,7 +29,8 @@ http {
         endpoint otel-lgtm:4317;
     }
     otel_service_name gateway;
-    otel_resource_attr service.version 0.1.0;
+    otel_resource_attr service.version ${SERVICE_VERSION};
+    otel_resource_attr service.instance.id ${SERVICE_INSTANCE_ID};
     otel_resource_attr deployment.environment local;
     otel_trace on;
     otel_trace_context propagate;
@@ -34,7 +39,7 @@ http {
     # query strings can carry OAuth codes and other secrets. trace_id and span_id link the
     # line to its trace (gateway logs stay in stdout; only the traces are exported).
     log_format json escape=json
-        '{"timestamp":"$time_iso8601","level":"info","service":"gateway","version":"0.1.0",'
+        '{"timestamp":"$time_iso8601","level":"info","service":"gateway","version":"${SERVICE_VERSION}",'
         '"trace_id":"$otel_trace_id","span_id":"$otel_span_id",'
         '"msg":"request","request_id":"$request_id","method":"$request_method","path":"$uri",'
         '"status":$status,"duration_s":$request_time,"upstream":"$upstream_addr"}';
