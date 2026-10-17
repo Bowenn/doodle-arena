@@ -141,6 +141,12 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Changing a stored format without breaking stored rooms.** The Redis snapshot replaced `drawer` with `drawers`. A room written by an older server still restores, as `[drawer]`, and a test feeds the new code an old-shaped snapshot. Rolling back is not safe the other way round: an older server ignores `drawers`, so in a pair round it would treat the second drawer as a guesser who knows the word. Deploys must not mix versions while pair rounds run, or the snapshot needs a version field.
 - **Identity is (user, stroke id), everywhere.** Two drawers can both send `s1`. Undo, the client's state, the canvas painter's per-stroke "last point" and the local overlay all key strokes by user plus id, and the tests use colliding ids on purpose. Server-side, undo was already own-strokes-only; the property test now runs up to 6 players, so random walks cover pair rounds, undos across drawers and hand-overs.
 
+### M2 Full match with five web clients
+
+- **Testing multiplayer without five Google accounts.** Sign-in goes through Google and the web app keeps the access token only in memory, so extra browser tabs share one refresh cookie and are the same user. The extra seats ran the web app's own client code (`RoomConnection`, the reducer, the stroke batcher) in Node 24, with access tokens minted by auth's `TokenIssuer` and the local dev key. The game server checks those tokens the same way as real ones, so nothing about auth was faked on the server side.
+- **Why that still counts as end to end.** The Node seats run the same code as the browser, from the same files, through the gateway, the lobby's join tickets and the same game servers. Only the drawing on screen is missing, and the one real browser covered that. The trade-off: only one window was checked by eye, so the other seats were checked from their state instead (the same results and the same event order in every seat).
+- **Checking the server, not just the screen.** The browser showed the labels and scores, and Kafka confirmed the rest: three `RoundFinished` with the undone stroke left out of `strokeCount`, and one `MatchFinished` with a shared 2nd place.
+
 ## Stage 3: Drawing lifecycle
 
 ## Stage 4: Economy
