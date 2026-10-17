@@ -4,6 +4,11 @@
 // room's current URL, opens the WebSocket and sends hello {ticket, last_seq}. After a drop it
 // reconnects with jittered exponential backoff. Close codes that a retry can't fix (room full,
 // no such room, connected elsewhere, a bad first message) end the connection instead.
+//
+// A frozen game server keeps its TCP sockets open, so a drop isn't always reported. The
+// connection therefore expects to hear from the server: within HANDSHAKE_TIMEOUT_MS of opening
+// a socket, and within PONG_TIMEOUT_MS of each ping. A silent socket is abandoned without
+// waiting for its close (which can take minutes on a dead link) and the retry path takes over.
 
 import { LobbyError, type JoinTicket } from '../lobby.ts'
 import {
@@ -44,6 +49,11 @@ export const BACKOFF_MAX_MS = 8000
 /** Give up after this many attempts in a row without hearing from the server (about a minute,
  * which is also how long the room keeps a disconnected player's seat). */
 export const MAX_ATTEMPTS = 12
+/** From creating a socket to the server's first message (welcome or the replay). Longer than
+ * the pong timeout because welcome carries the canvas; the server's own hello window is 10 s. */
+export const HANDSHAKE_TIMEOUT_MS = 10_000
+/** After a ping, any server message must arrive within this time or the socket is dead. */
+export const PONG_TIMEOUT_MS = 5_000
 
 const TERMINAL_CLOSES: Record<number, string> = {
   [CloseCode.BadRequest]: 'The game server rejected this client (bad first message).',
@@ -71,6 +81,8 @@ export class RoomConnection {
   private stopped = false
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private pingTimer: ReturnType<typeof setInterval> | null = null
+  /** Runs while the server owes us a message: during the handshake, or after a ping. */
+  private deadline: ReturnType<typeof setTimeout> | null = null
 
   constructor(roomId: string, handlers: ConnectionHandlers, deps: Deps) {
     this.roomId = roomId
@@ -98,10 +110,7 @@ export class RoomConnection {
   /** Leaves the room: closes the socket and stops reconnecting. */
   close() {
     this.stopped = true
-    this.generation++
-    this.clearTimers()
-    this.ws?.close(1000, 'leaving')
-    this.ws = null
+    this.abandon('leaving')
   }
 
   private async connect() {
@@ -124,10 +133,10 @@ export class RoomConnection {
 
     const ws = new this.WS(this.wsBase + ticket.ws_url)
     this.ws = ws
+    this.expectWithin(HANDSHAKE_TIMEOUT_MS)
     ws.onopen = () => {
       if (gen !== this.generation) return
       ws.send(JSON.stringify({ type: 'hello', data: { ticket: ticket.ticket, last_seq: this.lastSeq } }))
-      this.pingTimer = setInterval(() => this.send({ type: 'ping', data: { t: this.now() } }), PING_INTERVAL_MS)
     }
     ws.onmessage = (ev: MessageEvent) => {
       if (gen !== this.generation || typeof ev.data !== 'string') return
@@ -150,11 +159,15 @@ export class RoomConnection {
   }
 
   private handle(msg: ServerMessage) {
+    // Any message proves the server is alive, whatever it answers.
+    if (this.deadline) clearTimeout(this.deadline)
+    this.deadline = null
     // Hearing from the server means the connection works: start backing off from scratch.
     if (!this.heard) {
       this.heard = true
       this.attempt = 0
       this.on.status({ kind: 'open' })
+      this.pingTimer = setInterval(() => this.ping(), PING_INTERVAL_MS)
     }
     switch (msg.type) {
       case 'welcome':
@@ -177,19 +190,46 @@ export class RoomConnection {
         this.on.rtt?.(this.now() - msg.data.t)
         return
       case 'room_moved':
-        // The room is on another server now; the lobby knows where.
-        this.reconnectNow()
+        // The room is on another server now; the lobby knows where. A zombie that wakes up
+        // fences all its rooms at once, so back off (with jitter) rather than have every
+        // player ask the lobby in the same millisecond. The close 4010 that follows is ignored.
+        this.abandon('room moved')
+        this.retry()
         return
       default:
         this.on.private(msg)
     }
   }
 
-  private reconnectNow() {
+  private ping() {
+    this.send({ type: 'ping', data: { t: this.now() } })
+    // The deadline counts from the first unanswered ping, so later pings don't push it back.
+    // It starts when the ping really goes out: a background tab's late timers can delay a
+    // verdict but never cause a false one.
+    if (!this.deadline) this.expectWithin(PONG_TIMEOUT_MS)
+  }
+
+  /** Abandons the socket unless the server sends something within ms. */
+  private expectWithin(ms: number) {
+    if (this.deadline) clearTimeout(this.deadline)
+    this.deadline = setTimeout(() => {
+      this.deadline = null
+      this.abandon('server silent')
+      this.retry()
+    }, ms)
+  }
+
+  /** Stops listening to the current socket and closes it without waiting for its close event:
+   * on a dead link the closing handshake never completes. Later callbacks from it are ignored. */
+  private abandon(reason: string) {
     this.generation++
     this.clearTimers()
-    this.ws?.close(1000, 'reconnecting')
+    this.ws?.close(1000, reason)
     this.ws = null
+  }
+
+  private reconnectNow() {
+    this.abandon('reconnecting')
     this.on.status({ kind: 'reconnecting', attempt: 0, delayMs: 0 })
     void this.connect()
   }
@@ -215,7 +255,9 @@ export class RoomConnection {
   private clearTimers() {
     if (this.retryTimer) clearTimeout(this.retryTimer)
     if (this.pingTimer) clearInterval(this.pingTimer)
+    if (this.deadline) clearTimeout(this.deadline)
     this.retryTimer = null
     this.pingTimer = null
+    this.deadline = null
   }
 }

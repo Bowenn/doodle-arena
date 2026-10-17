@@ -10,7 +10,7 @@ export const MAX_COORD = 10000
 export const MAX_POINTS_PER_BATCH = 512
 export const MAX_STROKE_TIME_MS = 600_000
 export const MAX_GUESS_CHARS = 100
-export const PING_INTERVAL_MS = 15_000
+export const PING_INTERVAL_MS = 5_000
 
 /** Part of a stroke. width is in the same normalized units as coordinates (0..10000). */
 export type StrokeBatch = {
@@ -112,4 +112,7 @@ export const CloseCode = {
   NoRoom: 4004,
   HelloTimeout: 4008,
   Replaced: 4009,
+  /** The room isn't (or is no longer) on this server, usually after a takeover (ADR 0007).
+   * Retryable on purpose: the lobby knows the room's new server. */
+  RoomMoved: 4010,
 } as const
