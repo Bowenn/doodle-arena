@@ -147,6 +147,13 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Why that still counts as end to end.** The Node seats run the same code as the browser, from the same files, through the gateway, the lobby's join tickets and the same game servers. Only the drawing on screen is missing, and the one real browser covered that. The trade-off: only one window was checked by eye, so the other seats were checked from their state instead (the same results and the same event order in every seat).
 - **Checking the server, not just the screen.** The browser showed the labels and scores, and Kafka confirmed the rest: three `RoundFinished` with the undone stroke left out of `strokeCount`, and one `MatchFinished` with a shared 2nd place.
 
+### Review hardening (after M2)
+
+- **Secrets leak through traces, not just logs.** The gateway's access log already dropped query strings, but the OAuth callback's authorization code and state were still in Tempo twice: as `url.query` on auth's span and as `http.target` on the gateway's. Auth now redacts every query value (names stay), so there is no list of sensitive parameters to keep up to date, and the gateway doesn't trace that one route. A test sends a known fake code through the real OTLP export path and checks that no attribute of any span contains it.
+- **Fencing has to cover every write, including the small ones.** Event appends, snapshots, renewals and closes compared the lease with `<server_id>:<token>`, but ticket redemption only checked the server id. The risk was small (used-ticket markers, not room state), but "every write is fenced" is only worth saying if it's true. A room now carries the token it was taken with, and the redemption compares the exact lease value. A test shows the old prefix check accepts an older and a newer token, and the new one doesn't.
+- **Refuse, don't strip, when the tool can't do "all".** nginx can clear named headers but can't match them by pattern, so "strip every `X-User-*`" was really three names. A six-line njs function (the module already ships in the official image) flags any `X-User-*` or `X-Roles` header, and the gateway answers 400. Rejecting fails closed and is easy to test with curl; silently dropping would hide a misbehaving client.
+- **An audit is worth doing against your own docs.** Each of these was a place where the docs claimed more than the code did. Comparing the two found them, and running the M2 tests repeatedly (`-count=10`) also found a test that only passed on its first run in a process.
+
 ## Stage 3: Drawing lifecycle
 
 ## Stage 4: Economy
