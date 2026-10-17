@@ -44,7 +44,10 @@ type Server struct {
 	events    room.Sink
 	log       *slog.Logger
 	store     *roomstore.Store // nil: rooms live only in memory (tests)
-	ctx       context.Context  // rooms run until it ends
+	requeuer  Requeuer         // nil: outbox entries aren't queued again
+	scanEvery time.Duration
+	staleAge  time.Duration
+	ctx       context.Context // rooms run until it ends
 	wg        sync.WaitGroup
 
 	mu       sync.Mutex
@@ -58,6 +61,18 @@ type entry struct {
 	handle *roomstore.Handle // nil without a store
 }
 
+// Requeuer queues outbox entries for publishing again (events.Publisher).
+type Requeuer interface {
+	Requeue(entries []room.OutboxEntry) int
+}
+
+// Outbox scan defaults (ADR 0009): an entry still there after OutboxStaleAfter failed or was
+// dropped, and is queued again.
+const (
+	OutboxScanEvery  = 30 * time.Second
+	OutboxStaleAfter = time.Minute
+)
+
 // Config creates a Server.
 type Config struct {
 	ID        string
@@ -68,6 +83,11 @@ type Config struct {
 	Events    room.Sink // finished rounds and matches; nil: discarded
 	Store     *roomstore.Store
 	Log       *slog.Logger
+	// Outbox queues what a room's outbox still holds: a previous owner's entries when this
+	// server takes a room, and this server's own stale ones every OutboxScan.
+	Outbox     Requeuer
+	OutboxScan time.Duration // 0: OutboxScanEvery
+	StaleAfter time.Duration // 0: OutboxStaleAfter
 }
 
 // New returns a control server. Rooms run until ctx ends; Wait waits for them. With a store,
@@ -77,9 +97,13 @@ func New(ctx context.Context, cfg Config) *Server {
 		cfg.Clock = room.RealClock
 	}
 	s := &Server{id: cfg.ID, wsAddress: cfg.WSAddress, maxRooms: cfg.MaxRooms, clock: cfg.Clock,
-		metrics: cfg.Metrics, events: cfg.Events, store: cfg.Store, log: cfg.Log, ctx: ctx, rooms: map[string]*entry{}}
+		metrics: cfg.Metrics, events: cfg.Events, store: cfg.Store, log: cfg.Log, ctx: ctx, rooms: map[string]*entry{},
+		requeuer: cfg.Outbox, scanEvery: cmp.Or(cfg.OutboxScan, OutboxScanEvery), staleAge: cmp.Or(cfg.StaleAfter, OutboxStaleAfter)}
 	if s.store != nil {
 		s.wg.Go(s.keepLeases)
+		if s.requeuer != nil {
+			s.wg.Go(s.scanOutboxes)
+		}
 	}
 	return s
 }
@@ -138,6 +162,7 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 		Clock: s.clock, Log: s.log, Metrics: s.metrics, Events: s.events,
 	}
 	e := &entry{}
+	var outbox []room.OutboxEntry
 	if s.store != nil {
 		// Take the room (by force, if another server still holds it: ADR 0007), then read it.
 		actx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -151,6 +176,7 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 			return nil, status.Error(codes.Unavailable, "room store unavailable")
 		}
 		e.handle = s.store.Handle(req.GetRoomId(), s.id, owned.Token)
+		outbox = owned.Outbox
 		cfg.Durable, cfg.Token = e.handle, owned.Token
 		if owned.Snapshot != nil {
 			cfg.Restore = &room.Restored{Snapshot: *owned.Snapshot, Events: owned.Events}
@@ -184,7 +210,52 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 	if cfg.Restore == nil {
 		s.log.InfoContext(ctx, "room allocated", "room_id", r.ID(), "server_id", s.id, "user_id", req.GetHostUserId())
 	}
+	if len(outbox) > 0 && s.requeuer != nil {
+		// What the previous owner committed but never got into Kafka (ADR 0009).
+		n := s.requeuer.Requeue(outbox)
+		s.metrics.OutboxRequeued(ctx, "takeover", n)
+		s.log.InfoContext(ctx, "outbox entries left by the previous owner queued", "room_id", r.ID(), "entries", n)
+	}
 	return resp, nil
+}
+
+// scanOutboxes queues again, every scanEvery, the outbox entries of this server's rooms that
+// are older than staleAge: their publish failed, timed out or was dropped (ADR 0009). Entries
+// still queued or in flight are skipped by the requeuer.
+func (s *Server) scanOutboxes() {
+	t := time.NewTicker(s.scanEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-t.C:
+		}
+		s.mu.Lock()
+		ids := make([]string, 0, len(s.rooms))
+		for id, e := range s.rooms {
+			if e.handle != nil {
+				ids = append(ids, id)
+			}
+		}
+		s.mu.Unlock()
+		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+		pending, err := s.store.Pending(ctx, ids, s.clock.Now().Add(-s.staleAge))
+		cancel()
+		if err != nil {
+			s.log.Warn("outboxes not scanned", "rooms", len(ids), "err", err)
+			continue
+		}
+		stale, queued := 0, 0
+		for id, entries := range pending {
+			stale += len(entries)
+			n := s.requeuer.Requeue(entries)
+			queued += n
+			s.log.Warn("stale outbox entries queued again", "room_id", id, "entries", len(entries), "queued", n)
+		}
+		s.metrics.OutboxPending(s.ctx, stale)
+		s.metrics.OutboxRequeued(s.ctx, "stale", queued)
+	}
 }
 
 // keepLeases renews every room's lease every RenewEvery in one pipeline, and stops rooms whose

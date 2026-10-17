@@ -178,6 +178,8 @@ func run(cfg config, logger *slog.Logger) error {
 	ctrl := control.New(roomsCtx, control.Config{
 		ID: cfg.instance, WSAddress: cfg.wsAddress, MaxRooms: cfg.maxRooms, Metrics: roomMetrics, Events: publisher,
 		Store: store, Log: logger,
+		// What a room's outbox still holds is queued again: on takeover, and when stale (ADR 0009).
+		Outbox: publisher,
 	})
 	wsHandler, err := ws.NewHandler(ws.Config{
 		ServerID: cfg.instance, Rooms: ctrl, Verifier: ticket.NewVerifier(keys, time.Now),
