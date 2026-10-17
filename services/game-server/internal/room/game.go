@@ -292,6 +292,12 @@ func (g *Game) Join(now time.Time, uid, name string, resume bool) error {
 			Data: map[string]any{"user_id": uid, "view": g.ViewFor(uid), "seq": g.seq}})
 	}
 	g.sendPrivate(uid)
+	if resume {
+		// The last message of every resume (ADR 0008): after the replay, this join's own events
+		// and the private state, so the client knows it is caught up, and can check seq. Without
+		// it, a resume with nothing missed got no answer at all.
+		g.send(uid, "resumed", map[string]any{"seq": g.seq})
+	}
 	return nil
 }
 

@@ -184,6 +184,44 @@ func TestResumeReplaysExactlyTheMissedEvents(t *testing.T) {
 	if other[len(other)-1].Seq != evs[len(evs)-1].Seq {
 		t.Fatal("the resumed client is not in step with the room")
 	}
+	assertResumedLast(t, back, evs[len(evs)-1].Seq)
+}
+
+// assertResumedLast checks that conn's last message is resumed {seq} (ADR 0008), and its only one.
+func assertResumedLast(t *testing.T, conn *fakeConn, seq int64) {
+	t.Helper()
+	all := conn.all()
+	if len(all) == 0 || all[len(all)-1].Type != "resumed" || len(conn.private("resumed")) != 1 {
+		t.Fatalf("want exactly one resumed, last; got %d messages", len(all))
+	}
+	var data struct {
+		Seq int64 `json:"seq"`
+	}
+	if err := json.Unmarshal(all[len(all)-1].Data, &data); err != nil || data.Seq != seq {
+		t.Fatalf("resumed = %s, want seq %d", all[len(all)-1].Data, seq)
+	}
+}
+
+// A socket that died silently: the room still thinks the player is connected, and the client
+// resumes with nothing missed. It used to get no message at all, so its handshake timer fired
+// on a working socket; now it gets resumed.
+func TestResumeWithNothingMissedIsAnswered(t *testing.T) {
+	h := newHarness(t, "a", DefaultSettings, nil)
+	a := h.join("a")
+	h.join("b")
+	h.sync()
+	evs := a.events("") // b's own join came in its welcome; a saw it as the latest event
+	lastSeen := evs[len(evs)-1].Seq
+
+	back := &fakeConn{uid: "b"}
+	if err := h.room.Join(context.Background(), back, "Name b", lastSeen); err != nil {
+		t.Fatal(err)
+	}
+	h.sync()
+	if got := back.all(); len(got) != 1 {
+		t.Fatalf("got %d messages, want only resumed", len(got))
+	}
+	assertResumedLast(t, back, lastSeen)
 }
 
 func TestResumeFarBehindGetsAWelcome(t *testing.T) {
@@ -203,8 +241,8 @@ func TestResumeFarBehindGetsAWelcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.sync()
-	if len(back.private("welcome")) != 1 {
-		t.Fatal("over the replay cap, a full welcome is expected")
+	if len(back.private("welcome")) != 1 || len(back.private("resumed")) != 0 {
+		t.Fatal("over the replay cap, a full welcome (and no resumed) is expected")
 	}
 }
 

@@ -207,7 +207,8 @@ func (r *Room) Summary() Summary { return *r.summary.Load() }
 // Done is closed when the actor has stopped.
 func (r *Room) Done() <-chan struct{} { return r.done }
 
-// Join adds conn's player to the room and waits until the welcome is queued.
+// Join adds conn's player to the room. It returns once the actor has accepted the join; the
+// replay is sent by then, and the welcome (or resumed) follows in the same step's flush.
 func (r *Room) Join(ctx context.Context, conn Conn, name string, lastSeq int64) error {
 	reply := make(chan error, 1)
 	if err := r.enqueue(ctx, joinIn{conn: conn, name: name, lastSeq: lastSeq, reply: reply}); err != nil {
