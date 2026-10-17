@@ -173,6 +173,78 @@ func storedServer(t *testing.T, id string, store *roomstore.Store) *Server {
 	return s
 }
 
+// fakeRequeuer records the outbox entries a server queues again, by event_id.
+type fakeRequeuer struct {
+	mu  sync.Mutex
+	got []string
+}
+
+func (f *fakeRequeuer) Requeue(entries []room.OutboxEntry) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, e := range entries {
+		f.got = append(f.got, e.EventID)
+	}
+	return len(entries)
+}
+
+func (f *fakeRequeuer) all() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.got)
+}
+
+func outboxServer(t *testing.T, id string, store *roomstore.Store, rq Requeuer, scan, stale time.Duration) *Server {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, Config{ID: id, WSAddress: "/ws/" + id, MaxRooms: 10, Metrics: room.NoopMetrics(), Store: store, Log: quiet,
+		Outbox: rq, OutboxScan: scan, StaleAfter: stale})
+	t.Cleanup(func() { cancel(); s.Wait() })
+	return s
+}
+
+// ADR 0009: gs-1 committed a finished round and died before Kafka had it; gs-2, taking the
+// room, queues the entry it finds.
+func TestTakeoverRequeuesWhatThePreviousOwnerLeft(t *testing.T) {
+	store := roomstore.New(redistest.New(t))
+	ctx := t.Context()
+	a := outboxServer(t, "gs-1", store, &fakeRequeuer{}, time.Hour, time.Hour)
+	onA, onB := req("r1"), req("r1")
+	onA.ServerId, onB.ServerId = "gs-1", "gs-2"
+	if _, err := a.AllocateRoom(ctx, onA); err != nil {
+		t.Fatal(err)
+	}
+	left := []room.OutboxEntry{{EventID: "evt-left", Kind: room.OutboxRound, Payload: []byte("x")}}
+	if err := store.Commit(ctx, "r1", "gs-1", a.Room("r1").Token(), nil, nil, left); err != nil {
+		t.Fatal(err)
+	}
+
+	rq := &fakeRequeuer{}
+	b := outboxServer(t, "gs-2", store, rq, time.Hour, time.Hour)
+	if _, err := b.AllocateRoom(ctx, onB); err != nil {
+		t.Fatal(err)
+	}
+	if got := rq.all(); !slices.Equal(got, []string{"evt-left"}) {
+		t.Fatalf("gs-2 queued %v, want the entry gs-1 left", got)
+	}
+}
+
+// An entry its own server failed to publish is queued again by the scan once it is stale.
+func TestStaleOutboxEntriesAreQueuedAgain(t *testing.T) {
+	store := roomstore.New(redistest.New(t))
+	ctx := t.Context()
+	rq := &fakeRequeuer{}
+	s := outboxServer(t, "gs-1", store, rq, 50*time.Millisecond, time.Millisecond)
+	if _, err := s.AllocateRoom(ctx, req("r1")); err != nil {
+		t.Fatal(err)
+	}
+	stuck := []room.OutboxEntry{{EventID: "evt-stuck", Kind: room.OutboxMatch, Payload: []byte("x")}}
+	if err := store.Commit(ctx, "r1", "gs-1", s.Room("r1").Token(), nil, nil, stuck); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the stale entry queued again", func() bool { return slices.Contains(rq.all(), "evt-stuck") })
+}
+
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -239,7 +311,7 @@ func TestTakeoverAcrossServers(t *testing.T) {
 		}
 	}
 	// gs-1's zombie writes are rejected (stale token).
-	if err := store.Handle("r1", "gs-1", 1).Commit(ctx, []room.StoredEvent{{Seq: 99, Type: "chat", Data: []byte(`{}`)}}, nil); !errors.Is(err, roomstore.ErrFenced) {
+	if err := store.Handle("r1", "gs-1", 1).Commit(ctx, []room.StoredEvent{{Seq: 99, Type: "chat", Data: []byte(`{}`)}}, nil, nil); !errors.Is(err, roomstore.ErrFenced) {
 		t.Fatalf("zombie commit: err = %v", err)
 	}
 

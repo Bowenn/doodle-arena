@@ -186,6 +186,14 @@ func (g *Game) Phase() Phase { return g.phase }
 // Closed reports that the room has been empty long enough to close.
 func (g *Game) Closed() bool { return g.closed }
 
+// KeepOpen takes back a close the store refused (ADR 0009: finished rounds or matches are
+// still to be published). The room stays, empty, and tries again after another EmptyTTL; a
+// player who joins meanwhile finds it open.
+func (g *Game) KeepOpen(now time.Time) {
+	g.closed = false
+	g.empty = now
+}
+
 // Seq is the seq of the latest shared event.
 func (g *Game) Seq() int64 { return g.seq }
 

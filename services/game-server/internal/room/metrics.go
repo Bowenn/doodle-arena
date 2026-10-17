@@ -16,6 +16,8 @@ type Metrics struct {
 	guesses     metric.Int64Counter
 	reconnects  metric.Int64Counter
 	takeovers   metric.Int64Counter
+	outboxStale metric.Int64Gauge
+	requeued    metric.Int64Counter
 }
 
 // NewMetrics creates the instruments once per process.
@@ -44,11 +46,32 @@ func NewMetrics(m metric.Meter) (*Metrics, error) {
 		metric.WithDescription("Rooms this server took over from another owner"), metric.WithUnit("{room}")); err != nil {
 		return nil, err
 	}
+	if mt.outboxStale, err = m.Int64Gauge("game.outbox.pending",
+		metric.WithDescription("Outbox entries older than a minute (finished rounds and matches not yet in Kafka) in this server's rooms"),
+		metric.WithUnit("{entry}")); err != nil {
+		return nil, err
+	}
+	if mt.requeued, err = m.Int64Counter("game.outbox.requeued",
+		metric.WithDescription("Outbox entries queued for publishing again, by reason: takeover or stale"),
+		metric.WithUnit("{entry}")); err != nil {
+		return nil, err
+	}
 	return &mt, nil
 }
 
 // Takeover counts a room this server restored from another owner's state.
 func (m *Metrics) Takeover(ctx context.Context) { m.takeovers.Add(ctx, 1) }
+
+// OutboxPending records how many outbox entries in this server's rooms are older than the
+// stale threshold (ADR 0009).
+func (m *Metrics) OutboxPending(ctx context.Context, n int) { m.outboxStale.Record(ctx, int64(n)) }
+
+// OutboxRequeued counts entries queued again: reason is "takeover" or "stale".
+func (m *Metrics) OutboxRequeued(ctx context.Context, reason string, n int) {
+	if n > 0 {
+		m.requeued.Add(ctx, int64(n), metric.WithAttributes(attribute.String("reason", reason)))
+	}
+}
 
 // NoopMetrics records nothing (tests that don't look at metrics).
 func NoopMetrics() *Metrics {

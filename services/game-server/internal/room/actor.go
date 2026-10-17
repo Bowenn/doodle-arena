@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -41,18 +42,19 @@ func (realClock) AfterFunc(d time.Duration, f func()) func() bool {
 // RealClock is the wall clock.
 var RealClock Clock = realClock{}
 
-// Sink takes finished rounds and matches out of the room (the event publisher). Both methods
-// must return at once and never do I/O: the actor calls them inside its loop. ctx carries
-// only the round's or match's end span; it is never cancelled with the room.
+// Sink takes finished rounds and matches out of the room (the event publisher), each with its
+// outbox entry: the publisher deletes the entry once the event is in Kafka (ADR 0009). Both
+// methods must return at once and never do I/O: the actor calls them inside its loop. ctx
+// carries only the round's or match's end span; it is never cancelled with the room.
 type Sink interface {
-	RoundFinished(ctx context.Context, r FinishedRound)
-	MatchFinished(ctx context.Context, m FinishedMatch)
+	RoundFinished(ctx context.Context, r FinishedRound, e OutboxEntry)
+	MatchFinished(ctx context.Context, m FinishedMatch, e OutboxEntry)
 }
 
 type noSink struct{}
 
-func (noSink) RoundFinished(context.Context, FinishedRound) {}
-func (noSink) MatchFinished(context.Context, FinishedMatch) {}
+func (noSink) RoundFinished(context.Context, FinishedRound, OutboxEntry) {}
+func (noSink) MatchFinished(context.Context, FinishedMatch, OutboxEntry) {}
 
 // ErrClosed means the room has shut down.
 var ErrClosed = errors.New("room closed")
@@ -61,10 +63,12 @@ var ErrClosed = errors.New("room closed")
 // this server must stop the room at once (ADR 0007).
 var ErrMoved = errors.New("room moved to another server")
 
-// Durable stores a room's events and snapshots for its owner (package roomstore). Every call
-// is checked against the owner's lease and fencing token: ErrMoved means the room is gone.
+// Durable stores a room's events, snapshots and outbox for its owner (package roomstore).
+// Every call is checked against the owner's lease and fencing token: ErrMoved means the room
+// is gone. Commit fills in the outbox entries' IDs. Close returns ErrOutboxPending while the
+// outbox has entries.
 type Durable interface {
-	Commit(ctx context.Context, events []StoredEvent, snap *Snapshot) error
+	Commit(ctx context.Context, events []StoredEvent, snap *Snapshot, outbox []OutboxEntry) error
 	Close(ctx context.Context) error
 }
 
@@ -100,8 +104,9 @@ type Config struct {
 	Rand     *rand.Rand // nil: a random seed
 	Log      *slog.Logger
 	Metrics  *Metrics
-	Events   Sink    // nil: finished rounds and matches go nowhere
-	Durable  Durable // nil: the room lives only in memory (tests)
+	Events   Sink          // nil: finished rounds and matches go nowhere
+	Durable  Durable       // nil: the room lives only in memory (tests)
+	NewID    func() string // event ids for the outbox; nil: random UUIDs
 	// Token is the fencing token of the lease the room was taken with (0 without Durable).
 	// It never changes: a new owner builds a new Room.
 	Token   int64
@@ -140,6 +145,7 @@ type Room struct {
 	metrics *Metrics
 	events  Sink
 	tracer  trace.Tracer
+	newID   func() string
 
 	conns     map[string]Conn            // actor only
 	traces    map[string]context.Context // actor only: each connection's span, for its log lines
@@ -171,7 +177,10 @@ func New(cfg Config) (*Room, error) {
 		id: cfg.ID, mode: cfg.Mode, inbox: make(chan any, 256), done: make(chan struct{}),
 		clock: cfg.Clock, log: cfg.Log.With("room_id", cfg.ID), metrics: cfg.Metrics, events: cfg.Events,
 		tracer: otel.Tracer("game-server"), conns: map[string]Conn{}, traces: map[string]context.Context{}, durable: cfg.Durable,
-		token: cfg.Token,
+		token: cfg.Token, newID: cfg.NewID,
+	}
+	if r.newID == nil {
+		r.newID = uuid.NewString
 	}
 	if cfg.Restore != nil {
 		g, err := RestoreGame(cfg.Restore.Snapshot, cfg.Restore.Events, rng, cfg.Clock.Now())
@@ -275,7 +284,7 @@ func (r *Room) Run(ctx context.Context) {
 	if r.fresh && r.durable != nil {
 		// The base every later event applies to: without it a new owner couldn't rebuild.
 		snap := r.game.Snapshot()
-		if err := r.commit(ctx, nil, &snap); err != nil {
+		if err := r.commit(ctx, nil, &snap, nil); err != nil {
 			r.stop(err)
 			return
 		}
@@ -304,10 +313,19 @@ func (r *Room) Run(ctx context.Context) {
 		if r.game.Closed() {
 			if r.durable != nil {
 				cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitTimeout)
-				if err := r.durable.Close(cctx); err != nil {
+				err := r.durable.Close(cctx)
+				cancel()
+				if errors.Is(err, ErrOutboxPending) {
+					// Finished rounds or matches aren't in Kafka yet (ADR 0009): keep the room,
+					// and with it the lease, so they are published here or by the next owner.
+					r.game.KeepOpen(r.clock.Now())
+					r.log.Info("room not closed yet: finished rounds or matches still to publish")
+					r.rearm()
+					continue
+				}
+				if err != nil {
 					r.log.Warn("closed room not marked in Redis", "err", err)
 				}
-				cancel()
 			}
 			r.log.Info("room closed: empty")
 			return
@@ -335,10 +353,10 @@ func (r *Room) stop(err error) {
 	}
 }
 
-func (r *Room) commit(ctx context.Context, events []StoredEvent, snap *Snapshot) error {
+func (r *Room) commit(ctx context.Context, events []StoredEvent, snap *Snapshot, outbox []OutboxEntry) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitTimeout)
 	defer cancel()
-	if err := r.durable.Commit(ctx, events, snap); err != nil {
+	if err := r.durable.Commit(ctx, events, snap, outbox); err != nil {
 		return err
 	}
 	if snap != nil {
@@ -438,14 +456,23 @@ func (r *Room) flush(ctx context.Context) error {
 			phase = phase || IsPhaseEvent(ev.Type)
 		}
 	}
+	// Finished rounds and matches go into the outbox in the same commit as the events that end
+	// them (ADR 0009). If the commit fails, neither exists, and the next owner replays the round.
+	fin, err := r.prepare(r.game.TakeFinished())
+	if err != nil {
+		return err
+	}
+	outbox := make([]OutboxEntry, len(fin))
+	for i := range fin {
+		outbox[i] = fin[i].entry
+	}
 	if r.durable != nil && len(stored) > 0 {
 		var snap *Snapshot
 		if phase || r.game.Seq()-r.lastSnapSeq >= SnapshotEvery {
 			s := r.game.Snapshot()
 			snap = &s
 		}
-		if err := r.commit(ctx, stored, snap); err != nil {
-			r.game.TakeFinished() // never published: the next owner has the state
+		if err := r.commit(ctx, stored, snap, outbox); err != nil {
 			return err
 		}
 	}
@@ -471,10 +498,44 @@ func (r *Room) flush(ctx context.Context) error {
 		r.metrics.broadcast(ctx, ev.Type, time.Since(start))
 		r.lifecycle(ev)
 	}
-	for _, f := range r.game.TakeFinished() {
-		r.finish(f)
+	for i := range fin {
+		r.finish(fin[i], outbox[i])
 	}
 	return nil
+}
+
+// finishing is a finished round or match on its way out: its end span and its outbox entry.
+type finishing struct {
+	Finished
+	ctx   context.Context // carries the end span
+	entry OutboxEntry
+}
+
+// prepare starts each finished round's or match's end span and builds its outbox entry, before
+// the commit that stores it. The end span is the parent of the publisher's spans, so the
+// Kafka traceparent leads back here.
+func (r *Room) prepare(fins []Finished) ([]finishing, error) {
+	out := make([]finishing, 0, len(fins))
+	for _, f := range fins {
+		var ctx context.Context
+		switch {
+		case f.Round != nil:
+			ctx = r.span("game.round.end", []attribute.KeyValue{attribute.String("room.id", r.id),
+				attribute.String("match.id", f.Round.MatchID), attribute.Int("round.no", f.Round.RoundNo)})
+		case f.Match != nil:
+			m := *f.Match
+			m.Mode = r.mode
+			f.Match = &m
+			ctx = r.span("game.match.end", []attribute.KeyValue{attribute.String("room.id", r.id),
+				attribute.String("match.id", m.MatchID), attribute.Int("match.rounds", m.Rounds)})
+		}
+		e, err := EncodeOutbox(ctx, r.id, r.newID(), f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, finishing{Finished: f, ctx: ctx, entry: e})
+	}
+	return out, nil
 }
 
 // lifecycle logs and traces matches and rounds (never single strokes or guesses).
@@ -494,25 +555,21 @@ func (r *Room) lifecycle(ev protocol.Event) {
 	}
 }
 
-// finish logs and traces a finished round or match and hands it to the event publisher. The
-// end span is the parent of the publisher's spans, so the Kafka traceparent leads back here.
-func (r *Room) finish(f Finished) {
+// finish logs a finished round or match, now stored and broadcast, and hands it with its
+// outbox entry (ID set once committed) to the event publisher.
+func (r *Room) finish(f finishing, e OutboxEntry) {
 	switch {
 	case f.Round != nil:
 		fr := *f.Round
-		ctx := r.span("game.round.end", []attribute.KeyValue{attribute.String("room.id", r.id),
-			attribute.String("match.id", fr.MatchID), attribute.Int("round.no", fr.RoundNo)})
 		// The word is logged only now that everyone has seen it.
-		r.log.InfoContext(ctx, "round finished", "match_id", fr.MatchID, "round_no", fr.RoundNo, "word", fr.Word,
-			"stroke_batches", len(fr.Canvas), "correct", fr.Correct, "user_id", fr.DrawerIDs[0])
-		r.events.RoundFinished(ctx, fr)
+		r.log.InfoContext(f.ctx, "round finished", "match_id", fr.MatchID, "round_no", fr.RoundNo, "word", fr.Word,
+			"stroke_batches", len(fr.Canvas), "correct", fr.Correct, "user_id", fr.DrawerIDs[0], "event_id", e.EventID)
+		r.events.RoundFinished(f.ctx, fr, e)
 	case f.Match != nil:
 		fm := *f.Match
-		fm.Mode = r.mode
-		ctx := r.span("game.match.end", []attribute.KeyValue{attribute.String("room.id", r.id),
-			attribute.String("match.id", fm.MatchID), attribute.Int("match.rounds", fm.Rounds)})
-		r.log.InfoContext(ctx, "match finished", "match_id", fm.MatchID, "rounds", fm.Rounds, "players", len(fm.Results))
-		r.events.MatchFinished(ctx, fm)
+		r.log.InfoContext(f.ctx, "match finished", "match_id", fm.MatchID, "rounds", fm.Rounds, "players", len(fm.Results),
+			"event_id", e.EventID)
+		r.events.MatchFinished(f.ctx, fm, e)
 	}
 }
 

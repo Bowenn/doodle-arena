@@ -3,9 +3,11 @@
 // the claim-check pattern) and MatchFinished to Kafka (design doc, sections 4.4 and 6.2).
 //
 // Room actors must never wait for I/O, so the Publisher takes work through a bounded queue
-// and one worker goroutine does the uploads and produces. When the queue is full (Kafka or
-// S3 has been down for a while), new work is dropped, logged and counted instead of blocking
-// the rooms. The queue lives in memory, so a crash loses what is still queued.
+// and one worker goroutine does the uploads and produces. The queue is only the hand-off: every
+// event is already in its room's outbox in Redis (ADR 0009), and the worker deletes it there
+// (Ack) once Kafka has it. When the queue is full, a job is dropped instead of blocking the
+// rooms, and a failed job is given up after its deadline; either way the entry stays in the
+// outbox and is queued again (Requeue) by the owner's scan or by a new owner after a takeover.
 package events
 
 import (
@@ -14,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,6 +43,11 @@ type ObjectStore interface {
 	PutObject(ctx context.Context, in *s3.PutObjectInput, opts ...func(*s3.Options)) (*s3.PutObjectOutput, error)
 }
 
+// Acker deletes a published entry from its room's outbox (roomstore.Store).
+type Acker interface {
+	Ack(ctx context.Context, roomID, entryID string) error
+}
+
 // Defaults for Config.
 const (
 	DefaultQueueSize  = 1024
@@ -59,12 +67,14 @@ type Config struct {
 	Backoff    time.Duration // first wait between retries, doubling up to 10 s; 0: 500 ms
 	Log        *slog.Logger
 	Meter      metric.Meter
-	NewID      func() string // event ids; nil: random UUIDs
+	NewID      func() string // event ids for entries without one (tests); nil: random UUIDs
+	Outbox     Acker         // deletes published entries; nil: nothing to delete (no Redis)
 }
 
 type job struct {
 	ctx     context.Context // carries the end span from the room; never cancelled
 	eventID string          // fixed when the job is queued, so every retry reuses it
+	entry   room.OutboxEntry
 	round   *room.FinishedRound
 	match   *room.FinishedMatch
 }
@@ -86,6 +96,9 @@ type Publisher struct {
 	closing chan struct{}
 	closed  atomic.Bool
 	done    chan struct{}
+
+	mu       sync.Mutex
+	inflight map[string]bool // outbox entry IDs queued or being published
 }
 
 var _ room.Sink = (*Publisher)(nil)
@@ -111,35 +124,91 @@ func New(cfg Config) (*Publisher, error) {
 	return &Publisher{
 		cfg: cfg, log: cfg.Log, metrics: m, tracer: otel.Tracer("game-server"),
 		queue: make(chan job, cfg.QueueSize), closing: make(chan struct{}), done: make(chan struct{}),
+		inflight: map[string]bool{},
 	}, nil
 }
 
-// RoundFinished queues a finished round. It never blocks: the room actor calls it.
-func (p *Publisher) RoundFinished(ctx context.Context, r room.FinishedRound) {
-	p.enqueue(job{ctx: context.WithoutCancel(ctx), eventID: p.cfg.NewID(), round: &r},
+// RoundFinished queues a finished round, with the event_id its outbox entry fixed. It never
+// blocks: the room actor calls it.
+func (p *Publisher) RoundFinished(ctx context.Context, r room.FinishedRound, e room.OutboxEntry) {
+	p.enqueue(job{ctx: context.WithoutCancel(ctx), eventID: p.eventID(e), entry: e, round: &r},
 		"room_id", r.RoomID, "match_id", r.MatchID, "round_no", r.RoundNo)
 }
 
 // MatchFinished queues a finished match. It never blocks.
-func (p *Publisher) MatchFinished(ctx context.Context, m room.FinishedMatch) {
-	p.enqueue(job{ctx: context.WithoutCancel(ctx), eventID: p.cfg.NewID(), match: &m},
+func (p *Publisher) MatchFinished(ctx context.Context, m room.FinishedMatch, e room.OutboxEntry) {
+	p.enqueue(job{ctx: context.WithoutCancel(ctx), eventID: p.eventID(e), entry: e, match: &m},
 		"room_id", m.RoomID, "match_id", m.MatchID)
 }
 
-func (p *Publisher) enqueue(j job, logAttrs ...any) {
+// Requeue queues outbox entries again: ones a previous owner left, or this server's that
+// failed or were dropped. Entries already queued or being published are skipped, so a scan
+// never doubles the work. It never blocks, and returns how many it queued.
+func (p *Publisher) Requeue(entries []room.OutboxEntry) int {
+	n := 0
+	for _, e := range entries {
+		if p.isInflight(e.ID) {
+			continue
+		}
+		f, ctx, err := room.DecodeOutbox(e)
+		if err != nil {
+			// A bug, not an outage: it stays in the outbox, where someone can look at it.
+			p.log.Error("outbox entry can't be decoded", "room_id", e.RoomID, "entry_id", e.ID,
+				"event_id", e.EventID, "err", err)
+			continue
+		}
+		j := job{ctx: ctx, eventID: p.eventID(e), entry: e, round: f.Round, match: f.Match}
+		if p.enqueue(j, "room_id", e.RoomID, "entry_id", e.ID) {
+			n++
+		}
+	}
+	return n
+}
+
+func (p *Publisher) isInflight(entryID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return entryID != "" && p.inflight[entryID]
+}
+
+func (p *Publisher) setInflight(entryID string, on bool) {
+	if entryID == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if on {
+		p.inflight[entryID] = true
+	} else {
+		delete(p.inflight, entryID)
+	}
+}
+
+// eventID is the entry's, so every delivery of one event has the same id.
+func (p *Publisher) eventID(e room.OutboxEntry) string {
+	if e.EventID != "" {
+		return e.EventID
+	}
+	return p.cfg.NewID()
+}
+
+func (p *Publisher) enqueue(j job, logAttrs ...any) bool {
 	if !p.closed.Load() {
+		p.setInflight(j.entry.ID, true)
 		select {
 		case p.queue <- j:
 			p.metrics.queued.Add(j.ctx, 1)
-			return
+			return true
 		default:
+			p.setInflight(j.entry.ID, false)
 		}
 	}
-	// Dropping loses one event; blocking would freeze the room for every player. The log
-	// line has the ids needed to find what was lost.
+	// Blocking would freeze the room for every player. The event isn't lost: it stays in the
+	// room's outbox and is queued again by the next scan.
 	p.metrics.result(j.ctx, j.topic(), resultDropped)
 	p.log.ErrorContext(j.ctx, "event dropped: publish queue full or shutting down",
 		append(logAttrs, "topic", j.topic(), "event_id", j.eventID)...)
+	return false
 }
 
 // Run publishes queued work, one event at a time, in the order it was queued, so a room's
@@ -178,6 +247,7 @@ func (p *Publisher) Done() <-chan struct{} { return p.done }
 
 func (p *Publisher) handle(runCtx context.Context, j job) {
 	p.metrics.queued.Add(j.ctx, -1)
+	defer p.setInflight(j.entry.ID, false)
 	topic := j.topic()
 	if runCtx.Err() != nil {
 		p.metrics.result(j.ctx, topic, resultDropped)
@@ -202,6 +272,21 @@ func (p *Publisher) handle(runCtx context.Context, j job) {
 		return
 	}
 	p.metrics.result(ctx, topic, resultSuccess)
+	p.ack(ctx, j)
+}
+
+// ack deletes the published entry from its room's outbox. If that fails, the entry is
+// published again later with the same event_id, which consumers absorb.
+func (p *Publisher) ack(ctx context.Context, j job) {
+	if p.cfg.Outbox == nil || j.entry.ID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), attemptTimeout)
+	defer cancel()
+	if err := p.cfg.Outbox.Ack(ctx, j.entry.RoomID, j.entry.ID); err != nil {
+		p.log.WarnContext(ctx, "published event not removed from the outbox; it will be sent again",
+			"room_id", j.entry.RoomID, "entry_id", j.entry.ID, "event_id", j.eventID, "err", err)
+	}
 }
 
 func (p *Publisher) publishRound(ctx context.Context, eventID string, r room.FinishedRound) (err error) {

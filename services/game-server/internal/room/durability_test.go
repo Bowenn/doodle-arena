@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/rand/v2"
@@ -21,17 +22,29 @@ type fakeDurable struct {
 	mu        sync.Mutex
 	events    []StoredEvent
 	snapshots []Snapshot
+	outbox    []OutboxEntry // committed and not acked
+	commits   [][]string    // per commit: its event types, then "outbox:<kind>" per entry
 	fail      error
 	closed    bool
 }
 
-func (d *fakeDurable) Commit(_ context.Context, events []StoredEvent, snap *Snapshot) error {
+func (d *fakeDurable) Commit(_ context.Context, events []StoredEvent, snap *Snapshot, outbox []OutboxEntry) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.fail != nil {
 		return d.fail
 	}
 	d.events = append(d.events, events...)
+	var rec []string
+	for _, ev := range events {
+		rec = append(rec, ev.Type)
+	}
+	for i := range outbox {
+		outbox[i].ID = fmt.Sprintf("o-%d", len(d.outbox)+1)
+		d.outbox = append(d.outbox, outbox[i])
+		rec = append(rec, "outbox:"+outbox[i].Kind)
+	}
+	d.commits = append(d.commits, rec)
 	if snap != nil {
 		// Through JSON, as Redis stores it.
 		b, _ := json.Marshal(snap)
@@ -45,8 +58,18 @@ func (d *fakeDurable) Commit(_ context.Context, events []StoredEvent, snap *Snap
 func (d *fakeDurable) Close(context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.fail == nil && len(d.outbox) > 0 {
+		return ErrOutboxPending
+	}
 	d.closed = true
 	return d.fail
+}
+
+// ack deletes a published entry, as the publisher does.
+func (d *fakeDurable) ack(id string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.outbox = slices.DeleteFunc(d.outbox, func(e OutboxEntry) bool { return e.ID == id })
 }
 
 func (d *fakeDurable) setFail(err error) { d.mu.Lock(); d.fail = err; d.mu.Unlock() }
@@ -96,8 +119,8 @@ func TestNothingIsSentUnlessStored(t *testing.T) {
 	sink.mu.Lock()
 	published := len(sink.items)
 	sink.mu.Unlock()
-	if published != 0 {
-		t.Fatal("published to Kafka without storing")
+	if published != 0 || len(d.outbox) != 0 {
+		t.Fatal("published to Kafka, or queued in the outbox, without storing")
 	}
 }
 

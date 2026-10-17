@@ -147,7 +147,9 @@ func run(cfg config, logger *slog.Logger) error {
 	}
 
 	// Finished rounds and matches leave through the publisher's own goroutine; room actors
-	// only queue them. It runs until the rooms have stopped (see the shutdown below).
+	// only queue them. Each is already in its room's outbox in Redis (ADR 0009), and the
+	// publisher deletes it there once Kafka has it. It runs until the rooms have stopped (see
+	// the shutdown below); what it can't finish stays in the outbox for the next owner.
 	if cfg.s3.AccessKey == "" || cfg.s3.SecretKey == "" {
 		return errors.New("S3_ACCESS_KEY and S3_SECRET_KEY must be set (stroke logs go to the round-logs bucket)")
 	}
@@ -156,8 +158,11 @@ func run(cfg config, logger *slog.Logger) error {
 		return err
 	}
 	defer kafka.Close()
+	// Rooms are stored in Redis under a lease, so another server can take them over (ADR 0007).
+	store := roomstore.New(rdb)
 	publisher, err := events.New(events.Config{
 		Kafka: kafka, S3: events.NewS3Client(cfg.s3), Bucket: cfg.roundLogs, Log: logger, Meter: meter,
+		Outbox: store,
 	})
 	if err != nil {
 		return err
@@ -172,8 +177,9 @@ func run(cfg config, logger *slog.Logger) error {
 	defer stopRooms()
 	ctrl := control.New(roomsCtx, control.Config{
 		ID: cfg.instance, WSAddress: cfg.wsAddress, MaxRooms: cfg.maxRooms, Metrics: roomMetrics, Events: publisher,
-		// Rooms are stored in Redis under a lease, so another server can take them over (ADR 0007).
-		Store: roomstore.New(rdb), Log: logger,
+		Store: store, Log: logger,
+		// What a room's outbox still holds is queued again: on takeover, and when stale (ADR 0009).
+		Outbox: publisher,
 	})
 	wsHandler, err := ws.NewHandler(ws.Config{
 		ServerID: cfg.instance, Rooms: ctrl, Verifier: ticket.NewVerifier(keys, time.Now),
@@ -233,7 +239,8 @@ func run(cfg config, logger *slog.Logger) error {
 
 	// SIGTERM: stop heartbeats (the lobby stops sending rooms here within 6 seconds), stop
 	// accepting connections, close the rooms (their sockets get 1001 and can reconnect), wait
-	// for the sockets, publish the queued events, then exit. Rooms aren't handed to another
+	// for the sockets, publish the queued events (what isn't published in time stays in the
+	// rooms' outboxes for the next owner, ADR 0009), then exit. Rooms aren't handed to another
 	// server: the lobby moves them by ordinary failover once the heartbeats stop (handing them
 	// over is roadmap task 5.5); a match cut short by shutdown publishes nothing.
 	logger.Info("shutting down")
