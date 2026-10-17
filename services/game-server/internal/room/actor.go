@@ -147,9 +147,10 @@ type Room struct {
 
 	durable     Durable
 	token       int64
-	fresh       bool  // a new room: its first snapshot must be written before anything
-	lastSnapSeq int64 // seq of the latest snapshot written
-	moved       bool  // set by fencedIn
+	fenced      atomic.Bool // the lease was lost: the room is stopping, or has stopped
+	fresh       bool        // a new room: its first snapshot must be written before anything
+	lastSnapSeq int64       // seq of the latest snapshot written
+	moved       bool        // set by fencedIn
 }
 
 // New creates a room, or rebuilds one from cfg.Restore; start it with Run.
@@ -188,11 +189,16 @@ func New(cfg Config) (*Room, error) {
 // Fence tells the room that its lease was taken over. It never blocks: if the inbox is full,
 // the lease keeper finds the lease lost again on its next round.
 func (r *Room) Fence() {
+	r.fenced.Store(true)
 	select {
 	case r.inbox <- fencedIn{}:
 	default:
 	}
 }
+
+// Fenced reports that the room lost its lease (Fence, or a write the store refused as moved).
+// Safe from any goroutine.
+func (r *Room) Fenced() bool { return r.fenced.Load() }
 
 // ID is the room's id.
 func (r *Room) ID() string { return r.id }
@@ -307,6 +313,7 @@ func (r *Room) Run(ctx context.Context) {
 // it can). Nothing that wasn't stored was sent to anyone.
 func (r *Room) stop(err error) {
 	if errors.Is(err, ErrMoved) {
+		r.fenced.Store(true)
 		r.log.Warn("room taken over by another server: stopping", "match_id", r.game.MatchID())
 		for _, c := range r.conns {
 			c.Send(protocol.Marshal("room_moved", map[string]string{"reason": "takeover"}))

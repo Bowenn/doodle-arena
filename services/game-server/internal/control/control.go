@@ -110,8 +110,22 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.rooms[req.GetRoomId()]; ok {
-		return resp, nil
+	if e, ok := s.rooms[req.GetRoomId()]; ok {
+		if s.stillOwns(ctx, e) {
+			return resp, nil
+		}
+		// Another server took the room (ADR 0007) and the lobby is now giving it back. The old
+		// copy here must stop before a new one takes the lease, or OK would point the lobby at
+		// a room that is about to close.
+		if done := s.awaitStopped(ctx, e); !done {
+			return nil, status.Error(codes.Unavailable, "the room's previous copy is still stopping")
+		}
+		if cur, ok := s.rooms[req.GetRoomId()]; ok {
+			if cur != e {
+				return resp, nil // a concurrent AllocateRoom already took it back
+			}
+			delete(s.rooms, req.GetRoomId())
+		}
 	}
 	if s.draining {
 		return nil, status.Error(codes.FailedPrecondition, "server is draining")
@@ -207,6 +221,51 @@ func (s *Server) keepLeases() {
 		}
 	}
 }
+
+// stillOwns reports whether this server's copy of a room still holds its lease. The lease keeper
+// finds a lost lease within RenewEvery; this checks now, so the answer is never stale.
+func (s *Server) stillOwns(ctx context.Context, e *entry) bool {
+	select {
+	case <-e.room.Done():
+		return false
+	default:
+	}
+	if e.room.Fenced() {
+		return false
+	}
+	if s.store == nil || e.handle == nil {
+		return true
+	}
+	rctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	lost, err := s.store.Renew(rctx, s.id, []roomstore.Lease{e.handle.Lease()})
+	if err != nil {
+		// Can't tell; the room's next write would find out. Keep the old answer.
+		s.log.WarnContext(ctx, "lease not checked", "room_id", e.room.ID(), "err", err)
+		return true
+	}
+	return len(lost) == 0
+}
+
+// awaitStopped fences a room that lost its lease and waits, with s.mu released, until its actor
+// has stopped (at most stopWait). It returns with s.mu held again.
+func (s *Server) awaitStopped(ctx context.Context, e *entry) bool {
+	e.room.Fence()
+	s.mu.Unlock()
+	defer s.mu.Lock()
+	timer := time.NewTimer(stopWait)
+	defer timer.Stop()
+	select {
+	case <-e.room.Done():
+		return true
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	return false
+}
+
+// stopWait bounds how long AllocateRoom waits for a fenced room's actor to stop.
+const stopWait = 1500 * time.Millisecond
 
 // DrainServer stops new allocations. Handing rooms over is task 2.5.
 func (s *Server) DrainServer(ctx context.Context, _ *gamev1.DrainServerRequest) (*gamev1.DrainServerResponse, error) {
