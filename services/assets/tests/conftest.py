@@ -245,3 +245,52 @@ def stroke_log_bytes(
 
 
 DEFAULT_STROKE: dict[str, Any] = {"points": [(1000, 1000, 0), (5000, 5000, 40), (9000, 2000, 80)]}
+
+
+KAFKA_IMAGE = "apache/kafka:4.2.2"
+
+
+@pytest.fixture(scope="session")
+def kafka_brokers() -> Iterator[str]:
+    """A single KRaft broker, like the stack's, advertised on a fixed free host port."""
+    import socket
+
+    from confluent_kafka.admin import AdminClient
+    from testcontainers.core.container import DockerContainer
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    env = {
+        "KAFKA_NODE_ID": "1",
+        "KAFKA_PROCESS_ROLES": "broker,controller",
+        "KAFKA_CONTROLLER_QUORUM_VOTERS": "1@localhost:9093",
+        "KAFKA_LISTENERS": "EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:19092",
+        "KAFKA_ADVERTISED_LISTENERS": f"EXTERNAL://localhost:{port},INTERNAL://localhost:19092",
+        "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP": (
+            "EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT"
+        ),
+        "KAFKA_INTER_BROKER_LISTENER_NAME": "INTERNAL",
+        "KAFKA_CONTROLLER_LISTENER_NAMES": "CONTROLLER",
+        "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR": "1",
+        "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
+        "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR": "1",
+        "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS": "0",
+        "KAFKA_AUTO_CREATE_TOPICS_ENABLE": "false",  # like the stack: topics are created on purpose
+    }
+    container = DockerContainer(KAFKA_IMAGE).with_bind_ports(9092, port)
+    for k, v in env.items():
+        container = container.with_env(k, v)
+    with container:
+        brokers = f"localhost:{port}"
+        admin = AdminClient({"bootstrap.servers": brokers})
+        deadline = time.monotonic() + 90
+        while True:
+            try:
+                admin.list_topics(timeout=2)
+                break
+            except Exception:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.5)
+        yield brokers

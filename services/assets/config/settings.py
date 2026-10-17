@@ -156,6 +156,7 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 KAFKA_BROKERS = env.kafka_brokers
+SERVICE_INSTANCE_ID = env.service_instance_id
 S3_ENDPOINT = env.s3_endpoint
 S3_REGION = env.s3_region
 S3_ACCESS_KEY = env.s3_access_key

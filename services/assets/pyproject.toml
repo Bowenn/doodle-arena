@@ -76,4 +76,5 @@ dev = [
     "pytest-django>=4.14.0",
     "ruff>=0.17.1",
     "testcontainers[kafka,mongodb,postgres,redis]>=4.15.0",
+    "types-protobuf>=7.35.1.20260906",
 ]
