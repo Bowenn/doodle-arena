@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchMe, loginUrl, logout, type Me } from './auth.ts'
 import { Leaderboard } from './Leaderboard.tsx'
 import { Lobby } from './Lobby.tsx'
+import { Moderate } from './Moderate.tsx'
 import { Room } from './room/Room.tsx'
 
 type View =
@@ -71,6 +72,7 @@ export default function App() {
               <img src={me.avatar_url} alt="" width={28} height={28} referrerPolicy="no-referrer" />
             )}
             Logged in as {me.display_name}
+            {(me.roles.includes('moderator') || me.roles.includes('admin')) && <a href="/admin/">Moderate</a>}
             <button type="button" onClick={() => void signOut()}>
               Sign out
             </button>
@@ -78,6 +80,8 @@ export default function App() {
         </header>
         {roomId ? (
           <Room key={roomId} roomId={roomId} onLeave={() => go('/')} />
+        ) : path === '/moderate' ? (
+          <Moderate onBack={() => go('/')} />
         ) : path === '/leaderboard' ? (
           <Leaderboard meId={me.id} onBack={() => go('/')} />
         ) : (
@@ -97,7 +101,7 @@ export default function App() {
       {view.kind === 'signed-out' && (
         <>
           {cancelled && <p role="status">Sign-in was cancelled.</p>}
-          <a className="button" href={loginUrl(window.location.pathname)}>
+          <a className="button" href={loginUrl(window.location.pathname + window.location.search)}>
             Sign in with Google
           </a>
         </>

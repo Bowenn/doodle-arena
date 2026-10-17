@@ -119,4 +119,26 @@ describe('App', () => {
 
     expect(await screen.findByRole('alert')).toBeTruthy()
   })
+  it('signing in from /moderate comes back to it with its next page', async () => {
+    window.history.replaceState(null, '', '/moderate?next=/admin/drawings/drawing/')
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(json(401, { error: { code: 'REFRESH_TOKEN_INVALID' } })),
+    )
+
+    render(<App />)
+
+    const link = await screen.findByRole('link', { name: 'Sign in with Google' })
+    expect(link.getAttribute('href')).toBe(
+      '/api/auth/google/login?return_to=%2Fmoderate%3Fnext%3D%2Fadmin%2Fdrawings%2Fdrawing%2F',
+    )
+  })
+
+  it('hides the Moderate link from players', async () => {
+    signedIn()
+
+    render(<App />)
+
+    expect(await screen.findByText(/Logged in as Ada Lovelace/)).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Moderate' })).toBeNull()
+  })
 })
