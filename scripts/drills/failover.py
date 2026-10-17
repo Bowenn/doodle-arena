@@ -15,6 +15,7 @@ the fencing check, and its log says so.
 """
 
 import asyncio
+import contextlib
 import json
 import subprocess
 import sys
@@ -31,8 +32,19 @@ sys.path.insert(0, str(ROOT / "services" / "auth"))
 from app.tokens import SigningKey, TokenIssuer  # noqa: E402
 
 GW, WS, ORIGIN = "http://localhost:8080", "ws://localhost:8080", "http://localhost:8080"
-COMPOSE = ["docker", "compose", "-f", str(ROOT / "infra/docker-compose.yml"), "--env-file", str(ROOT / ".env")]
-issuer = TokenIssuer(SigningKey.from_file(str(ROOT / "secrets/jwt-private.pem")), GW + "/api/auth", timedelta(minutes=10))
+COMPOSE = [
+    "docker",
+    "compose",
+    "-f",
+    str(ROOT / "infra/docker-compose.yml"),
+    "--env-file",
+    str(ROOT / ".env"),
+]
+issuer = TokenIssuer(
+    SigningKey.from_file(str(ROOT / "secrets/jwt-private.pem")),
+    GW + "/api/auth",
+    timedelta(minutes=10),
+)
 
 
 def call(method, path, user, body=None):
@@ -44,7 +56,7 @@ def call(method, path, user, body=None):
 
 
 class Bot:
-    """A player that reconnects through the lobby and resumes from its last seq, like the web app."""
+    """A player that reconnects through the lobby and resumes from its last seq, like the web."""
 
     def __init__(self, user, room_id):
         self.user, self.room_id = user, room_id
@@ -64,17 +76,22 @@ class Bot:
             try:
                 j = call("POST", f"/api/lobby/rooms/{self.room_id}/join", self.user)
                 self.ws = await websockets.connect(WS + j["ws_url"], origin=ORIGIN)
-                await self.ws.send(json.dumps({"type": "hello", "data": {"ticket": j["ticket"], "last_seq": self.last_seq}}))
+                await self.ws.send(
+                    json.dumps(
+                        {
+                            "type": "hello",
+                            "data": {"ticket": j["ticket"], "last_seq": self.last_seq},
+                        }
+                    )
+                )
                 self.server = j["ws_url"].split("/")[2]
                 return
-            except (urllib.error.HTTPError, OSError, websockets.WebSocketException):
+            except urllib.error.HTTPError, OSError, websockets.WebSocketException:
                 await asyncio.sleep(0.25)  # the lobby says 503 while the room moves
 
     async def send(self, typ, data):
-        try:
+        with contextlib.suppress(websockets.WebSocketException):
             await self.ws.send(json.dumps({"type": typ, "data": data}))
-        except websockets.WebSocketException:
-            pass
 
     async def run(self, stop):
         await self.connect()
@@ -104,14 +121,19 @@ class Bot:
     def gaps(self):
         """Seqs out of order or repeated (a welcome resets the base)."""
         bad = []
-        for a, b in zip(self.seqs, self.seqs[1:]):
+        for a, b in zip(self.seqs, self.seqs[1:], strict=False):
             if b != a + 1:
                 bad.append((a, b))
         return bad
 
 
 async def main(mode):
-    room = call("POST", "/api/lobby/rooms", "drill-host", {"settings": {"draw_seconds": 120, "choose_seconds": 30}})
+    room = call(
+        "POST",
+        "/api/lobby/rooms",
+        "drill-host",
+        {"settings": {"draw_seconds": 120, "choose_seconds": 30}},
+    )
     rid = room["room_id"]
     bots = [Bot(u, rid) for u in ("drill-host", "drill-b", "drill-c")]
     stop = asyncio.Event()
@@ -125,7 +147,9 @@ async def main(mode):
     await host.send("start", {})
     drawer = None
     for _ in range(100):  # the 3 s countdown, then word options for the drawer
-        drawer = next((b for b in bots if any(p["type"] == "word_options" for p in b.private)), None)
+        drawer = next(
+            (b for b in bots if any(p["type"] == "word_options" for p in b.private)), None
+        )
         if drawer:
             break
         await asyncio.sleep(0.1)
@@ -134,21 +158,36 @@ async def main(mode):
     await drawer.send("choose_word", {"index": 0})
     await asyncio.sleep(0.5)
     for i in range(10):
-        await drawer.send("stroke_batch", {"stroke_id": f"s{i}", "points": [[100 * i, 100, i]], "color": "#112233", "width": 3, "done": True})
+        await drawer.send(
+            "stroke_batch",
+            {
+                "stroke_id": f"s{i}",
+                "points": [[100 * i, 100, i]],
+                "color": "#112233",
+                "width": 3,
+                "done": True,
+            },
+        )
         await asyncio.sleep(0.1)
     owner = bots[0].server
     print(f"room {rid} on {owner}; seq {bots[0].last_seq}; {mode} {owner} now")
 
     t0 = time.monotonic()
     if mode == "kill":
-        subprocess.run(["docker", "kill", f"doodle-arena-{owner}-1"], check=True, capture_output=True)
+        subprocess.run(
+            ["docker", "kill", f"doodle-arena-{owner}-1"], check=True, capture_output=True
+        )
     else:
-        subprocess.run(["docker", "pause", f"doodle-arena-{owner}-1"], check=True, capture_output=True)
+        subprocess.run(
+            ["docker", "pause", f"doodle-arena-{owner}-1"], check=True, capture_output=True
+        )
 
         async def unpause_later():
             # Long enough for the lobby to see no heartbeats (6 s) and move the room.
             await asyncio.sleep(9)
-            subprocess.run(["docker", "unpause", f"doodle-arena-{owner}-1"], check=True, capture_output=True)
+            subprocess.run(
+                ["docker", "unpause", f"doodle-arena-{owner}-1"], check=True, capture_output=True
+            )
             print(f"unpaused {owner} after 9 s")
 
         unpause = asyncio.create_task(unpause_later())
@@ -156,7 +195,16 @@ async def main(mode):
     # The drawer keeps drawing during the outage, as a real player would.
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline and not all(b.resumed_at for b in bots):
-        await drawer.send("stroke_batch", {"stroke_id": "late", "points": [[5, 5, 1]], "color": "#112233", "width": 3, "done": False})
+        await drawer.send(
+            "stroke_batch",
+            {
+                "stroke_id": "late",
+                "points": [[5, 5, 1]],
+                "color": "#112233",
+                "width": 3,
+                "done": False,
+            },
+        )
         await asyncio.sleep(0.5)
     if mode == "pause":
         await unpause
@@ -168,18 +216,28 @@ async def main(mode):
     ok = True
     for b in bots:
         took = f"{b.resumed_at - t0:.1f} s" if b.resumed_at else "never"
-        print(f"  {b.user}: now on {b.server}, drops {b.drops}, full welcomes after the drop {b.welcomes}, "
-              f"resumed after {took}, seq gaps/duplicates {b.gaps()}")
+        print(
+            f"  {b.user}: now on {b.server}, drops {b.drops}, "
+            f"full welcomes after the drop {b.welcomes}, "
+            f"resumed after {took}, seq gaps/duplicates {b.gaps()}"
+        )
         ok &= bool(b.resumed_at) and b.server != owner and not b.gaps()
     worst = max((b.resumed_at or 1e9) - t0 for b in bots)
     print(f"recovery (slowest bot): {worst:.1f} s" if ok else "FAILED")
     if mode == "pause":
-        logs = subprocess.run(COMPOSE + ["logs", "--no-log-prefix", "--since", "30s", owner], capture_output=True, text=True).stdout
-        fenced = sum("lease lost" in line or "taken over by another server" in line for line in logs.splitlines())
+        logs = subprocess.run(
+            [*COMPOSE, "logs", "--no-log-prefix", "--since", "30s", owner],
+            capture_output=True,
+            text=True,
+        ).stdout
+        fenced = sum(
+            "lease lost" in line or "taken over by another server" in line
+            for line in logs.splitlines()
+        )
         print(f"zombie {owner}: {fenced} fencing log lines")
         ok &= fenced > 0
     if mode == "kill":
-        subprocess.run(COMPOSE + ["start", owner], capture_output=True)
+        subprocess.run([*COMPOSE, "start", owner], capture_output=True)
     sys.exit(0 if ok else 1)
 
 
