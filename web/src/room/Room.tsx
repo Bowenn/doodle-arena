@@ -6,7 +6,10 @@ import type { ConnectionStatus } from '../game/connection.ts'
 import { MAX_GUESS_CHARS, type ClientMessage } from '../game/protocol.ts'
 import {
   canStart,
+  choosingLabel,
   connectedCount,
+  drawingLabel,
+  isChooser,
   isDrawer,
   nameOf,
   wordLine,
@@ -102,7 +105,6 @@ function RoomBody({ state, send, welcomes, live }: BodyProps) {
 }
 
 function PhaseBar({ state, send }: { state: RoomState; send: (m: ClientMessage) => boolean }) {
-  const drawerName = state.drawerIds.length ? nameOf(state, state.drawerIds[0]) : ''
   const start = canStart(state) && (
     <button type="button" className="primary" onClick={() => send({ type: 'start', data: {} })}>
       {state.phase === 'match_end' ? 'Play again' : 'Start the match'}
@@ -130,7 +132,7 @@ function PhaseBar({ state, send }: { state: RoomState; send: (m: ClientMessage) 
       break
     case 'choosing':
       body =
-        isDrawer(state) && state.wordOptions ? (
+        isChooser(state) && state.wordOptions ? (
           <>
             <span>Pick a word to draw:</span>
             {state.wordOptions.map((w, i) => (
@@ -140,7 +142,7 @@ function PhaseBar({ state, send }: { state: RoomState; send: (m: ClientMessage) 
             ))}
           </>
         ) : (
-          <span>{isDrawer(state) ? 'Getting your words…' : `${drawerName} is choosing a word.`}</span>
+          <span>{isChooser(state) ? 'Getting your words…' : choosingLabel(state)}</span>
         )
       break
     case 'drawing':
@@ -149,9 +151,7 @@ function PhaseBar({ state, send }: { state: RoomState; send: (m: ClientMessage) 
           <span className="word" aria-label="Word">
             {wordLine(state).split('').join(' ')}
           </span>
-          <span className="muted">
-            {isDrawer(state) ? 'Your turn to draw' : `${drawerName} is drawing`}
-          </span>
+          <span className="muted">{drawingLabel(state)}</span>
         </>
       )
       break
