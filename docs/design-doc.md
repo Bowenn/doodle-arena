@@ -352,11 +352,11 @@ Defaults, all configurable: up to 8 players; each player draws once per match; 1
 
 ### 7.5 Game server failover
 
-1. Game server A dies. Its room leases expire within 5 seconds, and the lobby sees its heartbeats stop within 6 seconds.
+1. Game server A dies, or is cut off from the lobby. The lobby sees its heartbeats stop within 6 seconds (a restarted A that comes back without its rooms is noticed the same way: its heartbeats no longer list them).
 2. The lobby calls `AllocateRoom` on game server B for each of A's rooms.
-3. B takes each lease (which issues a new fencing token), loads the snapshot, replays the stream after the snapshot's `seq`, and restarts the timers from the stored deadlines.
+3. B takes each lease by force (ADR 0007): it increments the fence (its new token) and overwrites the lease, then loads the snapshot, replays the stream after the snapshot's `seq`, and restarts the timers from the stored deadlines. A room that has closed answers `NOT_FOUND`, and the lobby forgets it.
 4. Clients reconnect through the lobby and resume (section 7.4).
-5. If A comes back as a zombie, its writes fail the fencing check, and it stops the room and closes those sockets.
+5. If A is still alive (a partition) or comes back as a zombie, its next write or lease renewal fails the fencing check within about 1.5 seconds; it stops the room, sends `room_moved` and closes those sockets with 4010. Because the actor writes events before broadcasting them, nothing A's players saw is missing on B.
 
 Target: players resume within 10 seconds. Measure this and record it in the evidence log.
 
@@ -538,6 +538,7 @@ Releases:
 | D20 | The lobby signs join tickets with Ed25519; game servers verify with the public key only; tickets last 60 seconds and are single-use through Redis `SET NX` (ADR 0005) | Only the lobby can mint tickets, rotation needs no coordinated restart, and a leaked ticket can't be replayed |
 | D21 | WebSockets connect to `/ws/<server_id>/rooms/<room_id>`, a direct URL from the lobby that the gateway maps to the instance (ADR 0002) | Always agrees with the lobby's view of the owner; consistent hashing would save no lobby call because tickets are single-use |
 | D22 | No authentication on the lobby–game-server gRPC for now; network isolation and security groups only, with mTLS and service tokens prototyped as the upgrade path (ADR 0006) | No real users or real money yet, zero cost, and the upgrade touches no contract |
+| D23 | A new owner takes a room's lease by force with a new fencing token; the old owner's next write fails and it sends `room_moved` (ADR 0007) | Recovery within the 10-second target, and safety never depends on the old owner stepping down |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
@@ -545,7 +546,6 @@ New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and the reward amounts (defaults are in section 7).
-- Before task 2.5: the takeover protocol when a game server loses the lobby but can still reach Redis. The lobby then reassigns rooms whose lease the old server is still renewing. Does the new server wait for the lease to expire, or take it by force with a new fencing token, and what do clients do in the meantime?
 - Before task 4.3: what happens to an `IN_PROGRESS` idempotency key when the process crashes mid-request. One option is to insert the key in the same transaction as the purchase, so a crash rolls it back; another is to let `IN_PROGRESS` rows expire after a short timeout.
 - Before task 4.6: royalties for co-drawn drawings. Today, when one of two co-authors sells for the first time, the other gets nothing, and only `drawer_ids[0]` ever becomes the owner. Also, when the buyer is an author, their account appears twice in the lock set, so the set must be deduplicated.
 - `docs/keyword-coverage.md` mentions two things this doc doesn't design yet: Redis cache-aside for listings and wallet reads (which Redis key prefix does the marketplace own, and should balances be cached at all, given they need strong consistency?), and a MongoDB replica set.
