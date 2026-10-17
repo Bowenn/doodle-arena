@@ -101,7 +101,10 @@ type Config struct {
 	Metrics  *Metrics
 	Events   Sink    // nil: finished rounds and matches go nowhere
 	Durable  Durable // nil: the room lives only in memory (tests)
-	Restore  *Restored
+	// Token is the fencing token of the lease the room was taken with (0 without Durable).
+	// It never changes: a new owner builds a new Room.
+	Token   int64
+	Restore *Restored
 }
 
 // Inputs to the actor. Everything that touches a room goes through its inbox, in order.
@@ -142,6 +145,7 @@ type Room struct {
 	summary   atomic.Pointer[Summary]
 
 	durable     Durable
+	token       int64
 	fresh       bool  // a new room: its first snapshot must be written before anything
 	lastSnapSeq int64 // seq of the latest snapshot written
 	moved       bool  // set by fencedIn
@@ -163,6 +167,7 @@ func New(cfg Config) (*Room, error) {
 		id: cfg.ID, mode: cfg.Mode, inbox: make(chan any, 256), done: make(chan struct{}),
 		clock: cfg.Clock, log: cfg.Log.With("room_id", cfg.ID), metrics: cfg.Metrics, events: cfg.Events,
 		tracer: otel.Tracer("game-server"), conns: map[string]Conn{}, durable: cfg.Durable,
+		token: cfg.Token,
 	}
 	if cfg.Restore != nil {
 		g, err := RestoreGame(cfg.Restore.Snapshot, cfg.Restore.Events, rng, cfg.Clock.Now())
@@ -190,6 +195,10 @@ func (r *Room) Fence() {
 
 // ID is the room's id.
 func (r *Room) ID() string { return r.id }
+
+// Token is the fencing token of the room's lease; every write for the room (including ticket
+// redemptions) is checked against it.
+func (r *Room) Token() int64 { return r.token }
 
 // Summary is the room's latest published state; safe from any goroutine.
 func (r *Room) Summary() Summary { return *r.summary.Load() }

@@ -136,7 +136,7 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 			return nil, status.Error(codes.Unavailable, "room store unavailable")
 		}
 		e.handle = s.store.Handle(req.GetRoomId(), s.id, owned.Token)
-		cfg.Durable = e.handle
+		cfg.Durable, cfg.Token = e.handle, owned.Token
 		if owned.Snapshot != nil {
 			cfg.Restore = &room.Restored{Snapshot: *owned.Snapshot, Events: owned.Events}
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/redistest"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/ticket"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -197,6 +198,9 @@ func TestTakeoverAcrossServers(t *testing.T) {
 	if _, err := a.AllocateRoom(ctx, reqA); err != nil {
 		t.Fatal(err)
 	}
+	if got := a.Room("r1").Token(); got != 1 {
+		t.Fatalf("gs-1's token = %d, want 1", got)
+	}
 	u1, u2 := &conn{uid: "u1"}, &conn{uid: "u2"}
 	for _, c := range []*conn{u1, u2} {
 		if err := a.Room("r1").Join(ctx, c, c.uid, 0); err != nil {
@@ -212,6 +216,18 @@ func TestTakeoverAcrossServers(t *testing.T) {
 	}
 	if b.Room("r1") == nil {
 		t.Fatal("gs-2 didn't take the room")
+	}
+	// Each owner's room carries the fencing token it took the lease with, and tickets redeem
+	// only against the current one (ADR 0007): gs-1's token 1 no longer works.
+	if got := b.Room("r1").Token(); got != 2 {
+		t.Fatalf("gs-2's token = %d, want 2", got)
+	}
+	tk := ticket.Ticket{ID: "j1", RoomID: "r1", ExpiresAt: time.Now().Add(ticket.TTL)}
+	if err := ticket.NewRedisRedeemer(rdb, "gs-1", time.Now).Redeem(ctx, tk, 1); !errors.Is(err, ticket.ErrNotOwner) {
+		t.Fatalf("redeem on gs-1 after the takeover: err = %v, want ErrNotOwner", err)
+	}
+	if err := ticket.NewRedisRedeemer(rdb, "gs-2", time.Now).Redeem(ctx, tk, b.Room("r1").Token()); err != nil {
+		t.Fatalf("redeem on gs-2: %v", err)
 	}
 
 	// gs-1 is still running and unaware; its lease keeper must find out within ~1.5 s.

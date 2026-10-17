@@ -204,7 +204,7 @@ func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, l
 	if rm == nil {
 		return nil, nil, protocol.CloseRoomMoved, "room is not here; ask the lobby"
 	}
-	switch err := h.cfg.Redeemer.Redeem(ctx, t); {
+	switch err := h.cfg.Redeemer.Redeem(ctx, t, rm.Token()); {
 	case errors.Is(err, ticket.ErrNotOwner):
 		return nil, nil, protocol.CloseRoomMoved, "room moved; ask the lobby"
 	case errors.Is(err, ticket.ErrReused):
