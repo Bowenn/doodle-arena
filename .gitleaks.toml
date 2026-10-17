@@ -1,0 +1,14 @@
+# gitleaks config: the default rules plus one narrow exception. Run with `make lint s=secrets`;
+# CI runs the same check in .github/workflows/secrets.yml.
+[extend]
+useDefault = true
+
+# The shared JWT test cases (ADR 0001) are real tokens, but they are signed by a key that is
+# generated fresh on every regeneration and never written to disk, so nobody can sign new ones.
+# This extends the default jwt rule only, and only for this one file. (A top-level
+# [[allowlists]] with targetRules is ignored by gitleaks 8.28 when extending the defaults.)
+[[rules]]
+id = "jwt"
+[[rules.allowlists]]
+description = "JWT verification fixtures signed by a discarded key"
+paths = ['''^fixtures/jwt/cases\.json$''']

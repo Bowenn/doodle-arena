@@ -28,6 +28,7 @@ run_one() {
     java) (cd "$dir" && ./gradlew --quiet test) ;;
     proto) ./scripts/proto.sh check ;;
     ci) echo "(no tests; workflows are checked by make lint s=ci)" ;;
+    secrets) echo "(no tests; history is scanned by make lint s=secrets)" ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm test) ;;
   esac
 }
