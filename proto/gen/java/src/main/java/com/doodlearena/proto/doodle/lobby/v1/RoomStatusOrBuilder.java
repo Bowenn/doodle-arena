@@ -58,4 +58,16 @@ public interface RoomStatusOrBuilder extends
    * @return The phase.
    */
   com.doodlearena.proto.doodle.lobby.v1.RoomPhase getPhase();
+
+  /**
+   * <pre>
+   * Seats held: connected players plus those within their rejoin grace (and, during a match,
+   * every player who joined it). The room is full when seats reaches max_players. 0 means not
+   * reported (an older game server): the lobby then uses players.
+   * </pre>
+   *
+   * <code>uint32 seats = 4 [json_name = "seats"];</code>
+   * @return The seats.
+   */
+  int getSeats();
 }

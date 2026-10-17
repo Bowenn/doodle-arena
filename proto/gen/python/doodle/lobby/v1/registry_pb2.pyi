@@ -35,14 +35,16 @@ class HeartbeatRequest(_message.Message):
     def __init__(self, server_id: _Optional[str] = ..., ws_address: _Optional[str] = ..., room_ids: _Optional[_Iterable[str]] = ..., sockets: _Optional[int] = ..., draining: _Optional[bool] = ..., rooms: _Optional[_Iterable[_Union[RoomStatus, _Mapping]]] = ..., control_address: _Optional[str] = ...) -> None: ...
 
 class RoomStatus(_message.Message):
-    __slots__ = ("room_id", "players", "phase")
+    __slots__ = ("room_id", "players", "phase", "seats")
     ROOM_ID_FIELD_NUMBER: _ClassVar[int]
     PLAYERS_FIELD_NUMBER: _ClassVar[int]
     PHASE_FIELD_NUMBER: _ClassVar[int]
+    SEATS_FIELD_NUMBER: _ClassVar[int]
     room_id: str
     players: int
     phase: RoomPhase
-    def __init__(self, room_id: _Optional[str] = ..., players: _Optional[int] = ..., phase: _Optional[_Union[RoomPhase, str]] = ...) -> None: ...
+    seats: int
+    def __init__(self, room_id: _Optional[str] = ..., players: _Optional[int] = ..., phase: _Optional[_Union[RoomPhase, str]] = ..., seats: _Optional[int] = ...) -> None: ...
 
 class HeartbeatResponse(_message.Message):
     __slots__ = ()
