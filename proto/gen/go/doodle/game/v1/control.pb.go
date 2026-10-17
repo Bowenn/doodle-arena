@@ -34,7 +34,11 @@ type AllocateRoomRequest struct {
 	// User id of the player who created the room; only the host can start a match. If the host
 	// isn't connected, hosting passes to the earliest-joined connected player. Empty means the
 	// first player to join hosts. Ignored when the room already exists.
-	HostUserId    string `protobuf:"bytes,4,opt,name=host_user_id,json=hostUserId,proto3" json:"host_user_id,omitempty"`
+	HostUserId string `protobuf:"bytes,4,opt,name=host_user_id,json=hostUserId,proto3" json:"host_user_id,omitempty"`
+	// The game server the lobby means (its heartbeat server_id). A server with another id
+	// refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+	// wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+	ServerId      string `protobuf:"bytes,5,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -93,6 +97,13 @@ func (x *AllocateRoomRequest) GetSettings() *RoomSettings {
 func (x *AllocateRoomRequest) GetHostUserId() string {
 	if x != nil {
 		return x.HostUserId
+	}
+	return ""
+}
+
+func (x *AllocateRoomRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
 	}
 	return ""
 }
@@ -312,13 +323,14 @@ var File_doodle_game_v1_control_proto protoreflect.FileDescriptor
 
 const file_doodle_game_v1_control_proto_rawDesc = "" +
 	"\n" +
-	"\x1cdoodle/game/v1/control.proto\x12\x0edoodle.game.v1\x1a\x19doodle/game/v1/game.proto\"\xb8\x01\n" +
+	"\x1cdoodle/game/v1/control.proto\x12\x0edoodle.game.v1\x1a\x19doodle/game/v1/game.proto\"\xd5\x01\n" +
 	"\x13AllocateRoomRequest\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12,\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x18.doodle.game.v1.GameModeR\x04mode\x128\n" +
 	"\bsettings\x18\x03 \x01(\v2\x1c.doodle.game.v1.RoomSettingsR\bsettings\x12 \n" +
 	"\fhost_user_id\x18\x04 \x01(\tR\n" +
-	"hostUserId\"\x9c\x01\n" +
+	"hostUserId\x12\x1b\n" +
+	"\tserver_id\x18\x05 \x01(\tR\bserverId\"\x9c\x01\n" +
 	"\fRoomSettings\x12\x1f\n" +
 	"\vmax_players\x18\x01 \x01(\rR\n" +
 	"maxPlayers\x12%\n" +

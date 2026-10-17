@@ -35,6 +35,7 @@ private static final long serialVersionUID = 0L;
     roomId_ = "";
     mode_ = 0;
     hostUserId_ = "";
+    serverId_ = "";
   }
 
   public static final com.google.protobuf.Descriptors.Descriptor
@@ -221,6 +222,57 @@ private static final long serialVersionUID = 0L;
     }
   }
 
+  public static final int SERVER_ID_FIELD_NUMBER = 5;
+  @SuppressWarnings("serial")
+  private volatile java.lang.Object serverId_ = "";
+  /**
+   * <pre>
+   * The game server the lobby means (its heartbeat server_id). A server with another id
+   * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+   * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+   * </pre>
+   *
+   * <code>string server_id = 5 [json_name = "serverId"];</code>
+   * @return The serverId.
+   */
+  @java.lang.Override
+  public java.lang.String getServerId() {
+    java.lang.Object ref = serverId_;
+    if (ref instanceof java.lang.String) {
+      return (java.lang.String) ref;
+    } else {
+      com.google.protobuf.ByteString bs = 
+          (com.google.protobuf.ByteString) ref;
+      java.lang.String s = bs.toStringUtf8();
+      serverId_ = s;
+      return s;
+    }
+  }
+  /**
+   * <pre>
+   * The game server the lobby means (its heartbeat server_id). A server with another id
+   * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+   * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+   * </pre>
+   *
+   * <code>string server_id = 5 [json_name = "serverId"];</code>
+   * @return The bytes for serverId.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getServerIdBytes() {
+    java.lang.Object ref = serverId_;
+    if (ref instanceof java.lang.String) {
+      com.google.protobuf.ByteString b = 
+          com.google.protobuf.ByteString.copyFromUtf8(
+              (java.lang.String) ref);
+      serverId_ = b;
+      return b;
+    } else {
+      return (com.google.protobuf.ByteString) ref;
+    }
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -247,6 +299,9 @@ private static final long serialVersionUID = 0L;
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(hostUserId_)) {
       com.google.protobuf.GeneratedMessage.writeString(output, 4, hostUserId_);
     }
+    if (!com.google.protobuf.GeneratedMessage.isStringEmpty(serverId_)) {
+      com.google.protobuf.GeneratedMessage.writeString(output, 5, serverId_);
+    }
     getUnknownFields().writeTo(output);
   }
   private int computeSerializedSize_0() {
@@ -264,6 +319,9 @@ private static final long serialVersionUID = 0L;
     }
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(hostUserId_)) {
       size += com.google.protobuf.GeneratedMessage.computeStringSize(4, hostUserId_);
+    }
+    if (!com.google.protobuf.GeneratedMessage.isStringEmpty(serverId_)) {
+      size += com.google.protobuf.GeneratedMessage.computeStringSize(5, serverId_);
     }
     return size;
   }
@@ -299,6 +357,8 @@ private static final long serialVersionUID = 0L;
     }
     if (!getHostUserId()
         .equals(other.getHostUserId())) return false;
+    if (!getServerId()
+        .equals(other.getServerId())) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -320,6 +380,8 @@ private static final long serialVersionUID = 0L;
     }
     hash = (37 * hash) + HOST_USER_ID_FIELD_NUMBER;
     hash = (53 * hash) + getHostUserId().hashCode();
+    hash = (37 * hash) + SERVER_ID_FIELD_NUMBER;
+    hash = (53 * hash) + getServerId().hashCode();
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -469,6 +531,7 @@ private static final long serialVersionUID = 0L;
         settingsBuilder_ = null;
       }
       hostUserId_ = "";
+      serverId_ = "";
       return this;
     }
 
@@ -518,6 +581,9 @@ private static final long serialVersionUID = 0L;
       if (((from_bitField0_ & 0x00000008) != 0)) {
         result.hostUserId_ = hostUserId_;
       }
+      if (((from_bitField0_ & 0x00000010) != 0)) {
+        result.serverId_ = serverId_;
+      }
       result.bitField0_ |= to_bitField0_;
     }
 
@@ -547,6 +613,11 @@ private static final long serialVersionUID = 0L;
       if (!other.getHostUserId().isEmpty()) {
         hostUserId_ = other.hostUserId_;
         bitField0_ |= 0x00000008;
+        onChanged();
+      }
+      if (!other.getServerId().isEmpty()) {
+        serverId_ = other.serverId_;
+        bitField0_ |= 0x00000010;
         onChanged();
       }
       this.mergeUnknownFields(other.getUnknownFields());
@@ -595,6 +666,11 @@ private static final long serialVersionUID = 0L;
               bitField0_ |= 0x00000008;
               break;
             } // case 34
+            case 42: {
+              serverId_ = input.readStringRequireUtf8();
+              bitField0_ |= 0x00000010;
+              break;
+            } // case 42
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -1038,6 +1114,108 @@ private static final long serialVersionUID = 0L;
       checkByteStringIsUtf8(value);
       hostUserId_ = value;
       bitField0_ |= 0x00000008;
+      onChanged();
+      return this;
+    }
+
+    private java.lang.Object serverId_ = "";
+    /**
+     * <pre>
+     * The game server the lobby means (its heartbeat server_id). A server with another id
+     * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+     * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+     * </pre>
+     *
+     * <code>string server_id = 5 [json_name = "serverId"];</code>
+     * @return The serverId.
+     */
+    public java.lang.String getServerId() {
+      java.lang.Object ref = serverId_;
+      if (!(ref instanceof java.lang.String)) {
+        com.google.protobuf.ByteString bs =
+            (com.google.protobuf.ByteString) ref;
+        java.lang.String s = bs.toStringUtf8();
+        serverId_ = s;
+        return s;
+      } else {
+        return (java.lang.String) ref;
+      }
+    }
+    /**
+     * <pre>
+     * The game server the lobby means (its heartbeat server_id). A server with another id
+     * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+     * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+     * </pre>
+     *
+     * <code>string server_id = 5 [json_name = "serverId"];</code>
+     * @return The bytes for serverId.
+     */
+    public com.google.protobuf.ByteString
+        getServerIdBytes() {
+      java.lang.Object ref = serverId_;
+      if (ref instanceof String) {
+        com.google.protobuf.ByteString b = 
+            com.google.protobuf.ByteString.copyFromUtf8(
+                (java.lang.String) ref);
+        serverId_ = b;
+        return b;
+      } else {
+        return (com.google.protobuf.ByteString) ref;
+      }
+    }
+    /**
+     * <pre>
+     * The game server the lobby means (its heartbeat server_id). A server with another id
+     * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+     * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+     * </pre>
+     *
+     * <code>string server_id = 5 [json_name = "serverId"];</code>
+     * @param value The serverId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setServerId(
+        java.lang.String value) {
+      java.util.Objects.requireNonNull(value);
+      serverId_ = value;
+      bitField0_ |= 0x00000010;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * The game server the lobby means (its heartbeat server_id). A server with another id
+     * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+     * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+     * </pre>
+     *
+     * <code>string server_id = 5 [json_name = "serverId"];</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearServerId() {
+      serverId_ = getDefaultInstance().getServerId();
+      bitField0_ = (bitField0_ & ~0x00000010);
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * The game server the lobby means (its heartbeat server_id). A server with another id
+     * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+     * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+     * </pre>
+     *
+     * <code>string server_id = 5 [json_name = "serverId"];</code>
+     * @param value The bytes for serverId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setServerIdBytes(
+        com.google.protobuf.ByteString value) {
+      java.util.Objects.requireNonNull(value);
+      checkByteStringIsUtf8(value);
+      serverId_ = value;
+      bitField0_ |= 0x00000010;
       onChanged();
       return this;
     }

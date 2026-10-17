@@ -30,6 +30,10 @@ message AllocateRoomRequest {
   // isn't connected, hosting passes to the earliest-joined connected player. Empty means the
   // first player to join hosts. Ignored when the room already exists.
   string host_user_id = 4;
+  // The game server the lobby means (its heartbeat server_id). A server with another id
+  // refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+  // wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+  string server_id = 5;
 }
 
 // RoomSettings are the host's choices for a room. A value of 0 means the server's default.
