@@ -390,3 +390,93 @@ func TestCancelledRunDropsWhatIsLeft(t *testing.T) {
 		t.Fatalf("published = %v, want the in-flight one failed and the queued one dropped", got)
 	}
 }
+
+// fakeAcker records which outbox entries were deleted, as "room/entry".
+type fakeAcker struct {
+	mu    sync.Mutex
+	acked []string
+}
+
+func (a *fakeAcker) Ack(_ context.Context, roomID, entryID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.acked = append(a.acked, roomID+"/"+entryID)
+	return nil
+}
+
+func (a *fakeAcker) all() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.acked)
+}
+
+// ADR 0009: an entry leaves the outbox only once Kafka has its event, which carries the
+// entry's event_id.
+func TestAcksTheOutboxEntryAfterKafkaConfirms(t *testing.T) {
+	acker := &fakeAcker{}
+	f := newFixture(t, &fakeS3{}, &fakeKafka{}, func(c *Config) { c.Outbox = acker })
+	f.pub.RoundFinished(context.Background(), finishedRound(), room.OutboxEntry{ID: "1-0", RoomID: "r1", EventID: "evt-round"})
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{ID: "1-1", RoomID: "r1", EventID: "evt-match"})
+	go f.pub.Run(context.Background())
+	f.drain()
+
+	if got := acker.all(); !slices.Equal(got, []string{"r1/1-0", "r1/1-1"}) {
+		t.Fatalf("acked = %v, want both entries, in order", got)
+	}
+	recs := f.kafka.all()
+	var re eventsv1.RoundEvent
+	if err := proto.Unmarshal(recs[0].Value, &re); err != nil || re.GetRoundFinished().GetMeta().GetEventId() != "evt-round" {
+		t.Fatalf("round event_id = %q (err %v), want the entry's", re.GetRoundFinished().GetMeta().GetEventId(), err)
+	}
+}
+
+func TestFailedPublishLeavesTheEntryInTheOutbox(t *testing.T) {
+	acker := &fakeAcker{}
+	k := &fakeKafka{err: errors.New("broker down")}
+	f := newFixture(t, &fakeS3{}, k, func(c *Config) { c.Outbox = acker; c.JobTimeout = 20 * time.Millisecond })
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{ID: "1-0", RoomID: "r1", EventID: "e1"})
+	go f.pub.Run(context.Background())
+	f.drain()
+	if got := acker.all(); len(got) != 0 {
+		t.Fatalf("acked %v after a failed publish", got)
+	}
+}
+
+// Requeue decodes what the outbox holds and publishes it with the entry's event_id, but skips
+// an entry that is still queued or being published.
+func TestRequeuePublishesFromTheOutboxOnce(t *testing.T) {
+	acker := &fakeAcker{}
+	k := &fakeKafka{block: make(chan struct{})}
+	f := newFixture(t, &fakeS3{}, k, func(c *Config) { c.Outbox = acker })
+	r := finishedRound()
+	e, err := room.EncodeOutbox(context.Background(), "r1", "evt-left", room.Finished{Round: &r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.ID = "7-0"
+
+	if n := f.pub.Requeue([]room.OutboxEntry{e}); n != 1 {
+		t.Fatalf("requeued %d, want 1", n)
+	}
+	go f.pub.Run(context.Background())
+	if n := f.pub.Requeue([]room.OutboxEntry{e}); n != 0 {
+		t.Fatalf("requeued %d while the entry was in flight, want 0", n)
+	}
+	close(k.block)
+	f.drain()
+
+	if got := acker.all(); !slices.Equal(got, []string{"r1/7-0"}) {
+		t.Fatalf("acked = %v", got)
+	}
+	recs := f.kafka.all()
+	var re eventsv1.RoundEvent
+	if len(recs) != 1 || proto.Unmarshal(recs[0].Value, &re) != nil || re.GetRoundFinished().GetMeta().GetEventId() != "evt-left" ||
+		re.GetRoundFinished().GetWord() != "zebra" {
+		t.Fatalf("records = %d, event %v", len(recs), re.GetRoundFinished())
+	}
+	// The stroke log came from the outbox's canvas, server receive times included.
+	l := gunzipStrokeLog(t, f.s3.objects["round-logs/m1/2.binpb.gz"])
+	if len(l.GetStrokes()) != 2 || l.GetStrokes()[0].GetServerReceivedMs() != 2000 {
+		t.Fatalf("stroke log from the outbox = %v", l.GetStrokes())
+	}
+}

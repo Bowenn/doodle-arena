@@ -147,7 +147,9 @@ func run(cfg config, logger *slog.Logger) error {
 	}
 
 	// Finished rounds and matches leave through the publisher's own goroutine; room actors
-	// only queue them. It runs until the rooms have stopped (see the shutdown below).
+	// only queue them. Each is already in its room's outbox in Redis (ADR 0009), and the
+	// publisher deletes it there once Kafka has it. It runs until the rooms have stopped (see
+	// the shutdown below); what it can't finish stays in the outbox for the next owner.
 	if cfg.s3.AccessKey == "" || cfg.s3.SecretKey == "" {
 		return errors.New("S3_ACCESS_KEY and S3_SECRET_KEY must be set (stroke logs go to the round-logs bucket)")
 	}
@@ -156,8 +158,11 @@ func run(cfg config, logger *slog.Logger) error {
 		return err
 	}
 	defer kafka.Close()
+	// Rooms are stored in Redis under a lease, so another server can take them over (ADR 0007).
+	store := roomstore.New(rdb)
 	publisher, err := events.New(events.Config{
 		Kafka: kafka, S3: events.NewS3Client(cfg.s3), Bucket: cfg.roundLogs, Log: logger, Meter: meter,
+		Outbox: store,
 	})
 	if err != nil {
 		return err
@@ -172,8 +177,7 @@ func run(cfg config, logger *slog.Logger) error {
 	defer stopRooms()
 	ctrl := control.New(roomsCtx, control.Config{
 		ID: cfg.instance, WSAddress: cfg.wsAddress, MaxRooms: cfg.maxRooms, Metrics: roomMetrics, Events: publisher,
-		// Rooms are stored in Redis under a lease, so another server can take them over (ADR 0007).
-		Store: roomstore.New(rdb), Log: logger,
+		Store: store, Log: logger,
 	})
 	wsHandler, err := ws.NewHandler(ws.Config{
 		ServerID: cfg.instance, Rooms: ctrl, Verifier: ticket.NewVerifier(keys, time.Now),

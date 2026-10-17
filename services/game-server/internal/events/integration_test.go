@@ -64,8 +64,18 @@ func TestPublishThroughKafkaAndSeaweedFS(t *testing.T) {
 	roundSpan.End()
 	matchCtx, matchSpan := tp.Tracer("t").Start(context.Background(), "game.match.end")
 	matchSpan.End()
-	pub.RoundFinished(roundCtx, finishedRound(), room.OutboxEntry{})
-	pub.MatchFinished(matchCtx, finishedMatch(), room.OutboxEntry{})
+	// The round comes back from an outbox, as a new owner sends what the old one left (ADR
+	// 0009): its trace continues through the traceparent stored in the entry.
+	r := finishedRound()
+	entry, err := room.EncodeOutbox(roundCtx, "r1", "evt-round", room.Finished{Round: &r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.ID = "1-0"
+	if n := pub.Requeue([]room.OutboxEntry{entry}); n != 1 {
+		t.Fatalf("requeued %d, want 1", n)
+	}
+	pub.MatchFinished(matchCtx, finishedMatch(), room.OutboxEntry{ID: "1-1", RoomID: "r1", EventID: "evt-match"})
 	pub.Close()
 	select {
 	case <-pub.Done():
