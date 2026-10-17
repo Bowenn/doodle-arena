@@ -28,6 +28,38 @@ describe('auth', () => {
     vi.unstubAllGlobals()
   })
 
+  // Two tabs are two copies of the module (vi.resetModules) sharing one cookie. A fake lock
+  // manager runs the holders of a lock one after another, like the browser's.
+  it('serializes refreshes across tabs with a Web Lock', async () => {
+    let tail: Promise<unknown> = Promise.resolve()
+    const request = vi.fn((_name: string, cb: () => Promise<unknown>) => {
+      const run = tail.then(cb)
+      tail = run.catch(() => {})
+      return run
+    })
+    vi.stubGlobal('navigator', { locks: { request } })
+    let active = 0
+    let overlapped = false
+    fetchMock.mockImplementation(async () => {
+      overlapped ||= active > 0
+      active++
+      await new Promise((r) => setTimeout(r, 5))
+      active--
+      return json(200, { access_token: 't', token_type: 'Bearer', expires_in: 900 })
+    })
+
+    vi.resetModules()
+    const tabA = await import('./auth.ts')
+    vi.resetModules()
+    const tabB = await import('./auth.ts')
+    expect(await Promise.all([tabA.refresh(), tabB.refresh()])).toEqual([true, true])
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(overlapped).toBe(false)
+    expect(request).toHaveBeenCalledWith('doodle-auth-refresh', expect.any(Function))
+  })
+
+  // jsdom has no Web Locks, so this and the other tests also cover the fallback.
   it('sends only one refresh when callers race', async () => {
     let release!: (r: Response) => void
     fetchMock.mockReturnValueOnce(new Promise<Response>((r) => (release = r)))

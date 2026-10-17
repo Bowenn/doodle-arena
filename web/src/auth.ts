@@ -3,7 +3,8 @@
 // The access token lives only in this module's memory. The refresh token is an HttpOnly cookie
 // the page can't read; the browser sends it to /api/auth/refresh. The server rotates it on
 // every use and revokes the whole family when a used token comes back, so two refreshes must
-// never race: refresh() is single-flight.
+// never race: refresh() is single-flight within a tab, and a Web Lock serializes refreshes
+// across the tabs of this origin, which all share the one cookie.
 
 export type Me = {
   id: string
@@ -14,6 +15,8 @@ export type Me = {
 
 // Refresh this long before the access token expires.
 const REFRESH_MARGIN_SECONDS = 60
+// The Web Lock every tab of this origin takes around its refresh call.
+const REFRESH_LOCK = 'doodle-auth-refresh'
 
 let accessToken: string | null = null
 let inFlight: Promise<boolean> | null = null
@@ -28,7 +31,15 @@ export function refresh(): Promise<boolean> {
   return inFlight
 }
 
-async function doRefresh(): Promise<boolean> {
+// Under the lock, a tab's request starts only after the previous tab's response has set the
+// rotated cookie, so no token is ever presented twice. Without Web Locks (an old browser, or
+// a page not in a secure context), refreshes are single-flight within the tab only.
+function doRefresh(): Promise<boolean> {
+  const locks = globalThis.navigator?.locks
+  return locks ? locks.request(REFRESH_LOCK, refreshNow) : refreshNow()
+}
+
+async function refreshNow(): Promise<boolean> {
   const resp = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' })
   if (!resp.ok) {
     clearSession()
