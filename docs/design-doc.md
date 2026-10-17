@@ -553,6 +553,7 @@ Releases:
 | D21 | WebSockets connect to `/ws/<server_id>/rooms/<room_id>`, a direct URL from the lobby that the gateway maps to the instance (ADR 0002) | Always agrees with the lobby's view of the owner; consistent hashing would save no lobby call because tickets are single-use |
 | D22 | No authentication on the lobby–game-server gRPC for now; network isolation and security groups only, with mTLS and service tokens prototyped as the upgrade path (ADR 0006) | No real users or real money yet, zero cost, and the upgrade touches no contract |
 | D23 | A new owner takes a room's lease by force with a new fencing token; the old owner's next write fails and it sends `room_moved` (ADR 0007) | Recovery within the 10-second target, and safety never depends on the old owner stepping down |
+| D24 | Game servers report held seats (`RoomStatus.seats`) besides connected players, and every successful resume ends with a private `resumed {seq}` (ADR 0008) | Quick play never sends a player to a full room, and a resume always gets an answer the client can check |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
