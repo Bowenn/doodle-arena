@@ -9,10 +9,29 @@ import (
 
 	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Interval is the time between heartbeats.
 const Interval = 2 * time.Second
+
+// Dial returns a client connection to the lobby's registry at target (host:port, or any gRPC
+// target). It connects lazily, on the first heartbeat.
+func Dial(target string) (*grpc.ClientConn, error) {
+	return grpc.NewClient(target,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		// gRPC's default reconnect backoff grows to 2 minutes. Cap it at the heartbeat interval,
+		// so a restarted lobby sees this server again within a few seconds.
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff:           backoff.Config{BaseDelay: 250 * time.Millisecond, Multiplier: 1.6, Jitter: 0.2, MaxDelay: Interval},
+			MinConnectTimeout: time.Second,
+		}),
+	)
+}
 
 // Status reports the server's rooms and whether it drains.
 type Status interface {
