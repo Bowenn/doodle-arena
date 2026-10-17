@@ -304,11 +304,13 @@ Server to client, shared room events (each wrapped as `event {seq, type, data}` 
 
 Server to client, private messages (no `seq`, never stored in the shared log): `welcome {user_id, view, seq}`, `word_options {words}` (drawer), `your_word {word}` (drawers), `guess_result {correct}`, `rate_limited`, `room_moved {reason}`, `error {code, message}`, `pong {t}`.
 
-`view` is built for each player from the room state (phase, host, players with scores, the round, the hint mask and the canvas). It contains the word only after the round has ended; drawers get the word through `your_word`, the only message that carries it during a round. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is. On `welcome`, a client replaces its state and then applies events with `seq` greater than `welcome.seq`; until task 2.5 a reconnect always gets a full `welcome`.
+`view` is built for each player from the room state (phase, host, players with scores, the round, the hint mask and the canvas). It contains the word only after the round has ended; drawers get the word through `your_word`, the only message that carries it during a round. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is. On `welcome`, a client replaces its state and then applies events with `seq` greater than `welcome.seq`. A member who reconnects with a `last_seq` the room still holds in memory (at most 200 events behind) gets no `welcome`: the server replays exactly the events after `last_seq`, then the player's private state (`your_word` or `word_options`), and the reconnect's own `player_joined` follows like any event. Further behind, or after a page reload (`last_seq` 0), it gets a full `welcome`.
 
 Guess rules: a guess is compared after lowercasing and keeping only the letters a–z. A guess that contains the word without being it is answered only privately (`guess_result {correct: false}`) and never broadcast, because that would show everyone the word. Drawers, and players who already guessed, can't chat while a round runs. Guesses and chat pass a per-player token bucket (5 at once, then 1 per second); a rate-limited guess gets `rate_limited` and is not processed.
 
-Close codes: 4000 bad first message, 4001 invalid or reused ticket, 4003 room full, 4004 no such room, 4008 no `hello` in time, 4009 the same player connected again elsewhere, 1003 binary frame, 1008 flooding, 1009 message too big, 1011 ticket store unavailable, 1013 too slow (the send queue filled up), 1001 server shutting down. After a close, a client asks the lobby for a new ticket (tickets are single-use) and reconnects.
+`room_moved {reason}` (private) comes right before close 4010 when another server took the room over (ADR 0007).
+
+Close codes: 4000 bad first message, 4001 invalid or reused ticket, 4003 room full, 4008 no `hello` in time, 4010 the room isn't (or is no longer) on this server: ask the lobby again and resume there (sent after a takeover, and to a valid ticket for a room this server doesn't hold, because the room is moving), 4009 the same player connected again elsewhere, 1003 binary frame, 1008 flooding, 1009 message too big, 1011 room store (Redis) unavailable, 1013 too slow (the send queue filled up), 1001 server shutting down. After a close, a client asks the lobby for a new ticket (tickets are single-use) and reconnects.
 
 ## 7. Key flows
 
@@ -347,8 +349,10 @@ Defaults, all configurable: up to 8 players; each player draws once per match; 1
 
 1. The client remembers the last `seq` it applied.
 2. After a disconnect, it reconnects with backoff. Tickets are single-use (ADR 0005), so before every attempt it asks the lobby for the room's current URL and a new ticket. After a failover or `room_moved`, that URL names the new server.
-3. It sends `hello {ticket, last_seq}`. The server replays every event after `last_seq` from the stream, then resends the player's private state.
-4. If `last_seq` is older than the stream's retention, the server sends a fresh `welcome` with the player's full view instead.
+3. It sends `hello {ticket, last_seq}`. The server replays every event after `last_seq` (from the room's in-memory buffer, which a new owner fills from the stream), then resends the player's private state.
+4. If `last_seq` is more than 200 events behind, or older than the buffer, the server sends a fresh `welcome` with the player's full view instead.
+
+While the lobby moves a room, `join` answers 503 `ROOM_UNAVAILABLE` with `Retry-After`; the client keeps retrying with backoff. Measured with `scripts/drills/failover.py`: players resume 5–8 s after their game server is killed (evidence log).
 
 ### 7.5 Game server failover
 
@@ -441,15 +445,20 @@ Redis keys for each room:
 
 | Key | Type | Purpose |
 |---|---|---|
-| `room:{id}:events` | Stream | Shared events with explicit IDs `<seq>-0` |
-| `room:{id}:snapshot` | String or hash | Full room state plus its `seq`, written at every state transition and every 200 events |
-| `room:{id}:lease` | String | The owning `server_id`, with a 5-second TTL renewed every 1.5 seconds |
-| `room:{id}:fence` | Counter | Incremented when a server takes the lease; the result is that server's fencing token |
+| `room:{id}:events` | Stream | Shared events with explicit IDs `<seq>-0` and fields `t` (server time, ms), `type`, `data` |
+| `room:{id}:snapshot` | String (JSON) | Full room state plus its `seq`, written at every phase change and every 200 events |
+| `room:{id}:lease` | String | `<server_id>:<token>`, with a 5-second TTL renewed every 1.5 seconds |
+| `room:{id}:fence` | Counter | Incremented when a server takes the lease (by force, ADR 0007); the result is that server's fencing token. No TTL: it only goes up |
+| `room:{id}:closed` | String | Tombstone of a room that ended (1 hour), so it is never restored |
 | `room:{id}:ticket:{ticket_id}` | String | A used join ticket, set with `SET NX` and a TTL that outlives the ticket (at most 65 seconds), so each ticket works once (ADR 0005) |
 
-Writes go through a Lua script that checks the lease holder and the fencing token before it appends events or writes the snapshot. A server whose check fails stops the room immediately. The stream is trimmed to keep everything after the latest snapshot plus a margin.
+The `{id}` in each key is literal braces around the room id: a Redis Cluster hash tag, so all of a room's keys live in one slot and one script can touch them.
 
-Recovery is the latest snapshot plus the events after its `seq`. Deadlines in the snapshot are absolute timestamps, so the new owner can continue the timers.
+Writes go through a Lua script that checks the lease holder and the fencing token before it appends events or writes the snapshot; ticket redemption and lease renewal check the lease too. A server whose check fails stops the room immediately and sends its sockets `room_moved`. The stream is trimmed to keep everything after the latest snapshot plus 500 events.
+
+**Write, then broadcast.** After each input, the actor commits the step's events (plus a snapshot when one is due) in one script call, and only then sends them to sockets and hands finished rounds to the Kafka publisher. A client never sees an event that a new owner can't replay. If Redis can't be reached, the room stops (close 1011) instead of running without durability; the lobby restores it once Redis is back.
+
+Recovery is the latest snapshot plus the events after its `seq`. Snapshots are written at every phase change, so the events after one only change a room within its phase (strokes, undos, hints, correct guesses, players coming and going), and the new owner applies exactly those. A property test checks over long random games that snapshot plus events always rebuild the live state. Deadlines in the snapshot are absolute timestamps, so the new owner continues the timers. Everyone is disconnected right after a takeover, so players count as present for a 15-second grace: the match doesn't end before they can resume.
 
 Stage 6 adds relays. They are the same binary in a relay role, read a room's stream with `XREAD`, and fan it out to thousands of viewer sockets. The room owner still processes every input alone.
 
@@ -463,7 +472,7 @@ Stage 6 adds relays. They are the same binary in a relay role, read a room's str
 | Drawing metadata and search | Eventual | A few seconds of lag is fine |
 | Read replicas (Stage 6) | Eventual, with read-your-writes for a user's own actions | Reads after a user's own write go to the primary for a short window |
 
-In CAP terms, the marketplace chooses consistency during a network partition: it rejects writes rather than risk double-spending. The leaderboard and search choose availability and catch up later.
+In CAP terms, the marketplace chooses consistency during a network partition: it rejects writes rather than risk double-spending. Room state does too: a game server that can't commit to Redis, or whose lease was taken, stops the room rather than diverge (ADR 0007). The leaderboard and search choose availability and catch up later.
 
 ## 11. Security
 

@@ -70,10 +70,10 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 |---|---|---|---|
 | `game.ws.connections` | UpDownCounter | – | game-server |
 | `game.rooms.active` | UpDownCounter | `mode` | game-server |
-| `game.broadcast.duration` | Histogram (ms) | `event_type` (time to marshal an event and queue it to every local socket; it doesn't include the network write) | game-server |
+| `game.broadcast.duration` | Histogram (ms) | `event_type` (time to marshal an event and queue it to every local socket, after the step's commit to Redis; it doesn't include the network write) | game-server |
 | `game.guesses` | Counter | `result` = correct, wrong, rate_limited | game-server |
-| `game.reconnects` | Counter | `result` = resumed, snapshot, failed (until task 2.5 every reconnect is a snapshot: a full `welcome`) | game-server |
-| `game.room.takeovers` | Counter | – | game-server |
+| `game.reconnects` | Counter | `result` = resumed (missed events replayed), snapshot (a full `welcome`), failed | game-server |
+| `game.room.takeovers` | Counter | – (rooms this server restored from another owner's state) | game-server |
 | `game.ws.slow_client_disconnects` | Counter | – | game-server |
 | `game.events.published` | Counter | `topic`, `result` = success, failed (retried until the 2-minute deadline), dropped (queue full, or shutting down) | game-server |
 | `game.events.queued` | UpDownCounter | – (finished rounds and matches waiting for the publisher) | game-server |
@@ -81,6 +81,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `auth.logins` | Counter | `result` = success, failed | auth |
 | `auth.refreshes` | Counter | `result` = rotated, reuse_detected, expired, invalid | auth |
 | `lobby.allocations` | Counter | `result` = success, no_servers, exhausted (every tried server full or draining), error | lobby |
+| `lobby.reassignments` | Counter | `result` = moved, ended (the game server answered NOT_FOUND), failed (retried on the next pass) | lobby |
 | `lobby.servers.healthy` | Gauge | – (game servers whose heartbeat arrived in the last 6 s, draining ones included) | lobby |
 | `assets.pipeline.duration` | Histogram (ms) | `step` = fetch, render, upload, moderate | assets |
 | `assets.jobs.oldest_age` | Gauge (s) | `queue` | assets |
