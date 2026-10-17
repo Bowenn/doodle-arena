@@ -7,16 +7,18 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class AllocateRoomRequest(_message.Message):
-    __slots__ = ("room_id", "mode", "settings", "host_user_id")
+    __slots__ = ("room_id", "mode", "settings", "host_user_id", "server_id")
     ROOM_ID_FIELD_NUMBER: _ClassVar[int]
     MODE_FIELD_NUMBER: _ClassVar[int]
     SETTINGS_FIELD_NUMBER: _ClassVar[int]
     HOST_USER_ID_FIELD_NUMBER: _ClassVar[int]
+    SERVER_ID_FIELD_NUMBER: _ClassVar[int]
     room_id: str
     mode: _game_pb2.GameMode
     settings: RoomSettings
     host_user_id: str
-    def __init__(self, room_id: _Optional[str] = ..., mode: _Optional[_Union[_game_pb2.GameMode, str]] = ..., settings: _Optional[_Union[RoomSettings, _Mapping]] = ..., host_user_id: _Optional[str] = ...) -> None: ...
+    server_id: str
+    def __init__(self, room_id: _Optional[str] = ..., mode: _Optional[_Union[_game_pb2.GameMode, str]] = ..., settings: _Optional[_Union[RoomSettings, _Mapping]] = ..., host_user_id: _Optional[str] = ..., server_id: _Optional[str] = ...) -> None: ...
 
 class RoomSettings(_message.Message):
     __slots__ = ("max_players", "choose_seconds", "draw_seconds", "word_options")

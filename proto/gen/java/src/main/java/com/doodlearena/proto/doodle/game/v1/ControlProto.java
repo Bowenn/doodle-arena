@@ -61,31 +61,32 @@ public final class ControlProto extends com.google.protobuf.GeneratedFile {
   static {
     java.lang.String[] descriptorData = {
       "\n\034doodle/game/v1/control.proto\022\016doodle.g" +
-      "ame.v1\032\031doodle/game/v1/game.proto\"\270\001\n\023Al" +
+      "ame.v1\032\031doodle/game/v1/game.proto\"\325\001\n\023Al" +
       "locateRoomRequest\022\027\n\007room_id\030\001 \001(\tR\006room" +
       "Id\022,\n\004mode\030\002 \001(\0162\030.doodle.game.v1.GameMo" +
       "deR\004mode\0228\n\010settings\030\003 \001(\0132\034.doodle.game" +
       ".v1.RoomSettingsR\010settings\022 \n\014host_user_" +
-      "id\030\004 \001(\tR\nhostUserId\"\234\001\n\014RoomSettings\022\037\n" +
-      "\013max_players\030\001 \001(\rR\nmaxPlayers\022%\n\016choose" +
-      "_seconds\030\002 \001(\rR\rchooseSeconds\022!\n\014draw_se" +
-      "conds\030\003 \001(\rR\013drawSeconds\022!\n\014word_options" +
-      "\030\004 \001(\rR\013wordOptions\"R\n\024AllocateRoomRespo" +
-      "nse\022\033\n\tserver_id\030\001 \001(\tR\010serverId\022\035\n\nws_a" +
-      "ddress\030\002 \001(\tR\twsAddress\"\024\n\022DrainServerRe" +
-      "quest\">\n\023DrainServerResponse\022\'\n\017rooms_re" +
-      "maining\030\001 \001(\rR\016roomsRemaining2\303\001\n\016Contro" +
-      "lService\022Y\n\014AllocateRoom\022#.doodle.game.v" +
-      "1.AllocateRoomRequest\032$.doodle.game.v1.A" +
-      "llocateRoomResponse\022V\n\013DrainServer\022\".doo" +
-      "dle.game.v1.DrainServerRequest\032#.doodle." +
-      "game.v1.DrainServerResponseB\330\001\n$com.dood" +
-      "learena.proto.doodle.game.v1B\014ControlPro" +
-      "toP\001ZHgithub.com/Bowenn/gap-project_priv" +
-      "ate/proto/gen/go/doodle/game/v1;gamev1\242\002" +
-      "\003DGX\252\002\016Doodle.Game.V1\312\002\016Doodle\\Game\\V1\342\002" +
-      "\032Doodle\\Game\\V1\\GPBMetadata\352\002\020Doodle::Ga" +
-      "me::V1b\006proto3"
+      "id\030\004 \001(\tR\nhostUserId\022\033\n\tserver_id\030\005 \001(\tR" +
+      "\010serverId\"\234\001\n\014RoomSettings\022\037\n\013max_player" +
+      "s\030\001 \001(\rR\nmaxPlayers\022%\n\016choose_seconds\030\002 " +
+      "\001(\rR\rchooseSeconds\022!\n\014draw_seconds\030\003 \001(\r" +
+      "R\013drawSeconds\022!\n\014word_options\030\004 \001(\rR\013wor" +
+      "dOptions\"R\n\024AllocateRoomResponse\022\033\n\tserv" +
+      "er_id\030\001 \001(\tR\010serverId\022\035\n\nws_address\030\002 \001(" +
+      "\tR\twsAddress\"\024\n\022DrainServerRequest\">\n\023Dr" +
+      "ainServerResponse\022\'\n\017rooms_remaining\030\001 \001" +
+      "(\rR\016roomsRemaining2\303\001\n\016ControlService\022Y\n" +
+      "\014AllocateRoom\022#.doodle.game.v1.AllocateR" +
+      "oomRequest\032$.doodle.game.v1.AllocateRoom" +
+      "Response\022V\n\013DrainServer\022\".doodle.game.v1" +
+      ".DrainServerRequest\032#.doodle.game.v1.Dra" +
+      "inServerResponseB\330\001\n$com.doodlearena.pro" +
+      "to.doodle.game.v1B\014ControlProtoP\001ZHgithu" +
+      "b.com/Bowenn/gap-project_private/proto/g" +
+      "en/go/doodle/game/v1;gamev1\242\002\003DGX\252\002\016Dood" +
+      "le.Game.V1\312\002\016Doodle\\Game\\V1\342\002\032Doodle\\Gam" +
+      "e\\V1\\GPBMetadata\352\002\020Doodle::Game::V1b\006pro" +
+      "to3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -97,7 +98,7 @@ public final class ControlProto extends com.google.protobuf.GeneratedFile {
     internal_static_doodle_game_v1_AllocateRoomRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_doodle_game_v1_AllocateRoomRequest_descriptor,
-        new java.lang.String[] { "RoomId", "Mode", "Settings", "HostUserId", });
+        new java.lang.String[] { "RoomId", "Mode", "Settings", "HostUserId", "ServerId", });
     internal_static_doodle_game_v1_RoomSettings_descriptor =
       getDescriptor().getMessageType(1);
     internal_static_doodle_game_v1_RoomSettings_fieldAccessorTable = new

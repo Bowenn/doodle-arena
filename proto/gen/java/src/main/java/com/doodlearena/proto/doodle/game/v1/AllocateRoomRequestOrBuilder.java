@@ -102,4 +102,28 @@ public interface AllocateRoomRequestOrBuilder extends
    */
   com.google.protobuf.ByteString
       getHostUserIdBytes();
+
+  /**
+   * <pre>
+   * The game server the lobby means (its heartbeat server_id). A server with another id
+   * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+   * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+   * </pre>
+   *
+   * <code>string server_id = 5 [json_name = "serverId"];</code>
+   * @return The serverId.
+   */
+  java.lang.String getServerId();
+  /**
+   * <pre>
+   * The game server the lobby means (its heartbeat server_id). A server with another id
+   * refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
+   * wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
+   * </pre>
+   *
+   * <code>string server_id = 5 [json_name = "serverId"];</code>
+   * @return The bytes for serverId.
+   */
+  com.google.protobuf.ByteString
+      getServerIdBytes();
 }
