@@ -1,6 +1,6 @@
 # ADR 0009: A durable outbox for the game server's events
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-17
 - Deciders: Bowen
 
@@ -75,8 +75,12 @@ Keep today's publisher, and let the marketplace pay rewards from a periodic reco
 
 ## Decision
 
-(Proposed: for Bowen to decide. The recommendation is Option A: it is the only option where the event is written atomically with the round's end, by the owner the fencing token allows.)
+Option A, decided by Bowen on 2026-10-17. It is the only option where the event is written atomically with the round's end, by the owner the fencing token allows, so an event exists exactly when players have seen its round end, never for a round a new owner replays. Recovery reuses the takeover the system already has, and the keys stay in the room's hash slot.
 
 ## Consequences
 
-To be written when an option is accepted.
+- Rewards (task 4.4) and drawings (Stage 3) can rely on every finished match and round reaching Kafka at least once, with the same `event_id` on every delivery. Consumers dedupe by `event_id` or by their natural key (`match_id`, `match_id` plus `round_no`).
+- A crash, a kill or a long outage delays events instead of losing them: the next owner, or the same server once Kafka and S3 are back, publishes them.
+- An empty room stays open (and owned) while its outbox has entries, so a long Kafka outage keeps finished rooms alive. Watch `game.outbox.pending` and alert when it stays above zero.
+- Each round's payload passes through Redis (up to about 100 KB gzipped) and is deleted after publishing, so Redis memory follows the publishing backlog, not the number of rooms.
+- The in-memory queue stays only as the hand-off to the worker. Dropping a job when it's full no longer loses the event, because the outbox still has it.
