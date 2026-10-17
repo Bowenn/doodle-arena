@@ -10,8 +10,14 @@
 //	room:{id}:fence     counter; INCR on every takeover gives the new owner its token. No TTL:
 //	                    it only goes up, so an old token can never match again
 //	room:{id}:closed    tombstone of a room that ended (1 h), so it is never restored
+//	room:{id}:outbox    stream of finished rounds and matches not yet in Kafka (ADR 0009), auto
+//	                    IDs (their ms part is the entry's age), fields event_id, kind, payload,
+//	                    traceparent. Written in the commit that ends the round, deleted once
+//	                    published; a room isn't closed while it has entries
 //
-// Every write checks the lease against the writer's server id and token in a Lua script.
+// Every write checks the lease against the writer's server id and token in a Lua script. The
+// one exception is deleting a published outbox entry (Ack): any owner may, since every owner
+// publishes the same event_id.
 package roomstore
 
 import (
@@ -50,6 +56,8 @@ var (
 	ErrClosed = errors.New("room has ended")
 	// ErrUnavailable means Redis couldn't be reached or answered with an error.
 	ErrUnavailable = errors.New("room store unavailable")
+	// ErrOutboxPending means the room can't close yet: its outbox still has entries.
+	ErrOutboxPending = errors.New("room outbox not empty")
 )
 
 // Keys of a room.
@@ -60,6 +68,7 @@ func snapshotKey(id string) string { return "room:{" + id + "}:snapshot" }
 func LeaseKey(id string) string  { return "room:{" + id + "}:lease" }
 func fenceKey(id string) string  { return "room:{" + id + "}:fence" }
 func closedKey(id string) string { return "room:{" + id + "}:closed" }
+func outboxKey(id string) string { return "room:{" + id + "}:outbox" }
 
 // TicketKey marks a used join ticket of the room (ADR 0005).
 func TicketKey(roomID, ticketID string) string { return "room:{" + roomID + "}:ticket:" + ticketID }
@@ -91,6 +100,7 @@ type Owned struct {
 	Token    int64
 	Snapshot *room.Snapshot // nil for a room that never had one (a new room)
 	Events   []room.StoredEvent
+	Outbox   []room.OutboxEntry // finished rounds and matches the old owner didn't publish
 }
 
 // Acquire takes a room for serverID by force (a takeover if someone else held it) and loads
@@ -132,7 +142,22 @@ func (s *Store) Acquire(ctx context.Context, roomID, serverID string) (Owned, er
 		}
 		o.Events = append(o.Events, ev)
 	}
+
+	// Read after taking the lease: whatever the old owner committed is in here.
+	pending, err := s.rdb.XRange(ctx, outboxKey(roomID), "-", "+").Result()
+	if err != nil {
+		return Owned{}, fmt.Errorf("%w: read outbox: %w", ErrUnavailable, err)
+	}
+	for _, e := range pending {
+		o.Outbox = append(o.Outbox, decodeOutbox(roomID, e))
+	}
 	return o, nil
+}
+
+func decodeOutbox(roomID string, e redis.XMessage) room.OutboxEntry {
+	str := func(k string) string { v, _ := e.Values[k].(string); return v }
+	return room.OutboxEntry{ID: e.ID, RoomID: roomID, EventID: str("event_id"), Kind: str("kind"),
+		Payload: []byte(str("payload")), Traceparent: str("traceparent")}
 }
 
 func decodeEntry(e redis.XMessage) (room.StoredEvent, error) {
@@ -147,9 +172,10 @@ func decodeEntry(e redis.XMessage) (room.StoredEvent, error) {
 	return room.StoredEvent{Seq: seq, Type: typ, Data: json.RawMessage(data), At: time.UnixMilli(t).UTC()}, nil
 }
 
-// Commit checks the lease, appends the events (stream ID <seq>-0) and, with a snapshot,
-// stores it and trims the stream, all in one script: either everything is written by the
-// rightful owner or nothing is.
+// Commit checks the lease, appends the events (stream ID <seq>-0), with a snapshot stores it
+// and trims the stream, and adds the step's finished rounds and matches to the outbox, all in
+// one script: either everything is written by the rightful owner or nothing is. It returns the
+// outbox entries' IDs.
 var commitScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return redis.error_reply('FENCED') end
 local n = tonumber(ARGV[2])
@@ -162,12 +188,20 @@ if ARGV[i] ~= '' then
   redis.call('SET', KEYS[3], ARGV[i])
   redis.call('XTRIM', KEYS[2], 'MINID', ARGV[i+1])
 end
-return n
+i = i + 2
+local ids = {}
+for _ = 1, tonumber(ARGV[i]) do
+  table.insert(ids, redis.call('XADD', KEYS[4], '*', 'event_id', ARGV[i+1], 'kind', ARGV[i+2],
+    'payload', ARGV[i+3], 'traceparent', ARGV[i+4]))
+  i = i + 4
+end
+return ids
 `)
 
-// Commit writes one actor step: events (may be empty when only a snapshot is written) and an
-// optional snapshot. It returns ErrFenced when serverID no longer holds the room with token.
-func (s *Store) Commit(ctx context.Context, roomID, serverID string, token int64, events []room.StoredEvent, snap *room.Snapshot) error {
+// Commit writes one actor step: events (may be empty when only a snapshot is written), an
+// optional snapshot, and the step's outbox entries, whose IDs it fills in. It returns ErrFenced
+// when serverID no longer holds the room with token.
+func (s *Store) Commit(ctx context.Context, roomID, serverID string, token int64, events []room.StoredEvent, snap *room.Snapshot, outbox []room.OutboxEntry) error {
 	args := []any{LeaseValue(serverID, token), len(events)}
 	for _, ev := range events {
 		args = append(args, strconv.FormatInt(ev.Seq, 10)+"-0", ev.At.UnixMilli(), ev.Type, string(ev.Data))
@@ -181,8 +215,19 @@ func (s *Store) Commit(ctx context.Context, roomID, serverID string, token int64
 	} else {
 		args = append(args, "", 0)
 	}
-	err := commitScript.Run(ctx, s.rdb, []string{LeaseKey(roomID), eventsKey(roomID), snapshotKey(roomID)}, args...).Err()
-	return classify(err)
+	args = append(args, len(outbox))
+	for _, e := range outbox {
+		args = append(args, e.EventID, e.Kind, e.Payload, e.Traceparent)
+	}
+	ids, err := commitScript.Run(ctx, s.rdb,
+		[]string{LeaseKey(roomID), eventsKey(roomID), snapshotKey(roomID), outboxKey(roomID)}, args...).StringSlice()
+	if err := classify(err); err != nil {
+		return err
+	}
+	for i := range outbox {
+		outbox[i].ID = ids[i]
+	}
+	return nil
 }
 
 func classify(err error) error {
@@ -191,6 +236,8 @@ func classify(err error) error {
 		return nil
 	case strings.Contains(err.Error(), "FENCED"):
 		return ErrFenced
+	case strings.Contains(err.Error(), "OUTBOX"):
+		return ErrOutboxPending
 	default:
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -237,21 +284,61 @@ func (s *Store) Renew(ctx context.Context, serverID string, leases []Lease) (los
 	return lost, nil
 }
 
-// Close marks an ended room with a tombstone and drops its stream, snapshot and lease. The
-// fence counter stays, so tokens keep growing if the id were ever used again.
+// Close marks an ended room with a tombstone and drops its stream, snapshot, outbox and lease,
+// unless the outbox still has entries: then the room stays (ADR 0009). The fence counter
+// stays, so tokens keep growing if the id were ever used again.
 var closeScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return redis.error_reply('FENCED') end
+if redis.call('XLEN', KEYS[5]) > 0 then return redis.error_reply('OUTBOX') end
 redis.call('SET', KEYS[4], '1', 'PX', ARGV[2])
-redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[5])
 return 1
 `)
 
-// Close ends a room for good (it was empty long enough).
+// Close ends a room for good (it was empty long enough). It returns ErrOutboxPending while
+// finished rounds or matches are still waiting to be published.
 func (s *Store) Close(ctx context.Context, roomID, serverID string, token int64) error {
 	err := closeScript.Run(ctx, s.rdb,
-		[]string{LeaseKey(roomID), eventsKey(roomID), snapshotKey(roomID), closedKey(roomID)},
+		[]string{LeaseKey(roomID), eventsKey(roomID), snapshotKey(roomID), closedKey(roomID), outboxKey(roomID)},
 		LeaseValue(serverID, token), tombstoneTTL.Milliseconds()).Err()
 	return classify(err)
+}
+
+// Ack deletes a published outbox entry. It isn't fenced: an old owner that published before a
+// takeover may still ack, because every owner publishes the same event_id, and deleting an
+// entry that is already gone does nothing.
+func (s *Store) Ack(ctx context.Context, roomID, entryID string) error {
+	if err := s.rdb.XDel(ctx, outboxKey(roomID), entryID).Err(); err != nil {
+		return fmt.Errorf("%w: ack outbox entry: %w", ErrUnavailable, err)
+	}
+	return nil
+}
+
+// Pending returns, per room, the outbox entries added before olderThan: the ones that should
+// have been published by now (a failed or dropped publish). Rooms without such entries are
+// left out.
+func (s *Store) Pending(ctx context.Context, roomIDs []string, olderThan time.Time) (map[string][]room.OutboxEntry, error) {
+	if len(roomIDs) == 0 {
+		return nil, nil
+	}
+	end := strconv.FormatInt(olderThan.UnixMilli(), 10)
+	cmds := make([]*redis.XMessageSliceCmd, len(roomIDs))
+	_, err := s.rdb.Pipelined(ctx, func(p redis.Pipeliner) error {
+		for i, id := range roomIDs {
+			cmds[i] = p.XRange(ctx, outboxKey(id), "-", end)
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("%w: read outboxes: %w", ErrUnavailable, err)
+	}
+	out := map[string][]room.OutboxEntry{}
+	for i, id := range roomIDs {
+		for _, e := range cmds[i].Val() {
+			out[id] = append(out[id], decodeOutbox(id, e))
+		}
+	}
+	return out, nil
 }
 
 // Handle is one owner's access to one room: what the room's actor uses (room.Durable).
@@ -269,7 +356,7 @@ func (s *Store) Handle(roomID, serverID string, token int64) *Handle {
 
 // Commit implements room.Durable.
 func (h *Handle) Commit(ctx context.Context, events []room.StoredEvent, snap *room.Snapshot) error {
-	return h.store.Commit(ctx, h.roomID, h.serverID, h.token, events, snap)
+	return h.store.Commit(ctx, h.roomID, h.serverID, h.token, events, snap, nil)
 }
 
 // Close implements room.Durable.
