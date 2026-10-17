@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
 )
@@ -179,8 +180,9 @@ func TestPairLeaving(t *testing.T) {
 		if ids := ch[1]["drawer_ids"].([]any); len(ids) != 2 || ids[0] != "p1" || ids[1] != "host" {
 			t.Fatalf("drawer_ids = %v, want p1 first, host still a drawer", ids)
 		}
-		if want := tb.now.Add(DefaultSettings.Choose); !tb.g.deadline.Equal(want) {
-			t.Fatalf("deadline = %v, want the full choosing time from the hand-over (%v)", tb.g.deadline, want)
+		deadline := tb.g.deadline
+		if want := t0.Add(StartingFor + DefaultSettings.Choose); !deadline.Equal(want) {
+			t.Fatalf("deadline = %v, want the original one (%v)", deadline, want)
 		}
 		if len(tb.private("p1", "word_options")) != 1 {
 			t.Fatal("the second drawer got no options")
@@ -199,6 +201,25 @@ func TestPairLeaving(t *testing.T) {
 		tb.send("host", protocol.Guess{Text: tb.g.word})
 		if tb.lastError("host") != "cannot_chat_now" || tb.g.correct != 0 {
 			t.Fatal("a drawer scored a guess")
+		}
+	})
+	t.Run("passing the choice back and forth never extends the deadline", func(t *testing.T) {
+		tb := newTable(t, DefaultSettings)
+		tb.join(players(5)...)
+		tb.startChoosing()
+		deadline := tb.g.deadline
+		for i := range 20 {
+			chooser := tb.g.chooser()
+			tb.advance(100 * time.Millisecond)
+			tb.leave(chooser)
+			tb.join(chooser)
+			if tb.g.chooser() == chooser || !tb.g.deadline.Equal(deadline) {
+				t.Fatalf("hand-over %d: chooser %s, deadline %v (want %v)", i, tb.g.chooser(), tb.g.deadline, deadline)
+			}
+		}
+		tb.advance(deadline.Sub(tb.now))
+		if tb.g.Phase() != PhaseDrawing {
+			t.Fatalf("phase = %s: the original deadline must auto-pick the word", tb.g.Phase())
 		}
 	})
 	t.Run("the first drawer while choosing, with the second gone too, starts the next round", func(t *testing.T) {

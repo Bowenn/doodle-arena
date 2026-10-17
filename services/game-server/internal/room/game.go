@@ -594,29 +594,29 @@ func (g *Game) nextRound(now time.Time) {
 		g.drawn[id] = true
 	}
 	g.options = g.picker.Options(g.settings.WordOptions, g.usedWords)
-	g.beginChoosing(now)
-}
-
-// beginChoosing starts (or restarts) the choosing phase for the current drawers: only the
-// first one gets the word options.
-func (g *Game) beginChoosing(now time.Time) {
 	g.phase = PhaseChoosing
 	g.deadline = now.Add(g.settings.Choose)
+	g.announceChoosing()
+}
+
+// announceChoosing tells the room who is choosing; only the first drawer gets the options.
+func (g *Game) announceChoosing() {
 	g.emit("choosing", map[string]any{"round_no": g.roundNo, "drawer_ids": slices.Clone(g.drawers), "deadline": g.deadline.UnixMilli()})
 	g.sendPrivate(g.chooser())
 }
 
 // passChoice handles the chooser leaving while choosing. If another drawer is still here, the
-// word options go to them, with the full choosing time; the one who left stays a drawer
-// (they saw the options, so they must not guess this round). Otherwise nobody saw a word
-// yet, and the next round simply starts.
+// word options go to them; the one who left stays a drawer (they saw the options, so they
+// must not guess this round). The deadline stays: two drawers leaving and rejoining in turn
+// could otherwise pass the choice back and forth and stall the room. If no drawer is here,
+// nobody saw a word yet, and the next round simply starts.
 func (g *Game) passChoice(now time.Time, next string) {
 	if next == "" {
 		g.nextRound(now)
 		return
 	}
 	g.drawers = append([]string{next}, slices.DeleteFunc(slices.Clone(g.drawers), func(id string) bool { return id == next })...)
-	g.beginChoosing(now)
+	g.announceChoosing()
 }
 
 // creditDrawers gives every drawer their points for one correct guess.

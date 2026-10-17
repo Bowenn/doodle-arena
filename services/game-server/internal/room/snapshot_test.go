@@ -287,6 +287,7 @@ func TestRestoreReadsOldSingleDrawerSnapshots(t *testing.T) {
 // the second drawer once the grace is over.
 func TestRestorePassesTheChoiceAfterTheGrace(t *testing.T) {
 	r := newRecorder(t, 8)
+	r.g.settings.Choose = 2 * TakeoverGrace // so the choice is still open when the grace ends
 	for _, u := range []string{"p0", "p1", "p2", "p3", "p4"} {
 		_ = r.g.Join(r.now, u, u, false)
 	}
