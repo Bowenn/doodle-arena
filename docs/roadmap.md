@@ -70,7 +70,8 @@ Tracks:
   - Lobby page and `/rooms/<id>` invite links; a pure reducer over server messages; strokes batched every 50 ms (`VITE_STROKE_BATCH_MS`, `?batch_ms=`) with widths in normalized units; reconnect with a fresh ticket, `last_seq` and jittered backoff. Checked live on 2026-10-16 with one signed-in browser and two scripted players, through two full matches.
 - [x] **2.4 Events out**: the stroke log upload (claim check), `RoundFinished` and `MatchFinished`.
   - Decided 2026-10-16: a bounded in-memory queue that drops new events when full (2.5's Redis Stream can become the durable outbox), a fixed 4:3 canvas (800 x 600), and every round published but no match without a finished round.
-- [ ] **2.5 Reliability**: the Redis Stream event log with explicit `seq` IDs, snapshots, reconnect with resume, the lease and fencing token through Lua, and failover through the lobby, with two game-server instances in Compose. The humans decide ADR 0002 first.
+- [x] **2.5 Reliability**: the Redis Stream event log with explicit `seq` IDs, snapshots, reconnect with resume, the lease and fencing token through Lua, and failover through the lobby, with two game-server instances in Compose. The humans decide ADR 0002 first.
+  - ADR 0007 is decided (2026-10-16): forced takeover with fencing tokens. Write-then-broadcast, snapshots at phase changes plus in-phase events on restore, resume by replay, and a lobby reassigner. Drill: `scripts/drills/failover.py kill|pause`.
 - [ ] **2.6 Shared canvas and leaderboard**: two drawers per round with own-stroke undo; a weekly leaderboard built from `MatchFinished`.
 
 **M2 exit criteria**
@@ -78,9 +79,9 @@ Tracks:
 - [ ] A full match plays end to end with three or more browsers.
 - [x] Test: with concurrent correct guesses, exactly one is first, and every client sees the same order (`TestConcurrentCorrectGuessesOneFirst` in `services/game-server/internal/room`, 50 runs with `-race`).
 - [x] Test: guessers never receive the word before the round ends (`TestGuessersNeverSeeWordBeforeRoundEnded`: late joiner, reconnect, chat containing the word, hints; fails when a leak is planted).
-- [ ] Test: a client that disconnects mid-round resumes without missing events.
-- [ ] Test: after a takeover, the old owner's writes are rejected by the fencing check.
-- [ ] Killing a game server mid-round moves the room to the other instance. Recovery time is recorded in the evidence log.
+- [x] Test: a client that disconnects mid-round resumes without missing events (`TestResumeReplaysExactlyTheMissedEvents` in `services/game-server/internal/room`; across a takeover, `TestRestoredRoomResumesItsPlayers` and the failover drill).
+- [x] Test: after a takeover, the old owner's writes are rejected by the fencing check (`TestTakeoverFencesTheOldOwner` in `internal/roomstore`, `TestTakeoverAcrossServers` in `internal/control`, and the zombie drill).
+- [x] Killing a game server mid-round moves the room to the other instance. Recovery time is recorded in the evidence log (5.1–7.8 s, target 10 s).
 - [x] `RoundFinished` and `MatchFinished` appear in Kafka with trace context (`TestPublishThroughKafkaAndSeaweedFS` in `services/game-server/internal/events` against real `apache/kafka` and SeaweedFS; and a match played through the gateway, decoded with `eventctl decode`, with the full trace in Tempo).
 
 ## Stage 3: Drawing lifecycle (Track B, Day 4)
@@ -191,3 +192,5 @@ Record every number you might put on a resume or mention in an interview.
 | 2026-10-16 | Kafka outage during a match | Kafka stopped for 24 s while a full match (3 rounds) ran: the match played normally, and all 4 events were published 7 s after Kafka restarted, in order, nothing dropped | `docker compose stop kafka`, the e2e match, `start kafka`, game-server logs and `game.events.published` | Task 2.4 PR |
 | 2026-10-16 | Game-server registration at cold start | First successful heartbeat about 4 s after start (8 s before capping gRPC's reconnect backoff at 2 s) | Container logs: `grpc listening` to `heartbeat recovered` | Task 2.1 PR |
 | 2026-10-16 | Browser WebSocket round-trip time (ping/pong) | 2–6 ms on one machine through the gateway | The room page's ping every 15 s, shown next to the connection status | Task 2.3 PR |
+| 2026-10-16 | Failover: `docker kill` of the game server that owns a room mid-drawing | All 3 players resumed on the other server 5.1–7.8 s after the kill (7 runs; median 6.5 s), by replay (no full `welcome`), with 0 missed or duplicate events; target 10 s | `scripts/drills/failover.py kill` against `make up` | Task 2.5 PR |
+| 2026-10-16 | Zombie: `docker pause` of the owner for 9 s, then `unpause` | The lobby moved the room after its heartbeats stopped; on waking, the old owner's lease renewal failed the fencing check within 0.2 s, it sent `room_moved`, and all 3 players resumed on the new owner with 0 missed or duplicate events | `scripts/drills/failover.py pause`, plus its fencing log lines | Task 2.5 PR |

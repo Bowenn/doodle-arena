@@ -23,6 +23,7 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/heartbeat"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/server"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/telemetry"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/ticket"
@@ -172,11 +173,13 @@ func run(cfg config, logger *slog.Logger) error {
 	roomsCtx, stopRooms := context.WithCancel(context.Background())
 	defer stopRooms()
 	ctrl := control.New(roomsCtx, control.Config{
-		ID: cfg.instance, WSAddress: cfg.wsAddress, MaxRooms: cfg.maxRooms, Metrics: roomMetrics, Events: publisher, Log: logger,
+		ID: cfg.instance, WSAddress: cfg.wsAddress, MaxRooms: cfg.maxRooms, Metrics: roomMetrics, Events: publisher,
+		// Rooms are stored in Redis under a lease, so another server can take them over (ADR 0007).
+		Store: roomstore.New(rdb), Log: logger,
 	})
 	wsHandler, err := ws.NewHandler(ws.Config{
 		ServerID: cfg.instance, Rooms: ctrl, Verifier: ticket.NewVerifier(keys, time.Now),
-		Redeemer: ticket.NewRedisRedeemer(rdb, time.Now), Origins: cfg.origins,
+		Redeemer: ticket.NewRedisRedeemer(rdb, cfg.instance, time.Now), Origins: cfg.origins,
 		HelloTimeout: cfg.helloTimeout, Log: logger, Meter: meter,
 	})
 	if err != nil {

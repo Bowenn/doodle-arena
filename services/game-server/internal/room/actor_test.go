@@ -22,6 +22,15 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+func mustNew(t *testing.T, cfg Config) *Room {
+	t.Helper()
+	r, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
 // fakeClock fires timers only when the test advances it, synchronously, so the tick lands
 // in the inbox before the test's next sync.
 type fakeClock struct {
@@ -151,7 +160,7 @@ func newHarness(t *testing.T, host string, s Settings, m *Metrics, opts ...func(
 		m = NoopMetrics()
 	}
 	clock := &fakeClock{now: t0}
-	r := New(Config{ID: "r1", Mode: "classic", HostID: host, Settings: s, Clock: clock,
+	r := mustNew(t, Config{ID: "r1", Mode: "classic", HostID: host, Settings: s, Clock: clock,
 		Rand: rand.New(rand.NewPCG(9, 9)), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: m})
 	for _, o := range opts {
 		o(r)
@@ -486,7 +495,7 @@ func TestEmptyRoomStopsAndReportsClosed(t *testing.T) {
 
 func TestShutdownClosesSockets(t *testing.T) {
 	clock := &fakeClock{now: t0}
-	r := New(Config{ID: "r1", Mode: "classic", Settings: DefaultSettings, Clock: clock,
+	r := mustNew(t, Config{ID: "r1", Mode: "classic", Settings: DefaultSettings, Clock: clock,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: NoopMetrics()})
 	ctx, cancel := context.WithCancel(context.Background())
 	go r.Run(ctx)

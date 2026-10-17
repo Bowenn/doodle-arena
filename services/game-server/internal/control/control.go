@@ -5,6 +5,7 @@ package control
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -14,6 +15,10 @@ import (
 
 	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -37,12 +42,19 @@ type Server struct {
 	metrics   *room.Metrics
 	events    room.Sink
 	log       *slog.Logger
-	ctx       context.Context // rooms run until it ends
+	store     *roomstore.Store // nil: rooms live only in memory (tests)
+	ctx       context.Context  // rooms run until it ends
 	wg        sync.WaitGroup
 
 	mu       sync.Mutex
-	rooms    map[string]*room.Room
+	rooms    map[string]*entry
 	draining bool
+}
+
+// entry is a running room and, with a store, its lease.
+type entry struct {
+	room   *room.Room
+	handle *roomstore.Handle // nil without a store
 }
 
 // Config creates a Server.
@@ -53,16 +65,22 @@ type Config struct {
 	Clock     room.Clock
 	Metrics   *room.Metrics
 	Events    room.Sink // finished rounds and matches; nil: discarded
+	Store     *roomstore.Store
 	Log       *slog.Logger
 }
 
-// New returns a control server. Rooms run until ctx ends; Wait waits for them.
+// New returns a control server. Rooms run until ctx ends; Wait waits for them. With a store,
+// it also keeps every room's lease alive until ctx ends.
 func New(ctx context.Context, cfg Config) *Server {
 	if cfg.Clock == nil {
 		cfg.Clock = room.RealClock
 	}
-	return &Server{id: cfg.ID, wsAddress: cfg.WSAddress, maxRooms: cfg.MaxRooms, clock: cfg.Clock,
-		metrics: cfg.Metrics, events: cfg.Events, log: cfg.Log, ctx: ctx, rooms: map[string]*room.Room{}}
+	s := &Server{id: cfg.ID, wsAddress: cfg.WSAddress, maxRooms: cfg.MaxRooms, clock: cfg.Clock,
+		metrics: cfg.Metrics, events: cfg.Events, store: cfg.Store, log: cfg.Log, ctx: ctx, rooms: map[string]*entry{}}
+	if s.store != nil {
+		s.wg.Go(s.keepLeases)
+	}
+	return s
 }
 
 var roomIDPattern = regexp.MustCompile(`^[a-z0-9]{1,64}$`)
@@ -100,22 +118,93 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 	if len(s.rooms) >= s.maxRooms {
 		return nil, status.Error(codes.ResourceExhausted, "server is full")
 	}
-	r := room.New(room.Config{
+	cfg := room.Config{
 		ID: req.GetRoomId(), Mode: "classic", HostID: req.GetHostUserId(), Settings: settings,
 		Clock: s.clock, Log: s.log, Metrics: s.metrics, Events: s.events,
-	})
-	s.rooms[r.ID()] = r
+	}
+	e := &entry{}
+	if s.store != nil {
+		// Take the room (by force, if another server still holds it: ADR 0007), then read it.
+		actx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		owned, err := s.store.Acquire(actx, req.GetRoomId(), s.id)
+		cancel()
+		switch {
+		case errors.Is(err, roomstore.ErrClosed):
+			return nil, status.Error(codes.NotFound, "room has ended")
+		case err != nil:
+			s.log.ErrorContext(ctx, "room not acquired", "room_id", req.GetRoomId(), "err", err)
+			return nil, status.Error(codes.Unavailable, "room store unavailable")
+		}
+		e.handle = s.store.Handle(req.GetRoomId(), s.id, owned.Token)
+		cfg.Durable = e.handle
+		if owned.Snapshot != nil {
+			cfg.Restore = &room.Restored{Snapshot: *owned.Snapshot, Events: owned.Events}
+		}
+		if cfg.Restore != nil {
+			_, span := otel.Tracer("game-server").Start(ctx, "game.room.takeover", trace.WithAttributes(
+				attribute.String("room.id", req.GetRoomId()), attribute.Int64("fencing.token", owned.Token)))
+			span.End()
+			s.metrics.Takeover(ctx)
+			s.log.InfoContext(ctx, "room taken over", "room_id", req.GetRoomId(), "server_id", s.id,
+				"token", owned.Token, "seq", owned.Snapshot.Seq, "events_loaded", len(owned.Events))
+		}
+	}
+	r, err := room.New(cfg)
+	if err != nil {
+		// The stored log doesn't fit its snapshot; never guess: a human looks at it.
+		s.log.ErrorContext(ctx, "room not restored", "room_id", req.GetRoomId(), "err", err)
+		return nil, status.Error(codes.Internal, "room state can't be restored")
+	}
+	e.room = r
+	s.rooms[r.ID()] = e
 	s.wg.Go(func() {
 		r.Run(s.ctx)
 		s.mu.Lock()
 		// A new room with the same id may already have replaced this one.
-		if s.rooms[r.ID()] == r {
+		if cur := s.rooms[r.ID()]; cur != nil && cur.room == r {
 			delete(s.rooms, r.ID())
 		}
 		s.mu.Unlock()
 	})
-	s.log.InfoContext(ctx, "room allocated", "room_id", r.ID(), "server_id", s.id, "user_id", req.GetHostUserId())
+	if cfg.Restore == nil {
+		s.log.InfoContext(ctx, "room allocated", "room_id", r.ID(), "server_id", s.id, "user_id", req.GetHostUserId())
+	}
 	return resp, nil
+}
+
+// keepLeases renews every room's lease every RenewEvery in one pipeline, and stops rooms whose
+// lease another server has taken (their writes would fail anyway; this catches idle rooms).
+func (s *Server) keepLeases() {
+	t := time.NewTicker(roomstore.RenewEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-t.C:
+		}
+		s.mu.Lock()
+		leases := make([]roomstore.Lease, 0, len(s.rooms))
+		byID := make(map[string]*room.Room, len(s.rooms))
+		for id, e := range s.rooms {
+			if e.handle != nil {
+				leases = append(leases, e.handle.Lease())
+				byID[id] = e.room
+			}
+		}
+		s.mu.Unlock()
+		ctx, cancel := context.WithTimeout(s.ctx, time.Second)
+		lost, err := s.store.Renew(ctx, s.id, leases)
+		cancel()
+		if err != nil {
+			s.log.Warn("leases not renewed", "rooms", len(leases), "err", err)
+			continue
+		}
+		for _, id := range lost {
+			s.log.Warn("lease lost: another server took the room", "room_id", id, "server_id", s.id)
+			byID[id].Fence()
+		}
+	}
 }
 
 // DrainServer stops new allocations. Handing rooms over is task 2.5.
@@ -133,7 +222,10 @@ func (s *Server) DrainServer(ctx context.Context, _ *gamev1.DrainServerRequest) 
 func (s *Server) Room(id string) *room.Room {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.rooms[id]
+	if e := s.rooms[id]; e != nil {
+		return e.room
+	}
+	return nil
 }
 
 // Status returns the rooms, sorted by id, and whether the server drains, for heartbeats. It
@@ -141,8 +233,8 @@ func (s *Server) Room(id string) *room.Room {
 func (s *Server) Status() (rooms []Room, draining bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, r := range s.rooms {
-		sum := r.Summary()
+	for id, e := range s.rooms {
+		sum := e.room.Summary()
 		if sum.Closed {
 			continue
 		}

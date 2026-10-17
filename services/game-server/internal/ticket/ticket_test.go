@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/redistest"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 )
@@ -162,8 +163,14 @@ func TestLoadPublicKeysReadsSeveralFiles(t *testing.T) {
 
 func TestRedisRedeemerIsSingleUse(t *testing.T) {
 	rdb := redistest.New(t)
-	r := NewRedisRedeemer(rdb, clock(now))
+	r := NewRedisRedeemer(rdb, "gs-1", clock(now))
 	tk := Ticket{ID: "jti-1", UserID: "u-1", RoomID: "r1", ExpiresAt: now.Add(TTL)}
+	if err := r.Redeem(t.Context(), tk); !errors.Is(err, ErrNotOwner) {
+		t.Fatalf("without the lease: err = %v, want ErrNotOwner", err)
+	}
+	for _, id := range []string{"r1", "r2"} {
+		rdb.Set(t.Context(), roomstore.LeaseKey(id), roomstore.LeaseValue("gs-1", 7), time.Minute)
+	}
 	if err := r.Redeem(t.Context(), tk); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +178,7 @@ func TestRedisRedeemerIsSingleUse(t *testing.T) {
 		t.Fatalf("second redeem: err = %v, want ErrReused", err)
 	}
 	// The record outlives the ticket: exp + leeway, 65 s here.
-	ttl := rdb.TTL(t.Context(), Key("r1", "jti-1")).Val()
+	ttl := rdb.TTL(t.Context(), roomstore.TicketKey("r1", "jti-1")).Val()
 	if ttl <= TTL || ttl > TTL+Leeway {
 		t.Fatalf("ttl = %v, want (60s, 65s]", ttl)
 	}
@@ -179,12 +186,16 @@ func TestRedisRedeemerIsSingleUse(t *testing.T) {
 	if err := r.Redeem(t.Context(), Ticket{ID: "jti-1", RoomID: "r2", ExpiresAt: now.Add(TTL)}); err != nil {
 		t.Fatal(err)
 	}
+	// A server whose id is a prefix of the owner's doesn't count as the owner.
+	if err := NewRedisRedeemer(rdb, "gs", clock(now)).Redeem(t.Context(), Ticket{ID: "j9", RoomID: "r1", ExpiresAt: now.Add(TTL)}); !errors.Is(err, ErrNotOwner) {
+		t.Fatalf("prefix id: err = %v", err)
+	}
 }
 
 func TestRedisRedeemerFailsClosed(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 100 * time.Millisecond, MaxRetries: -1})
 	defer rdb.Close()
-	err := NewRedisRedeemer(rdb, clock(now)).Redeem(context.Background(), Ticket{ID: "x", RoomID: "r1", ExpiresAt: now.Add(TTL)})
+	err := NewRedisRedeemer(rdb, "gs-1", clock(now)).Redeem(context.Background(), Ticket{ID: "x", RoomID: "r1", ExpiresAt: now.Add(TTL)})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}

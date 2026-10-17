@@ -297,10 +297,11 @@ func TestJoinErrors(t *testing.T) {
 		t.Fatalf("unknown room: err = %v", err)
 	}
 
-	// The server stops reporting the room after the grace period: the room has ended.
+	// The server stops reporting the room after the grace period: it is being moved (or found
+	// ended) by the reassigner; until then it can't be joined.
 	e.clock.add(reportGrace + time.Second)
-	if _, err := e.svc.Join(t.Context(), User{ID: "u-1"}, room.ID); !errors.Is(err, ErrRoomNotFound) {
-		t.Fatalf("ended room: err = %v", err)
+	if _, err := e.svc.Join(t.Context(), User{ID: "u-1"}, room.ID); !errors.Is(err, ErrRoomUnavailable) {
+		t.Fatalf("unreported room: err = %v", err)
 	}
 
 	// The server is gone: the room exists but can't be joined until failover moves it.
@@ -397,7 +398,7 @@ func TestPublicPageWithTiedScores(t *testing.T) {
 	}
 }
 
-func TestListDropsEndedRoomsAndHidesDeadServers(t *testing.T) {
+func TestListHidesUnreportedRoomsAndDeadServers(t *testing.T) {
 	e := newEnv(t)
 	e.beat(t, "gs-1", 0, false)
 	ended, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
@@ -405,14 +406,14 @@ func TestListDropsEndedRoomsAndHidesDeadServers(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.clock.add(reportGrace + time.Second)
-	// gs-1 is alive but no longer reports the room: it has ended.
+	// gs-1 is alive but no longer reports the room: hidden; the reassigner decides its fate.
 	e.beat(t, "gs-1", 0, false)
 	page, _, err := e.svc.List(t.Context(), nil, 10)
 	if err != nil || len(page) != 0 {
 		t.Fatalf("page = %+v, err = %v", page, err)
 	}
-	if _, err := e.store.Get(t.Context(), ended.ID); !errors.Is(err, ErrRoomNotFound) {
-		t.Fatalf("ended room still stored: %v", err)
+	if _, err := e.store.Get(t.Context(), ended.ID); err != nil {
+		t.Fatalf("listing removed the room; only the reassigner may: %v", err)
 	}
 
 	// A room whose server is gone is hidden, but kept for failover.
@@ -616,4 +617,168 @@ func TestGRPCAllocatorForgetRedials(t *testing.T) {
 		t.Fatal("Forget kept the cached connection")
 	}
 	a.Forget("unknown:1") // no-op
+}
+
+// roomsOn returns the index of a server's rooms, sorted.
+func (e *env) roomsOn(t *testing.T, server string) []string {
+	t.Helper()
+	ids, err := e.store.RoomsOf(t.Context(), server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// Failover in the lobby: a server's heartbeats stop, and its rooms move to a live server.
+func TestReassignMovesTheRoomsOfADeadServer(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	var ids []string
+	for range 3 {
+		r, err := e.svc.Create(t.Context(), "u-host", true, Settings{MaxPlayers: 4})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, r.ID)
+	}
+	slices.Sort(ids)
+	// gs-1 dies (its registry entry expires); gs-2 is up.
+	if err := e.store.rdb.Del(t.Context(), "lobby:server:gs-1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	e.beat(t, "gs-2", 0, false)
+	e.alloc.calls, e.alloc.targets = nil, nil
+
+	if err := e.svc.Reassign(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		r, err := e.store.Get(t.Context(), id)
+		if err != nil || r.ServerID != "gs-2" || r.HostID != "u-host" || r.Settings.MaxPlayers != 4 {
+			t.Fatalf("room %s after reassign: %+v, %v", id, r, err)
+		}
+	}
+	if got := e.roomsOn(t, "gs-2"); !slices.Equal(got, ids) {
+		t.Fatalf("index gs-2 = %v, want %v", got, ids)
+	}
+	if got := e.roomsOn(t, "gs-1"); len(got) != 0 {
+		t.Fatalf("index gs-1 still has %v", got)
+	}
+	if !slices.Equal(e.alloc.targets, []string{"gs-2", "gs-2", "gs-2"}) {
+		t.Fatalf("AllocateRoom targets = %v", e.alloc.targets)
+	}
+	// The next pass has nothing to do.
+	e.alloc.calls = nil
+	e.beat(t, "gs-2", 0, false, reported(ids)...)
+	if err := e.svc.Reassign(t.Context()); err != nil || len(e.alloc.calls) != 0 {
+		t.Fatalf("second pass: calls %v, err %v", e.alloc.calls, err)
+	}
+}
+
+func reported(ids []string) []registry.Room {
+	var out []registry.Room
+	for _, id := range ids {
+		out = append(out, registry.Room{ID: id, Phase: registry.PhaseWaiting})
+	}
+	return out
+}
+
+// A restarted server is alive but lost its rooms: once they're missing from its heartbeat
+// past the grace, they are allocated again (possibly on the same server, which restores them).
+func TestReassignRestoresRoomsAServerForgot(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	young, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.alloc.calls = nil
+	if err := e.svc.Reassign(t.Context()); err != nil || len(e.alloc.calls) != 0 {
+		t.Fatalf("a young room was reassigned: %v %v", e.alloc.calls, err)
+	}
+	e.clock.add(reportGrace + time.Second)
+	e.beat(t, "gs-1", 0, false) // restarted: reports nothing
+	if err := e.svc.Reassign(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(e.alloc.calls, []string{"gs-1:9090"}) {
+		t.Fatalf("calls = %v, want the room allocated again on gs-1", e.alloc.calls)
+	}
+	if r, _ := e.store.Get(t.Context(), young.ID); r.ServerID != "gs-1" {
+		t.Fatalf("room = %+v", r)
+	}
+}
+
+// A room that ended (the game server answers NOT_FOUND) is removed, with its index entry.
+func TestReassignRemovesAnEndedRoom(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	r, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.clock.add(reportGrace + time.Second)
+	e.beat(t, "gs-1", 0, false)
+	e.alloc.answers["gs-1:9090"] = status.Error(codes.NotFound, "room has ended")
+	if err := e.svc.Reassign(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.Get(t.Context(), r.ID); !errors.Is(err, ErrRoomNotFound) {
+		t.Fatalf("ended room still stored: %v", err)
+	}
+	if got := e.roomsOn(t, "gs-1"); len(got) != 0 {
+		t.Fatalf("index still has %v", got)
+	}
+	if page, _, _ := e.store.PublicPage(t.Context(), nil, 10); len(page) != 0 {
+		t.Fatal("ended room still listed")
+	}
+}
+
+func TestOnlyOneLobbyHoldsTheReassignerLock(t *testing.T) {
+	rdb := redistest.New(t)
+	if !holdLock(t.Context(), rdb, "lobby-1") {
+		t.Fatal("first lobby didn't get the lock")
+	}
+	if holdLock(t.Context(), rdb, "lobby-2") {
+		t.Fatal("second lobby got the lock too")
+	}
+	if !holdLock(t.Context(), rdb, "lobby-1") {
+		t.Fatal("the holder couldn't extend its lock")
+	}
+}
+
+// A stale pass can't overwrite a newer placement, and a just-moved room gets its own grace.
+func TestMoveIsCompareAndSetAndRestartsTheGrace(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	r, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := r
+	moved.ServerID = "gs-2"
+	if err := e.store.Move(t.Context(), moved, "gs-1"); err != nil {
+		t.Fatal(err)
+	}
+	stale := r
+	stale.ServerID = "gs-3"
+	if err := e.store.Move(t.Context(), stale, "gs-1"); !errors.Is(err, ErrMovedMeanwhile) {
+		t.Fatalf("stale move: err = %v", err)
+	}
+	if got, _ := e.store.Get(t.Context(), r.ID); got.ServerID != "gs-2" {
+		t.Fatalf("room on %s after a stale move", got.ServerID)
+	}
+
+	// Moved onto gs-2 just now: gs-2 hasn't reported it yet, but it isn't moved again.
+	e.clock.add(time.Hour)
+	moved.PlacedAt = e.clock.now()
+	if err := e.store.Move(t.Context(), moved, "gs-2"); err != nil {
+		t.Fatal(err)
+	}
+	e.beat(t, "gs-2", 0, false)
+	e.alloc.calls = nil
+	if err := e.svc.Reassign(t.Context()); err != nil || len(e.alloc.calls) != 0 {
+		t.Fatalf("a freshly placed room was reassigned: %v %v", e.alloc.calls, err)
+	}
 }

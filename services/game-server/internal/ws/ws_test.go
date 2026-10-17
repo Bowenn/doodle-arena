@@ -64,7 +64,10 @@ func newEnv(t *testing.T, maxPlayers int, hello time.Duration) *env {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := room.DefaultSettings
 	s.MaxPlayers = maxPlayers
-	r := room.New(room.Config{ID: "r1", Mode: "classic", HostID: "u1", Settings: s, Log: log, Metrics: room.NoopMetrics()})
+	r, err := room.New(room.Config{ID: "r1", Mode: "classic", HostID: "u1", Settings: s, Log: log, Metrics: room.NoopMetrics()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	go r.Run(ctx)
 	rooms := roomTable{"r1": r}
 	red := &memRedeemer{used: map[string]bool{}}
@@ -208,7 +211,7 @@ func TestUnknownRoomAndServer(t *testing.T) {
 	e := newEnv(t, 8, time.Second)
 	c := e.dial("/ws/gs-1/rooms/r9", nil)
 	write(t, c, "hello", map[string]any{"ticket": e.sign("u1", "r9", "j1")})
-	if got := closeCode(t, c); got != protocol.CloseNoRoom {
+	if got := closeCode(t, c); got != protocol.CloseRoomMoved {
 		t.Fatalf("close = %d", got)
 	}
 	resp, err := http.Get(e.srv.URL + "/ws/gs-2/rooms/r1")
