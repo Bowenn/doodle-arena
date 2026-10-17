@@ -3,7 +3,8 @@
 Configured by the standard OTEL_* environment variables. Without OTEL_EXPORTER_OTLP_ENDPOINT
 nothing is set up, so tests and CI never export anything.
 
-Gunicorn calls setup_telemetry in each worker after the fork (gunicorn.conf.py): the batch
+Gunicorn calls setup_telemetry in each worker after the fork (gunicorn.conf.py), and the Celery
+worker calls setup_worker_telemetry in each pool process (config/celery.py): the batch
 processors and the metric reader run background threads, and threads don't survive a fork.
 """
 
@@ -15,7 +16,9 @@ from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.celery import CeleryInstrumentor
 from opentelemetry.instrumentation.django import DjangoInstrumentor
+from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
 from opentelemetry.instrumentation.system_metrics import SystemMetricsInstrumentor
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
@@ -56,12 +59,31 @@ def resource(version: str, instance_id: str) -> Resource:
 
 
 def setup_telemetry() -> Callable[[], None]:
-    """Installs the global tracer, meter and logger providers and instruments Django. Must run
-    before Django loads the WSGI app, because the instrumentation adds a middleware. Returns a
-    function that flushes and stops the exporters; call it on shutdown."""
+    """For gunicorn workers: installs the global providers and instruments Django, psycopg and
+    Celery (which puts the trace context into the tasks it sends). Must run before Django loads
+    the WSGI app, because the instrumentation adds a middleware. Returns a function that flushes
+    and stops the exporters; call it on shutdown."""
     if not enabled():
         return lambda: None
+    shutdown = _install_providers()
+    DjangoInstrumentor().instrument(excluded_urls=EXCLUDED_URLS)
+    PsycopgInstrumentor().instrument()
+    CeleryInstrumentor().instrument()  # type: ignore[no-untyped-call]
+    return shutdown
 
+
+def setup_worker_telemetry() -> Callable[[], None]:
+    """For Celery pool processes: installs the global providers and instruments Celery (a span
+    per task, continuing the trace of whoever sent it) and psycopg."""
+    if not enabled():
+        return lambda: None
+    shutdown = _install_providers()
+    PsycopgInstrumentor().instrument()
+    CeleryInstrumentor().instrument()  # type: ignore[no-untyped-call]
+    return shutdown
+
+
+def _install_providers() -> Callable[[], None]:
     # The instrumentation reads settings.MIDDLEWARE; without this it would configure empty
     # settings. wsgi.py sets the same default.
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
@@ -85,8 +107,6 @@ def setup_telemetry() -> Callable[[], None]:
     # Host-wide system.* metrics are left out: they describe the machine, not the service.
     SystemMetricsInstrumentor(config=PROCESS_METRICS).instrument()
     set_logger_provider(logger_provider)
-
-    DjangoInstrumentor().instrument(excluded_urls=EXCLUDED_URLS)
 
     def shutdown() -> None:
         tracer_provider.shutdown()

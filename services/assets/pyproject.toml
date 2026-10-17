@@ -43,7 +43,7 @@ plugins = ["pydantic.mypy", "mypy_django_plugin.main"]
 
 [[tool.mypy.overrides]]
 # No type hints in these packages.
-module = ["gunicorn.*", "opentelemetry.instrumentation.django"]
+module = ["gunicorn.*", "opentelemetry.instrumentation.django", "opentelemetry.instrumentation.celery", "opentelemetry.instrumentation.psycopg"]
 ignore_missing_imports = true
 
 [tool.django-stubs]
@@ -56,6 +56,7 @@ DJANGO_SETTINGS_MODULE = "config.test_settings"
 
 [dependency-groups]
 dev = [
+    "celery-types>=0.26.0",
     "django-stubs>=6.1.2",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
