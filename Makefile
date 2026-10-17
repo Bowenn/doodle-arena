@@ -17,8 +17,9 @@ down:
 ps:
 	$(COMPOSE) ps
 
+# s=game-server shows both instances (the compose services are game-server-1 and -2).
 logs:
-	$(COMPOSE) logs -f --tail=100 $(s)
+	$(COMPOSE) logs -f --tail=100 $(if $(filter game-server,$(s)),game-server-1 game-server-2,$(s))
 
 test:
 	@./scripts/test.sh $(s)

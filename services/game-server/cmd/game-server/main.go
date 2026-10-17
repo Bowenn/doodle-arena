@@ -233,8 +233,9 @@ func run(cfg config, logger *slog.Logger) error {
 
 	// SIGTERM: stop heartbeats (the lobby stops sending rooms here within 6 seconds), stop
 	// accepting connections, close the rooms (their sockets get 1001 and can reconnect), wait
-	// for the sockets, publish the queued events, then exit. Handing rooms to another server is
-	// task 2.5; a match cut short by shutdown publishes nothing.
+	// for the sockets, publish the queued events, then exit. Rooms aren't handed to another
+	// server: the lobby moves them by ordinary failover once the heartbeats stop (handing them
+	// over is roadmap task 5.5); a match cut short by shutdown publishes nothing.
 	logger.Info("shutting down")
 	stopBeats()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

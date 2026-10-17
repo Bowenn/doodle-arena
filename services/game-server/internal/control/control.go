@@ -267,7 +267,8 @@ func (s *Server) awaitStopped(ctx context.Context, e *entry) bool {
 // stopWait bounds how long AllocateRoom waits for a fenced room's actor to stop.
 const stopWait = 1500 * time.Millisecond
 
-// DrainServer stops new allocations. Handing rooms over is task 2.5.
+// DrainServer stops new allocations. Rooms aren't handed over yet: on shutdown they close, and
+// the lobby moves them through ordinary failover (roadmap task 5.5).
 func (s *Server) DrainServer(ctx context.Context, _ *gamev1.DrainServerRequest) (*gamev1.DrainServerResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

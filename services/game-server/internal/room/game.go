@@ -47,8 +47,9 @@ const (
 	guessPerSecond = 1
 )
 
-// eventLogSize is how many recent shared events the room keeps in memory. Task 2.5 replaces
-// this with the Redis Stream room:{id}:events.
+// eventLogSize is how many recent shared events the room keeps in memory, for replays to
+// resuming clients. The durable log is the Redis Stream room:{id}:events (package roomstore);
+// a new owner refills this buffer from it.
 const eventLogSize = 1024
 
 // Out is one message the room wants delivered.

@@ -28,7 +28,7 @@ import (
 // Timeouts and limits.
 const (
 	DefaultHelloTimeout = 10 * time.Second
-	idleTimeout         = 60 * time.Second // clients ping every 15 s
+	idleTimeout         = 60 * time.Second // the web client pings every 5 s
 	writeTimeout        = 10 * time.Second
 	sendQueue           = 256 // messages; a client this far behind is closed as slow (> room's 200-event replay)
 	floodBurst          = 100 // messages per socket, before the per-player guess limit
