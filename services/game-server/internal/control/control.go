@@ -26,7 +26,8 @@ import (
 // Room is what this server reports about one of its rooms.
 type Room struct {
 	ID      string
-	Players uint32
+	Players uint32 // connected
+	Seats   uint32 // held, connected or not
 	Playing bool
 }
 
@@ -238,7 +239,7 @@ func (s *Server) Status() (rooms []Room, draining bool) {
 		if sum.Closed {
 			continue
 		}
-		rooms = append(rooms, Room{ID: id, Players: uint32(sum.Players), Playing: sum.Playing})
+		rooms = append(rooms, Room{ID: id, Players: uint32(sum.Players), Seats: uint32(sum.Seats), Playing: sum.Playing})
 	}
 	slices.SortFunc(rooms, func(a, b Room) int { return cmp.Compare(a.ID, b.ID) })
 	return rooms, s.draining

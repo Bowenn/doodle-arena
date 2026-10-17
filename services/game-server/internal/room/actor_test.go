@@ -461,9 +461,16 @@ func TestReplacedSocket(t *testing.T) {
 	if len(h.conns["b"].events("player_left")) != 0 || len(newer.events("match_started")) != 0 {
 		t.Fatal("a replaced socket still acted for its player")
 	}
-	if got := h.room.Summary(); got.Players != 2 || got.Playing {
+	if got := h.room.Summary(); got.Players != 2 || got.Seats != 2 || got.Playing {
 		t.Fatalf("summary = %+v", got)
 	}
+	// A player who leaves keeps their seat through the rejoin grace (ADR 0008).
+	h.room.Leave(h.conns["b"])
+	h.sync()
+	if got := h.room.Summary(); got.Players != 1 || got.Seats != 2 {
+		t.Fatalf("after b left: summary = %+v, want 1 player in 2 seats", got)
+	}
+	h.join("b")
 	h.input("a", protocol.Start{})
 	h.sync()
 	if !h.room.Summary().Playing {

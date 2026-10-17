@@ -104,7 +104,7 @@ func (s *Sender) beat(ctx context.Context) error {
 			phase = lobbyv1.RoomPhase_ROOM_PHASE_PLAYING
 		}
 		req.RoomIds = append(req.RoomIds, r.ID)
-		req.Rooms = append(req.Rooms, &lobbyv1.RoomStatus{RoomId: r.ID, Players: r.Players, Phase: phase})
+		req.Rooms = append(req.Rooms, &lobbyv1.RoomStatus{RoomId: r.ID, Players: r.Players, Seats: r.Seats, Phase: phase})
 		req.Sockets += r.Players
 	}
 	_, err := s.client.Heartbeat(ctx, req)

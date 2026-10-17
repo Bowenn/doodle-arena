@@ -239,6 +239,10 @@ func (g *Game) presentDrawer(now time.Time, except string) string {
 }
 
 // Connected counts players with an open connection.
+// Seated counts the players holding a seat: connected, within their rejoin grace, or (during
+// a match) anyone who joined it. It is what Join compares with max_players.
+func (g *Game) Seated() int { return len(g.players) }
+
 func (g *Game) Connected() int {
 	n := 0
 	for _, p := range g.players {

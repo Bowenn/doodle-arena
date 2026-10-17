@@ -84,7 +84,8 @@ const commitTimeout = 2 * time.Second
 
 // Summary is what heartbeats report about a room.
 type Summary struct {
-	Players int
+	Players int // connected
+	Seats   int // held, connected or not (Game.Seated)
 	Playing bool
 	Closed  bool
 }
@@ -502,7 +503,7 @@ func (r *Room) span(name string, attrs []attribute.KeyValue) context.Context {
 }
 
 func (r *Room) publish() {
-	s := Summary{Players: r.game.Connected(), Playing: r.game.Phase().Playing()}
+	s := Summary{Players: r.game.Connected(), Seats: r.game.Seated(), Playing: r.game.Phase().Playing()}
 	if *r.summary.Load() != s {
 		r.summary.Store(&s)
 	}
