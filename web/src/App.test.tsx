@@ -32,6 +32,10 @@ describe('App', () => {
               next_cursor: null,
             }),
           )
+        case '/api/lobby/leaderboard?limit=20':
+          return Promise.resolve(
+            json(200, { week: '2026-W42', entries: [{ rank: 1, user_id: 'u-1', name: 'Ada Lovelace', score: 42 }], me: { rank: 1, score: 42 } }),
+          )
         case '/api/auth/logout':
           return Promise.resolve(new Response(null, { status: 204 }))
         default:
@@ -93,6 +97,19 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Room abc123' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
     expect(window.location.pathname).toBe('/')
+  })
+
+  it('opens the weekly leaderboard from the lobby, and goes back', async () => {
+    signedIn()
+
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('link', { name: 'Weekly leaderboard' }))
+    expect(window.location.pathname).toBe('/leaderboard')
+    expect(await screen.findByText('Ada Lovelace (you)')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to lobby' }))
+    expect(window.location.pathname).toBe('/')
+    expect(await screen.findByRole('heading', { name: 'Lobby' })).toBeTruthy()
   })
 
   it('shows an error when the server is unreachable', async () => {

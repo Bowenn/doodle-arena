@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, loginUrl, logout, type Me } from './auth.ts'
+import { Leaderboard } from './Leaderboard.tsx'
 import { Lobby } from './Lobby.tsx'
 import { Room } from './room/Room.tsx'
 
@@ -77,8 +78,10 @@ export default function App() {
         </header>
         {roomId ? (
           <Room key={roomId} roomId={roomId} onLeave={() => go('/')} />
+        ) : path === '/leaderboard' ? (
+          <Leaderboard meId={me.id} onBack={() => go('/')} />
         ) : (
-          <Lobby onEnter={(id) => go(`/rooms/${id}`)} />
+          <Lobby onEnter={(id) => go(`/rooms/${id}`)} onLeaderboard={() => go('/leaderboard')} />
         )}
       </>
     )

@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createRoom, listRooms, LobbyError, quickPlay, type RoomListing } from './lobby.ts'
 
-type Props = { onEnter: (roomId: string) => void }
+type Props = { onEnter: (roomId: string) => void; onLeaderboard: () => void }
 
-export function Lobby({ onEnter }: Props) {
+export function Lobby({ onEnter, onLeaderboard }: Props) {
   const [rooms, setRooms] = useState<RoomListing[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -43,6 +43,16 @@ export function Lobby({ onEnter }: Props) {
         <label>
           <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} /> Public
         </label>
+        <a
+          href="/leaderboard"
+          className="leaderboard-link"
+          onClick={(e) => {
+            e.preventDefault()
+            onLeaderboard()
+          }}
+        >
+          Weekly leaderboard
+        </a>
       </div>
       {error && <p role="alert">{error}</p>}
       <h2>

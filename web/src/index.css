@@ -97,6 +97,38 @@ button.selected {
   border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
 }
 
+.leaderboard-link {
+  margin-left: auto;
+  color: inherit;
+}
+
+/* Leaderboard page */
+
+table.leaderboard {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table.leaderboard th,
+table.leaderboard td {
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+table.leaderboard th:first-child,
+table.leaderboard td:first-child,
+table.leaderboard th:last-child,
+table.leaderboard td:last-child {
+  width: 5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+table.leaderboard tr.me {
+  background: color-mix(in srgb, #1971c2 18%, transparent);
+  font-weight: bold;
+}
+
 /* Room page */
 
 main.room {
