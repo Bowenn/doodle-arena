@@ -32,17 +32,20 @@ func TestPublishThroughKafkaAndSeaweedFS(t *testing.T) {
 	}
 	brokers := kafkatest.Kafka(t)
 	kafkatest.CreateTopics(t, brokers, TopicRounds, TopicMatches)
-	store := NewS3Client(S3Config{Endpoint: kafkatest.SeaweedFS(t, "testkey", "testsecret"), Region: "us-east-1",
-		AccessKey: "testkey", SecretKey: "testsecret"})
-	createBucket(t, store, "round-logs")
 
-	// The production setup: a global tracer provider and the W3C propagator (internal/telemetry).
+	// The production setup: a global tracer provider and the W3C propagator (internal/telemetry),
+	// set before the clients are built: otelaws captures the global provider when the S3 client
+	// is created, so a client built first would keep the provider of an earlier run (-count=N).
 	spans := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
 	prevTP, prevProp := otel.GetTracerProvider(), otel.GetTextMapPropagator()
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { otel.SetTracerProvider(prevTP); otel.SetTextMapPropagator(prevProp) })
+
+	store := NewS3Client(S3Config{Endpoint: kafkatest.SeaweedFS(t, "testkey", "testsecret"), Region: "us-east-1",
+		AccessKey: "testkey", SecretKey: "testsecret"})
+	createBucket(t, store, "round-logs")
 
 	kafka, err := NewKafkaClient([]string{brokers})
 	if err != nil {
