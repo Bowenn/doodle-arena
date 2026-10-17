@@ -15,6 +15,7 @@ type Metrics struct {
 	broadcastMS metric.Float64Histogram
 	guesses     metric.Int64Counter
 	reconnects  metric.Int64Counter
+	takeovers   metric.Int64Counter
 }
 
 // NewMetrics creates the instruments once per process.
@@ -39,8 +40,15 @@ func NewMetrics(m metric.Meter) (*Metrics, error) {
 		metric.WithDescription("Reconnects by result: resumed, snapshot or failed"), metric.WithUnit("{reconnect}")); err != nil {
 		return nil, err
 	}
+	if mt.takeovers, err = m.Int64Counter("game.room.takeovers",
+		metric.WithDescription("Rooms this server took over from another owner"), metric.WithUnit("{room}")); err != nil {
+		return nil, err
+	}
 	return &mt, nil
 }
+
+// Takeover counts a room this server restored from another owner's state.
+func (m *Metrics) Takeover(ctx context.Context) { m.takeovers.Add(ctx, 1) }
 
 // NoopMetrics records nothing (tests that don't look at metrics).
 func NoopMetrics() *Metrics {

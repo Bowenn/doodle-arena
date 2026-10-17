@@ -33,7 +33,7 @@ func (tb *table) collect() { tb.out = append(tb.out, tb.g.TakeOut()...) }
 func (tb *table) join(ids ...string) {
 	tb.t.Helper()
 	for _, id := range ids {
-		if err := tb.g.Join(tb.now, id, "Name "+id); err != nil {
+		if err := tb.g.Join(tb.now, id, "Name "+id, false); err != nil {
 			tb.t.Fatalf("join %s: %v", id, err)
 		}
 	}
@@ -311,11 +311,11 @@ func TestHostHandover(t *testing.T) {
 func TestSeatsAndReconnects(t *testing.T) {
 	tb := newTable(t, Settings{MaxPlayers: 2, Choose: 10 * time.Second, Draw: 80 * time.Second, WordOptions: 3})
 	tb.join("host", "b")
-	if err := tb.g.Join(tb.now, "c", "C"); !errors.Is(err, ErrRoomFull) {
+	if err := tb.g.Join(tb.now, "c", "C", false); !errors.Is(err, ErrRoomFull) {
 		t.Fatalf("err = %v, want ErrRoomFull", err)
 	}
 	tb.leave("b")
-	if err := tb.g.Join(tb.now, "c", "C"); !errors.Is(err, ErrRoomFull) {
+	if err := tb.g.Join(tb.now, "c", "C", false); !errors.Is(err, ErrRoomFull) {
 		t.Fatal("a disconnected player's seat was given away during the grace period")
 	}
 	tb.join("b") // reconnecting is always allowed

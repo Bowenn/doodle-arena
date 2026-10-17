@@ -20,6 +20,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 )
@@ -43,6 +44,9 @@ var (
 	ErrInvalid     = errors.New("invalid join ticket")
 	ErrReused      = errors.New("join ticket already used")
 	ErrUnavailable = errors.New("ticket store unavailable")
+	// ErrNotOwner means this server doesn't hold the room's lease (it moved): the client
+	// should ask the lobby where the room is now.
+	ErrNotOwner = errors.New("this server doesn't own the room")
 )
 
 // Ticket is a verified ticket.
@@ -177,19 +181,25 @@ type Redeemer interface {
 }
 
 // RedisRedeemer stores used ticket ids under the game server's own prefix
-// (room:{room_id}:ticket:{ticket_id}) with SET NX.
+// (room:{room_id}:ticket:{ticket_id}) with SET NX, only while this server holds the room's
+// lease: like every write to a room's keys, it is checked against the owner (ADR 0007).
 type RedisRedeemer struct {
-	rdb redis.UniversalClient
-	now func() time.Time
+	rdb      redis.UniversalClient
+	serverID string
+	now      func() time.Time
 }
 
-// NewRedisRedeemer returns a redeemer backed by Redis.
-func NewRedisRedeemer(rdb redis.UniversalClient, now func() time.Time) *RedisRedeemer {
-	return &RedisRedeemer{rdb: rdb, now: now}
+// NewRedisRedeemer returns a redeemer backed by Redis for the game server serverID.
+func NewRedisRedeemer(rdb redis.UniversalClient, serverID string, now func() time.Time) *RedisRedeemer {
+	return &RedisRedeemer{rdb: rdb, serverID: serverID, now: now}
 }
 
-// Key is the Redis key that marks a ticket as used.
-func Key(roomID, ticketID string) string { return "room:" + roomID + ":ticket:" + ticketID }
+var redeemScript = redis.NewScript(`
+local lease = redis.call('GET', KEYS[1])
+if not lease or string.sub(lease, 1, string.len(ARGV[1]) + 1) ~= ARGV[1] .. ':' then return -1 end
+if redis.call('SET', KEYS[2], '1', 'NX', 'PX', ARGV[2]) then return 1 end
+return 0
+`)
 
 // Redeem implements Redeemer. The record lives as long as the ticket could still verify
 // (exp plus the leeway), so a replay can never outlive it.
@@ -200,11 +210,14 @@ func (r *RedisRedeemer) Redeem(ctx context.Context, t Ticket) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	ok, err := r.rdb.SetNX(ctx, Key(t.RoomID, t.ID), 1, ttl).Result()
-	if err != nil {
+	res, err := redeemScript.Run(ctx, r.rdb, []string{roomstore.LeaseKey(t.RoomID), roomstore.TicketKey(t.RoomID, t.ID)},
+		r.serverID, ttl.Milliseconds()).Int()
+	switch {
+	case err != nil:
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
-	}
-	if !ok {
+	case res < 0:
+		return ErrNotOwner
+	case res == 0:
 		return ErrReused
 	}
 	return nil

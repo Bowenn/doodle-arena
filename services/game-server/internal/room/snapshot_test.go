@@ -84,7 +84,7 @@ func TestSnapshotPlusEventsRebuildsTheGame(t *testing.T) {
 				uid := users[act.IntN(len(users))]
 				switch n := act.IntN(100); {
 				case n < 6:
-					_ = r.g.Join(r.now, uid, "Name "+uid)
+					_ = r.g.Join(r.now, uid, "Name "+uid, act.IntN(2) == 0)
 				case n < 9:
 					r.g.Leave(r.now, uid)
 				case n < 12:
@@ -127,7 +127,7 @@ func TestSnapshotPlusEventsRebuildsTheGame(t *testing.T) {
 func TestRestoreGivesPlayersAGraceToComeBack(t *testing.T) {
 	r := newRecorder(t, 3)
 	for _, u := range []string{"p0", "p1", "p2"} {
-		_ = r.g.Join(r.now, u, u)
+		_ = r.g.Join(r.now, u, u, false)
 	}
 	r.g.Handle(r.now, "p0", protocol.Start{})
 	r.commit()
@@ -155,10 +155,10 @@ func TestRestoreGivesPlayersAGraceToComeBack(t *testing.T) {
 	if drawer == "p1" {
 		other = "p2"
 	}
-	if err := g.Join(took.Add(time.Second), drawer, drawer); err != nil {
+	if err := g.Join(took.Add(time.Second), drawer, drawer, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.Join(took.Add(time.Second), other, other); err != nil {
+	if err := g.Join(took.Add(time.Second), other, other, false); err != nil {
 		t.Fatal(err)
 	}
 	g.Advance(took.Add(TakeoverGrace))
@@ -175,7 +175,7 @@ func TestRestoreGivesPlayersAGraceToComeBack(t *testing.T) {
 func TestRestoreEndsTheMatchWhenNobodyComesBack(t *testing.T) {
 	r := newRecorder(t, 4)
 	for _, u := range []string{"p0", "p1"} {
-		_ = r.g.Join(r.now, u, u)
+		_ = r.g.Join(r.now, u, u, false)
 	}
 	r.g.Handle(r.now, "p0", protocol.Start{})
 	r.commit()
@@ -195,9 +195,9 @@ func TestRestoreEndsTheMatchWhenNobodyComesBack(t *testing.T) {
 
 func TestRestoreRejectsABrokenLog(t *testing.T) {
 	r := newRecorder(t, 5)
-	_ = r.g.Join(r.now, "p0", "p0")
+	_ = r.g.Join(r.now, "p0", "p0", false)
 	r.commit()
-	_ = r.g.Join(r.now, "p1", "p1")
+	_ = r.g.Join(r.now, "p1", "p1", false)
 	r.commit()
 	gap := []StoredEvent{r.events[len(r.events)-1]} // the earlier event is missing
 	if _, err := restore(r.snap, gap, rand.New(rand.NewPCG(1, 1))); err == nil || !strings.Contains(err.Error(), "gap") {
@@ -212,7 +212,7 @@ func TestRestoreRejectsABrokenLog(t *testing.T) {
 func TestRecentEvents(t *testing.T) {
 	r := newRecorder(t, 6)
 	for i := range 5 {
-		_ = r.g.Join(r.now, fmt.Sprint("p", i), "x")
+		_ = r.g.Join(r.now, fmt.Sprint("p", i), "x", false)
 	}
 	evs, ok := r.g.RecentEvents(2)
 	if !ok || len(evs) != int(r.g.Seq())-2 || evs[0].Seq != 3 {

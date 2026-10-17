@@ -231,7 +231,14 @@ func (g *Game) Connected() int {
 // Join adds a player or reconnects one. A player who is already connected (a second socket)
 // changes nothing; the actor swaps the socket. The joiner gets a welcome, then any private
 // state (word options or the word, if they are drawing).
-func (g *Game) Join(now time.Time, uid, name string) error {
+//
+// With resume, a member who reconnects gets no welcome: the actor replays the events it
+// missed, and this join's own events reach it like everyone else's.
+func (g *Game) Join(now time.Time, uid, name string, resume bool) error {
+	except := uid // a welcome already shows the joiner itself
+	if resume {
+		except = ""
+	}
 	p, ok := g.players[uid]
 	switch {
 	case ok && p.connected:
@@ -240,7 +247,7 @@ func (g *Game) Join(now time.Time, uid, name string) error {
 		p.connected = true
 		p.leftAt = time.Time{}
 		p.name = name
-		g.emitExcept(uid, "player_joined", map[string]any{"user_id": uid, "name": name})
+		g.emitExcept(except, "player_joined", map[string]any{"user_id": uid, "name": name})
 	default:
 		if len(g.players) >= g.settings.MaxPlayers {
 			return ErrRoomFull
@@ -251,12 +258,14 @@ func (g *Game) Join(now time.Time, uid, name string) error {
 		if g.phase.Playing() {
 			g.drawOrder = append(g.drawOrder, uid) // joins the queue of drawers
 		}
-		g.emitExcept(uid, "player_joined", map[string]any{"user_id": uid, "name": name})
+		g.emitExcept(except, "player_joined", map[string]any{"user_id": uid, "name": name})
 	}
 	g.empty = time.Time{}
 	g.fixHost()
-	g.out = append(g.out, Out{To: uid, Type: "welcome", Seq: g.seq,
-		Data: map[string]any{"user_id": uid, "view": g.ViewFor(uid), "seq": g.seq}})
+	if !resume {
+		g.out = append(g.out, Out{To: uid, Type: "welcome", Seq: g.seq,
+			Data: map[string]any{"user_id": uid, "view": g.ViewFor(uid), "seq": g.seq}})
+	}
 	g.sendPrivate(uid)
 	return nil
 }

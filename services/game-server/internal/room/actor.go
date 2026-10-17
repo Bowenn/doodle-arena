@@ -2,7 +2,9 @@ package room
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"sync/atomic"
@@ -55,6 +57,31 @@ func (noSink) MatchFinished(context.Context, FinishedMatch) {}
 // ErrClosed means the room has shut down.
 var ErrClosed = errors.New("room closed")
 
+// ErrMoved means another server took the room over (its lease and fencing token are newer):
+// this server must stop the room at once (ADR 0007).
+var ErrMoved = errors.New("room moved to another server")
+
+// Durable stores a room's events and snapshots for its owner (package roomstore). Every call
+// is checked against the owner's lease and fencing token: ErrMoved means the room is gone.
+type Durable interface {
+	Commit(ctx context.Context, events []StoredEvent, snap *Snapshot) error
+	Close(ctx context.Context) error
+}
+
+// Restored is the state a new owner rebuilds a room from.
+type Restored struct {
+	Snapshot Snapshot
+	Events   []StoredEvent
+}
+
+// maxReplay is the most events a resuming client gets replayed; further behind, it gets a
+// full welcome. It stays well below the socket's send queue (256), so a replay can't make a
+// client look slow.
+const maxReplay = 200
+
+// commitTimeout bounds one write to Redis; the room stops rather than wait longer.
+const commitTimeout = 2 * time.Second
+
 // Summary is what heartbeats report about a room.
 type Summary struct {
 	Players int
@@ -72,7 +99,9 @@ type Config struct {
 	Rand     *rand.Rand // nil: a random seed
 	Log      *slog.Logger
 	Metrics  *Metrics
-	Events   Sink // nil: finished rounds and matches go nowhere
+	Events   Sink    // nil: finished rounds and matches go nowhere
+	Durable  Durable // nil: the room lives only in memory (tests)
+	Restore  *Restored
 }
 
 // Inputs to the actor. Everything that touches a room goes through its inbox, in order.
@@ -88,8 +117,9 @@ type (
 		conn Conn
 		msg  protocol.ClientMsg
 	}
-	tickIn  struct{}
-	probeIn struct{ done chan struct{} }
+	tickIn   struct{}
+	probeIn  struct{ done chan struct{} }
+	fencedIn struct{} // the lease keeper found the lease taken over
 )
 
 // Room is one room's actor: a single goroutine owns the Game and every connection, so
@@ -110,10 +140,15 @@ type Room struct {
 	armedFor  time.Time
 	stopTimer func() bool
 	summary   atomic.Pointer[Summary]
+
+	durable     Durable
+	fresh       bool  // a new room: its first snapshot must be written before anything
+	lastSnapSeq int64 // seq of the latest snapshot written
+	moved       bool  // set by fencedIn
 }
 
-// New creates a room; start it with Run.
-func New(cfg Config) *Room {
+// New creates a room, or rebuilds one from cfg.Restore; start it with Run.
+func New(cfg Config) (*Room, error) {
 	rng := cfg.Rand
 	if rng == nil {
 		rng = rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
@@ -126,12 +161,31 @@ func New(cfg Config) *Room {
 	}
 	r := &Room{
 		id: cfg.ID, mode: cfg.Mode, inbox: make(chan any, 256), done: make(chan struct{}),
-		clock: cfg.Clock, game: NewGame(cfg.ID, cfg.HostID, cfg.Settings, rng, cfg.Clock.Now()),
-		log: cfg.Log.With("room_id", cfg.ID), metrics: cfg.Metrics, events: cfg.Events, tracer: otel.Tracer("game-server"),
-		conns: map[string]Conn{},
+		clock: cfg.Clock, log: cfg.Log.With("room_id", cfg.ID), metrics: cfg.Metrics, events: cfg.Events,
+		tracer: otel.Tracer("game-server"), conns: map[string]Conn{}, durable: cfg.Durable,
+	}
+	if cfg.Restore != nil {
+		g, err := RestoreGame(cfg.Restore.Snapshot, cfg.Restore.Events, rng, cfg.Clock.Now())
+		if err != nil {
+			return nil, err
+		}
+		r.game = g
+		r.lastSnapSeq = cfg.Restore.Snapshot.Seq
+	} else {
+		r.game = NewGame(cfg.ID, cfg.HostID, cfg.Settings, rng, cfg.Clock.Now())
+		r.fresh = true
 	}
 	r.summary.Store(&Summary{})
-	return r
+	return r, nil
+}
+
+// Fence tells the room that its lease was taken over. It never blocks: if the inbox is full,
+// the lease keeper finds the lease lost again on its next round.
+func (r *Room) Fence() {
+	select {
+	case r.inbox <- fencedIn{}:
+	default:
+	}
 }
 
 // ID is the room's id.
@@ -193,6 +247,14 @@ func (r *Room) Run(ctx context.Context) {
 		}
 		r.summary.Store(&Summary{Closed: true})
 	}()
+	if r.fresh && r.durable != nil {
+		// The base every later event applies to: without it a new owner couldn't rebuild.
+		snap := r.game.Snapshot()
+		if err := r.commit(ctx, nil, &snap); err != nil {
+			r.stop(err)
+			return
+		}
+	}
 	r.rearm()
 	for {
 		select {
@@ -205,14 +267,58 @@ func (r *Room) Run(ctx context.Context) {
 		case in := <-r.inbox:
 			r.dispatch(ctx, in)
 		}
-		r.flush(ctx)
+		if r.moved {
+			r.stop(ErrMoved)
+			return
+		}
+		if err := r.flush(ctx); err != nil {
+			r.stop(err)
+			return
+		}
 		r.publish()
 		if r.game.Closed() {
+			if r.durable != nil {
+				cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitTimeout)
+				if err := r.durable.Close(cctx); err != nil {
+					r.log.Warn("closed room not marked in Redis", "err", err)
+				}
+				cancel()
+			}
 			r.log.Info("room closed: empty")
 			return
 		}
 		r.rearm()
 	}
+}
+
+// stop ends the room after a failed write: another server took it (room_moved, 4010; clients
+// find it through the lobby), or Redis is unreachable (1011; the lobby restores the room once
+// it can). Nothing that wasn't stored was sent to anyone.
+func (r *Room) stop(err error) {
+	if errors.Is(err, ErrMoved) {
+		r.log.Warn("room taken over by another server: stopping", "match_id", r.game.MatchID())
+		for _, c := range r.conns {
+			c.Send(protocol.Marshal("room_moved", map[string]string{"reason": "takeover"}))
+			c.Close(protocol.CloseRoomMoved, "room moved")
+		}
+		return
+	}
+	r.log.Error("room store unavailable: stopping", "err", err)
+	for _, c := range r.conns {
+		c.Close(1011, "try again")
+	}
+}
+
+func (r *Room) commit(ctx context.Context, events []StoredEvent, snap *Snapshot) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitTimeout)
+	defer cancel()
+	if err := r.durable.Commit(ctx, events, snap); err != nil {
+		return err
+	}
+	if snap != nil {
+		r.lastSnapSeq = snap.Seq
+	}
+	return nil
 }
 
 func (r *Room) dispatch(ctx context.Context, in any) {
@@ -221,7 +327,16 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 	case joinIn:
 		uid := in.conn.UserID()
 		old := r.conns[uid]
-		if err := r.game.Join(now, uid, in.name); err != nil {
+		// A member who says what it saw last gets only what it missed (design doc, 7.4),
+		// if this room still holds those events; otherwise a full welcome.
+		var replay []protocol.Event
+		resume := false
+		if in.lastSeq > 0 && in.lastSeq <= r.game.Seq() && r.game.IsMember(uid) {
+			if evs, ok := r.game.RecentEvents(in.lastSeq); ok && len(evs) <= maxReplay {
+				replay, resume = evs, true
+			}
+		}
+		if err := r.game.Join(now, uid, in.name, resume); err != nil {
 			in.reply <- err
 			return
 		}
@@ -229,10 +344,18 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 			old.Close(protocol.CloseReplaced, "connected again elsewhere")
 		}
 		r.conns[uid] = in.conn
-		if in.lastSeq > 0 {
-			r.metrics.reconnect(ctx, "snapshot") // 2.2 always resends a full view
+		// The missed events go first; this step's own events follow in flush, in seq order.
+		for _, ev := range replay {
+			in.conn.Send(protocol.Marshal("event", ev))
 		}
-		r.log.Info("player joined", "user_id", uid, "replaced", old != nil && old != in.conn)
+		switch {
+		case resume:
+			r.metrics.reconnect(ctx, "resumed")
+		case in.lastSeq > 0:
+			r.metrics.reconnect(ctx, "snapshot")
+		}
+		r.log.Info("player joined", "user_id", uid, "replaced", old != nil && old != in.conn,
+			"resumed", resume, "replayed", len(replay))
 		in.reply <- nil
 	case leaveIn:
 		uid := in.conn.UserID()
@@ -254,17 +377,45 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 		r.game.Advance(now)
 	case probeIn:
 		close(in.done)
+	case fencedIn:
+		r.moved = true
 	}
 }
 
-// flush delivers what the game produced. Each shared event is marshalled once and queued to
-// every socket; a joiner skips events its welcome already covers.
-func (r *Room) flush(ctx context.Context) {
+// flush stores what the game produced, then delivers it (write, then broadcast: ADR 0007).
+// If the store refuses, nothing is sent: a client never sees an event a new owner can't
+// replay. Each shared event is marshalled once; a joiner skips events its welcome covers.
+func (r *Room) flush(ctx context.Context) error {
 	outs := r.game.TakeOut()
 	welcomed := map[string]int64{}
-	for _, o := range outs {
-		if o.Type == "welcome" {
+	now := r.clock.Now()
+	var stored []StoredEvent
+	phase := false
+	for i, o := range outs {
+		switch o.Type {
+		case "welcome":
 			welcomed[o.To] = o.Seq
+		case "event":
+			ev := o.Data.(protocol.Event)
+			data, err := json.Marshal(ev.Data)
+			if err != nil {
+				return fmt.Errorf("encode %s: %w", ev.Type, err)
+			}
+			ev.Data = json.RawMessage(data)
+			outs[i].Data = ev
+			stored = append(stored, StoredEvent{Seq: ev.Seq, Type: ev.Type, Data: data, At: now})
+			phase = phase || IsPhaseEvent(ev.Type)
+		}
+	}
+	if r.durable != nil && len(stored) > 0 {
+		var snap *Snapshot
+		if phase || r.game.Seq()-r.lastSnapSeq >= SnapshotEvery {
+			s := r.game.Snapshot()
+			snap = &s
+		}
+		if err := r.commit(ctx, stored, snap); err != nil {
+			r.game.TakeFinished() // never published: the next owner has the state
+			return err
 		}
 	}
 	for _, o := range outs {
@@ -292,6 +443,7 @@ func (r *Room) flush(ctx context.Context) {
 	for _, f := range r.game.TakeFinished() {
 		r.finish(f)
 	}
+	return nil
 }
 
 // lifecycle logs and traces matches and rounds (never single strokes or guesses).

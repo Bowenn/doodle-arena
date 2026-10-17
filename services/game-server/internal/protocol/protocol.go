@@ -25,6 +25,9 @@ const (
 	CloseNoRoom       = 4004
 	CloseHelloTimeout = 4008
 	CloseReplaced     = 4009 // the same user connected again
+	// CloseRoomMoved: the room isn't (or is no longer) on this server; the client asks the
+	// lobby where it is now and resumes there (ADR 0007).
+	CloseRoomMoved = 4010
 )
 
 // Client message types.

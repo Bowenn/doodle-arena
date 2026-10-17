@@ -43,8 +43,9 @@ const (
 
 // Errors.
 var (
-	// ErrFenced means another server took the room: this server must stop it.
-	ErrFenced = errors.New("room lease lost to another server")
+	// ErrFenced means another server took the room: this server must stop it. It is the
+	// room package's ErrMoved, so the actor recognizes it.
+	ErrFenced = room.ErrMoved
 	// ErrClosed means the room ended; it must not be restored.
 	ErrClosed = errors.New("room has ended")
 	// ErrUnavailable means Redis couldn't be reached or answered with an error.
@@ -252,3 +253,29 @@ func (s *Store) Close(ctx context.Context, roomID, serverID string, token int64)
 		LeaseValue(serverID, token), tombstoneTTL.Milliseconds()).Err()
 	return classify(err)
 }
+
+// Handle is one owner's access to one room: what the room's actor uses (room.Durable).
+type Handle struct {
+	store    *Store
+	roomID   string
+	serverID string
+	token    int64
+}
+
+// Handle binds a room to its owner and fencing token.
+func (s *Store) Handle(roomID, serverID string, token int64) *Handle {
+	return &Handle{store: s, roomID: roomID, serverID: serverID, token: token}
+}
+
+// Commit implements room.Durable.
+func (h *Handle) Commit(ctx context.Context, events []room.StoredEvent, snap *room.Snapshot) error {
+	return h.store.Commit(ctx, h.roomID, h.serverID, h.token, events, snap)
+}
+
+// Close implements room.Durable.
+func (h *Handle) Close(ctx context.Context) error {
+	return h.store.Close(ctx, h.roomID, h.serverID, h.token)
+}
+
+// Lease is what the owner renews.
+func (h *Handle) Lease() Lease { return Lease{RoomID: h.roomID, Token: h.token} }

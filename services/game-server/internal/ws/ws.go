@@ -30,7 +30,7 @@ const (
 	DefaultHelloTimeout = 10 * time.Second
 	idleTimeout         = 60 * time.Second // clients ping every 15 s
 	writeTimeout        = 10 * time.Second
-	sendQueue           = 128 // messages; a client this far behind is closed as slow
+	sendQueue           = 256 // messages; a client this far behind is closed as slow (> room's 200-event replay)
 	floodBurst          = 100 // messages per socket, before the per-player guess limit
 	floodPerSecond      = 50
 )
@@ -197,11 +197,16 @@ func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, l
 		log.WarnContext(ctx, "join ticket rejected", "reason", err.Error())
 		return nil, nil, protocol.CloseBadTicket, "invalid ticket"
 	}
+	// The lobby only signs tickets for rooms it has placed; if this server doesn't hold the
+	// room, it is moving (a takeover, or this server restarted): the client asks the lobby
+	// again. 4004 would make it give up.
 	rm := h.cfg.Rooms.Room(roomID)
 	if rm == nil {
-		return nil, nil, protocol.CloseNoRoom, "no such room"
+		return nil, nil, protocol.CloseRoomMoved, "room is not here; ask the lobby"
 	}
 	switch err := h.cfg.Redeemer.Redeem(ctx, t); {
+	case errors.Is(err, ticket.ErrNotOwner):
+		return nil, nil, protocol.CloseRoomMoved, "room moved; ask the lobby"
 	case errors.Is(err, ticket.ErrReused):
 		log.WarnContext(ctx, "join ticket reused", "user_id", t.UserID)
 		return nil, nil, protocol.CloseBadTicket, "ticket already used"
@@ -219,10 +224,10 @@ func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, l
 		pc.closeWith(protocol.CloseRoomFull, "room is full")
 		<-pc.writerDone
 		return nil, nil, protocol.CloseRoomFull, "room is full"
-	case err != nil:
-		pc.closeWith(protocol.CloseNoRoom, "no such room")
+	case err != nil: // the room just stopped (closed, or taken over)
+		pc.closeWith(protocol.CloseRoomMoved, "room moved; ask the lobby")
 		<-pc.writerDone
-		return nil, nil, protocol.CloseNoRoom, "no such room"
+		return nil, nil, protocol.CloseRoomMoved, "room moved; ask the lobby"
 	}
 	return pc, rm, 0, ""
 }
