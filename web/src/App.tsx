@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, loginUrl, logout, type Me } from './auth.ts'
+import { Lobby } from './Lobby.tsx'
+import { Room } from './room/Room.tsx'
 
 type View =
   | { kind: 'loading' }
@@ -7,8 +9,25 @@ type View =
   | { kind: 'signed-in'; me: Me }
   | { kind: 'error' }
 
+/** The room id in a /rooms/<id> path, or null for the lobby. */
+function roomFromPath(path: string): string | null {
+  return /^\/rooms\/([a-z0-9]{1,64})$/.exec(path)?.[1] ?? null
+}
+
 export default function App() {
   const [view, setView] = useState<View>({ kind: 'loading' })
+  const [path, setPath] = useState(() => window.location.pathname)
+
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  function go(to: string) {
+    window.history.pushState(null, '', to)
+    setPath(to)
+  }
 
   useEffect(() => {
     // StrictMode runs this twice in development; refresh() is single-flight, so it's safe.
@@ -32,10 +51,20 @@ export default function App() {
 
   if (view.kind === 'signed-in') {
     const { me } = view
+    const roomId = roomFromPath(path)
     return (
       <>
         <header className="topbar">
-          <strong>Doodle Arena</strong>
+          <a
+            href="/"
+            className="brand"
+            onClick={(e) => {
+              e.preventDefault()
+              go('/')
+            }}
+          >
+            Doodle Arena
+          </a>
           <span className="user">
             {me.avatar_url && (
               <img src={me.avatar_url} alt="" width={28} height={28} referrerPolicy="no-referrer" />
@@ -46,10 +75,11 @@ export default function App() {
             </button>
           </span>
         </header>
-        <main>
-          <h1>Doodle Arena</h1>
-          <p>Rooms arrive in Stage 2.</p>
-        </main>
+        {roomId ? (
+          <Room key={roomId} roomId={roomId} onLeave={() => go('/')} />
+        ) : (
+          <Lobby onEnter={(id) => go(`/rooms/${id}`)} />
+        )}
       </>
     )
   }
@@ -64,7 +94,7 @@ export default function App() {
       {view.kind === 'signed-out' && (
         <>
           {cancelled && <p role="status">Sign-in was cancelled.</p>}
-          <a className="button" href={loginUrl('/')}>
+          <a className="button" href={loginUrl(window.location.pathname)}>
             Sign in with Google
           </a>
         </>
