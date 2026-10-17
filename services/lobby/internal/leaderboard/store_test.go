@@ -46,7 +46,7 @@ func TestApplyCountsAMatchOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := scores(t, rdb, "2026-W42")
-	want := map[string]float64{"alice": 300, "bob": 170, "carol": 0}
+	want := map[string]float64{"alice": 300, "bob": 170} // carol scored 0: no entry
 	if len(got) != len(want) {
 		t.Fatalf("scores = %v, want %v", got, want)
 	}
@@ -54,6 +54,9 @@ func TestApplyCountsAMatchOnce(t *testing.T) {
 		if got[id] != v {
 			t.Errorf("%s = %v, want %v", id, got[id], v)
 		}
+	}
+	if b, err := s.Board(t.Context(), "2026-W42", 20, "carol"); err != nil || b.Me != nil {
+		t.Fatalf("carol's place = %+v (err %v), want none: she scored nothing", b.Me, err)
 	}
 }
 
