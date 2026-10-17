@@ -70,6 +70,13 @@ var roomIDPattern = regexp.MustCompile(`^[a-z0-9]{1,64}$`)
 // AllocateRoom starts a room. It is idempotent: the lobby retries on timeouts, so asking again
 // for a room this server already runs succeeds without creating a second one.
 func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomRequest) (*gamev1.AllocateRoomResponse, error) {
+	// A request meant for another instance arrives when the lobby's cached connection points
+	// at an IP address that now belongs to this server. Create nothing; the lobby redials.
+	if target := req.GetServerId(); target != "" && target != s.id {
+		s.log.WarnContext(ctx, "allocation meant for another server refused", "room_id", req.GetRoomId(),
+			"server_id", s.id, "target_server_id", target)
+		return nil, status.Errorf(codes.FailedPrecondition, "this is %s, not %s", s.id, target)
+	}
 	if !roomIDPattern.MatchString(req.GetRoomId()) {
 		return nil, status.Error(codes.InvalidArgument, "room_id must be 1-64 lowercase letters or digits")
 	}

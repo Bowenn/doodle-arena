@@ -111,3 +111,21 @@ func TestResolveSettings(t *testing.T) {
 		}
 	}
 }
+
+// A stale lobby connection can reach the wrong server; it must refuse and create nothing.
+func TestAllocateRoomRefusesAnotherServersRequest(t *testing.T) {
+	s := newServer(t, 10)
+	misrouted := req("r1")
+	misrouted.ServerId = "gs-2"
+	if _, err := s.AllocateRoom(t.Context(), misrouted); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("err = %v, want FailedPrecondition", err)
+	}
+	if s.Room("r1") != nil {
+		t.Fatal("a room was created for another server")
+	}
+	meant := req("r1")
+	meant.ServerId = "gs-1"
+	if _, err := s.AllocateRoom(t.Context(), meant); err != nil || s.Room("r1") == nil {
+		t.Fatalf("own request: err = %v", err)
+	}
+}
