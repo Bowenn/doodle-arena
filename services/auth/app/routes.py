@@ -1,4 +1,5 @@
 import logging
+import secrets
 import uuid
 from datetime import timedelta
 from typing import Annotated, Any
@@ -75,7 +76,8 @@ def google_callback(
         response = RedirectResponse(f"{settings.public_base_url}/?login_error=cancelled", 302)
         cookies.clear_oauth_cookie(response, settings)
         return response
-    if not code or not state or state != login.state:
+    # Constant time, as for any secret comparison (bytes: a non-ASCII str would raise).
+    if not code or not state or not secrets.compare_digest(state.encode(), login.state.encode()):
         log.warning("login failed", extra={"reason": "state_mismatch"})
         ctx.metrics.login("failed")
         raise ApiError(400, "OAUTH_STATE_INVALID", "login expired or was started elsewhere")
