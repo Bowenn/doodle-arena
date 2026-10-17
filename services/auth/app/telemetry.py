@@ -6,6 +6,8 @@ nothing is set up, so tests and CI never export anything.
 
 import os
 from collections.abc import Callable
+from typing import Any
+from urllib.parse import parse_qsl, quote
 
 from fastapi import FastAPI
 from opentelemetry import metrics, trace
@@ -25,6 +27,7 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import OTELResourceDetector, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.trace import Span
 
 from app import SERVICE_NAME
 from app.context import AuthContext
@@ -33,12 +36,39 @@ from app.settings import Settings
 # The gateway and Docker probe /healthz every few seconds; those spans would drown real traffic.
 EXCLUDED_URLS = "healthz"
 
+# What replaces every query value in a server span.
+REDACTED = "REDACTED"
+
 PROCESS_METRICS: dict[str, list[str] | None] = {
     "process.cpu.time": ["user", "system"],
     "process.memory.usage": None,
     "process.thread.count": None,
     "cpython.gc.collections": None,
 }
+
+
+def redact_query(query: str) -> str:
+    """Keeps the parameter names and replaces every value. The Google callback's query holds the
+    authorization code and state, which must never reach the trace backend; redacting every
+    value means no list of sensitive names to keep up to date."""
+    names = [name for name, _ in parse_qsl(query, keep_blank_values=True)]
+    return "&".join(f"{quote(name)}={REDACTED}" for name in names)
+
+
+def server_request_hook(span: Span, scope: dict[str, Any]) -> None:
+    """Runs after the ASGI instrumentation has set the request's attributes, so these win."""
+    raw = scope.get("query_string", b"")
+    if not raw or not span.is_recording():
+        return
+    query = raw.decode("latin-1")
+    redacted = redact_query(query)
+    span.set_attribute("url.query", redacted)
+    # The older semantic conventions put the query into these (OTEL_SEMCONV_STABILITY_OPT_IN).
+    old = getattr(span, "attributes", None) or {}
+    for key in ("http.target", "http.url"):
+        value = old.get(key)
+        if isinstance(value, str) and query in value:
+            span.set_attribute(key, value.replace(query, redacted))
 
 
 def enabled() -> bool:
@@ -85,7 +115,9 @@ def setup_telemetry(app: FastAPI, settings: Settings) -> Callable[[], None]:
     set_logger_provider(logger_provider)
 
     ctx: AuthContext = app.state.ctx
-    FastAPIInstrumentor.instrument_app(app, excluded_urls=EXCLUDED_URLS)
+    FastAPIInstrumentor.instrument_app(
+        app, excluded_urls=EXCLUDED_URLS, server_request_hook=server_request_hook
+    )
     # SQLAlchemy spans carry the statement and pool; psycopg spans the driver round trip.
     SQLAlchemyInstrumentor().instrument(engine=ctx.engine)
     PsycopgInstrumentor().instrument()
