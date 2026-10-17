@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetAuthForTests } from './auth.ts'
-import { createRoom, joinRoom, LobbyError } from './lobby.ts'
+import { createRoom, getLeaderboard, joinRoom, LobbyError } from './lobby.ts'
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -32,6 +32,19 @@ describe('lobby client', () => {
     expect(url).toBe('/api/lobby/rooms')
     expect(init.method).toBe('POST')
     expect(init.body).toBe('{"public":false}')
+  })
+
+  it('asks for the leaderboard of a week, or of the current one', async () => {
+    const board = { week: '2026-W41', entries: [], me: null }
+    fetchMock
+      .mockResolvedValueOnce(token())
+      .mockResolvedValueOnce(json(200, board))
+      .mockResolvedValueOnce(json(200, board))
+
+    expect(await getLeaderboard('2026-W41', 50)).toEqual(board)
+    await getLeaderboard()
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/lobby/leaderboard?week=2026-W41&limit=50')
+    expect(fetchMock.mock.calls[2][0]).toBe('/api/lobby/leaderboard?limit=20')
   })
 
   it('turns the error shape into a LobbyError with its code', async () => {

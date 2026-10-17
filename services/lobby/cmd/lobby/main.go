@@ -1,5 +1,5 @@
-// Command lobby runs the lobby service: rooms, the game-server registry, room allocation and
-// join tickets (design doc, section 4.3).
+// Command lobby runs the lobby service: rooms, the game-server registry, room allocation,
+// join tickets and the weekly leaderboard (design doc, section 4.3).
 package main
 
 import (
@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/authn"
+	"github.com/Bowenn/gap-project_private/services/lobby/internal/leaderboard"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/registry"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/rooms"
@@ -43,6 +45,7 @@ type config struct {
 	jwksURL    string
 	jwtIssuer  string
 	ticketPath string
+	kafka      []string
 }
 
 func loadConfig() config {
@@ -58,6 +61,7 @@ func loadConfig() config {
 		jwksURL:    envOr("AUTH_JWKS_URL", "http://localhost:8081/api/auth/.well-known/jwks.json"),
 		jwtIssuer:  envOr("JWT_ISSUER", "http://localhost:8080/api/auth"),
 		ticketPath: os.Getenv("TICKET_PRIVATE_KEY_PATH"),
+		kafka:      strings.Split(envOr("KAFKA_BROKERS", "localhost:9094"), ","),
 	}
 }
 
@@ -126,6 +130,11 @@ func run(cfg config, logger *slog.Logger) error {
 	if err := registerServerGauge(reg); err != nil {
 		return err
 	}
+	board := leaderboard.NewStore(rdb)
+	consumer, err := leaderboard.NewConsumer(cfg.kafka, board, logger)
+	if err != nil {
+		return err
+	}
 
 	verifier := authn.NewVerifier(cfg.jwtIssuer, authn.NewJWKS(cfg.jwksURL,
 		&http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}, 30*time.Second))
@@ -133,7 +142,7 @@ func run(cfg config, logger *slog.Logger) error {
 		Addr: ":" + cfg.port,
 		Handler: server.NewHandler(
 			server.Info{Service: serviceName, Version: cfg.version, Instance: cfg.instance},
-			server.Deps{Verifier: verifier, Rooms: svc, Log: logger},
+			server.Deps{Verifier: verifier, Rooms: svc, Leaderboard: board, Log: logger},
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
@@ -151,6 +160,13 @@ func run(cfg config, logger *slog.Logger) error {
 	reassignDone := make(chan struct{})
 	go func() { svc.RunReassigner(reassignCtx, rdb, cfg.instance); close(reassignDone) }()
 	defer func() { stopReassign(); <-reassignDone }()
+
+	// Counts finished matches on the leaderboard. On shutdown it commits what it applied and
+	// leaves the consumer group, so another lobby takes over its partitions at once.
+	consumeCtx, stopConsumer := context.WithCancel(context.Background())
+	consumerDone := make(chan struct{})
+	go func() { consumer.Run(consumeCtx); close(consumerDone) }()
+	defer func() { stopConsumer(); <-consumerDone }()
 
 	serveErr := make(chan error, 2)
 	go func() {
