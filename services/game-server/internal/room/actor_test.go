@@ -206,36 +206,63 @@ func (h *harness) advance(d time.Duration) {
 // startDrawing starts a match and has the first drawer choose; it returns drawer and word.
 func (h *harness) startDrawing(host string) (string, string) {
 	h.t.Helper()
+	drawers, word := h.startDrawingAll(host)
+	return drawers[0], word
+}
+
+// startDrawingAll is startDrawing for rooms that may have two drawers: it returns all of them.
+func (h *harness) startDrawingAll(host string) ([]string, string) {
+	h.t.Helper()
 	h.input(host, protocol.Start{})
 	h.advance(StartingFor)
-	ch := h.conns[host].events("choosing")
+	drawers := h.drawerIDs(host, "choosing")
+	h.input(drawers[0], protocol.ChooseWord{Index: 0})
+	h.sync()
+	return drawers, h.word(drawers[0])
+}
+
+// drawerIDs reads drawer_ids from the latest event of a type that uid received.
+func (h *harness) drawerIDs(uid, typ string) []string {
+	h.t.Helper()
+	evs := h.conns[uid].events(typ)
+	if len(evs) == 0 {
+		h.t.Fatalf("%s got no %s", uid, typ)
+	}
 	var c struct {
 		DrawerIDs []string `json:"drawer_ids"`
 	}
-	_ = json.Unmarshal(ch[len(ch)-1].Data.(json.RawMessage), &c)
-	drawer := c.DrawerIDs[0]
-	h.input(drawer, protocol.ChooseWord{Index: 0})
-	h.sync()
-	yw := h.conns[drawer].private("your_word")
+	_ = json.Unmarshal(evs[len(evs)-1].Data.(json.RawMessage), &c)
+	return c.DrawerIDs
+}
+
+// word is the latest your_word uid received, or "".
+func (h *harness) word(uid string) string {
+	yw := h.conns[uid].private("your_word")
+	if len(yw) == 0 {
+		return ""
+	}
 	var w struct {
 		Word string `json:"word"`
 	}
 	_ = json.Unmarshal(yw[len(yw)-1], &w)
-	return drawer, w.Word
+	return w.Word
 }
 
 // M2 exit criterion: with concurrent correct guesses, exactly one is first, and every
-// client sees the same order.
+// client sees the same order. With 8 players, two of them draw.
 func TestConcurrentCorrectGuessesOneFirst(t *testing.T) {
 	h := newHarness(t, "u0", DefaultSettings, nil)
 	for i := range 8 {
 		h.join(fmt.Sprintf("u%d", i))
 	}
-	drawer, word := h.startDrawing("u0")
+	drawers, word := h.startDrawingAll("u0")
+	if len(drawers) != 2 {
+		t.Fatalf("drawers = %v, want a pair", drawers)
+	}
 
 	var guessers []string
 	for uid := range h.conns {
-		if uid != drawer {
+		if !slices.Contains(drawers, uid) {
 			guessers = append(guessers, uid)
 		}
 	}
@@ -271,8 +298,8 @@ func TestConcurrentCorrectGuessesOneFirst(t *testing.T) {
 			t.Fatalf("%s saw %v, others saw %v", uid, seen, reference)
 		}
 	}
-	if len(reference) != 7 {
-		t.Fatalf("correct guesses = %d, want 7", len(reference))
+	if len(reference) != 6 {
+		t.Fatalf("correct guesses = %d, want 6", len(reference))
 	}
 	firsts := 0
 	for i, cg := range reference {
@@ -286,8 +313,9 @@ func TestConcurrentCorrectGuessesOneFirst(t *testing.T) {
 	if firsts != 1 {
 		t.Fatalf("%d guessers were first", firsts)
 	}
-	// Everyone guessed, so the round ended, with the scores of the formula.
-	ended := h.conns[drawer].events("round_ended")
+	// Everyone guessed, so the round ended, with the scores of the formula: each drawer gets
+	// 10 points per correct guesser.
+	ended := h.conns[drawers[0]].events("round_ended")
 	if len(ended) != 1 {
 		t.Fatal("round didn't end once everyone guessed")
 	}
@@ -295,7 +323,8 @@ func TestConcurrentCorrectGuessesOneFirst(t *testing.T) {
 		RoundPoints map[string]int `json:"round_points"`
 	}
 	_ = json.Unmarshal(ended[0].Data.(json.RawMessage), &re)
-	if re.RoundPoints[drawer] != 70 || re.RoundPoints[reference[0].UserID] != 100 || re.RoundPoints[reference[6].UserID] != 20 {
+	if re.RoundPoints[drawers[0]] != 60 || re.RoundPoints[drawers[1]] != 60 ||
+		re.RoundPoints[reference[0].UserID] != 100 || re.RoundPoints[reference[5].UserID] != 25 {
 		t.Fatalf("round points = %v", re.RoundPoints)
 	}
 }
@@ -333,14 +362,15 @@ func containsWord(raw []byte, word string) bool {
 }
 
 // M2 exit criterion: guessers never receive the word before the round ends — not by a
-// late join, a reconnect, a chat that contains it, or the hints.
+// late join, a reconnect, a chat that contains it, or the hints. Four players and a late
+// joiner make a 5-player match with two rounds of two drawers, then one with a single drawer.
 func TestGuessersNeverSeeWordBeforeRoundEnded(t *testing.T) {
 	h := newHarness(t, "a", DefaultSettings, nil)
-	h.join("a")
-	h.join("b")
-	h.join("c")
 	// Every connection a guesser ever had, so replaced sockets are checked too.
-	history := map[string][]*fakeConn{"a": {h.conns["a"]}, "b": {h.conns["b"]}, "c": {h.conns["c"]}}
+	history := map[string][]*fakeConn{}
+	for _, uid := range []string{"a", "b", "c", "d"} {
+		history[uid] = []*fakeConn{h.join(uid)}
+	}
 
 	h.input("a", protocol.Start{})
 	h.advance(StartingFor)
@@ -351,33 +381,35 @@ func TestGuessersNeverSeeWordBeforeRoundEnded(t *testing.T) {
 				marks[c] = len(c.all())
 			}
 		}
-		var ch struct {
-			DrawerIDs []string `json:"drawer_ids"`
+		drawers := h.drawerIDs("a", "choosing")
+		if want := []int{2, 2, 1}[min(round, 3)-1]; len(drawers) != want {
+			t.Fatalf("round %d: drawers = %v, want %d", round, drawers, want)
 		}
-		evs := h.conns["a"].events("choosing")
-		_ = json.Unmarshal(evs[len(evs)-1].Data.(json.RawMessage), &ch)
-		drawer := ch.DrawerIDs[0]
-		h.input(drawer, protocol.ChooseWord{Index: 1})
+		h.input(drawers[0], protocol.ChooseWord{Index: 1})
 		h.sync()
-		yw := h.conns[drawer].private("your_word")
 		var w struct{ Word string }
-		_ = json.Unmarshal(yw[len(yw)-1], &w)
+		w.Word = h.word(drawers[0])
 		if w.Word == "" {
 			t.Fatalf("round %d: drawer got no word", round)
+		}
+		for _, d := range drawers {
+			if h.word(d) != w.Word {
+				t.Fatalf("round %d: drawer %s got %q, want %q", round, d, h.word(d), w.Word)
+			}
 		}
 
 		var guessers []string
 		for uid := range h.conns {
-			if uid != drawer {
+			if !slices.Contains(drawers, uid) {
 				guessers = append(guessers, uid)
 			}
 		}
 		g1, g2 := guessers[0], guessers[1]
 		h.input(g1, protocol.Guess{Text: "is it " + strings.ToUpper(w.Word) + "s?"}) // contains the word
 		if round == 1 {
-			d := h.join("d") // late joiner mid-round
-			history["d"] = []*fakeConn{d}
-			marks[d] = 0
+			e := h.join("e") // late joiner mid-round
+			history["e"] = []*fakeConn{e}
+			marks[e] = 0
 		}
 		reconnected := h.join(g2) // the same guesser on a new socket mid-round
 		history[g2] = append(history[g2], reconnected)
@@ -386,7 +418,7 @@ func TestGuessersNeverSeeWordBeforeRoundEnded(t *testing.T) {
 		h.advance(DefaultSettings.Draw)            // time is up
 
 		for uid, cs := range history {
-			if uid == drawer {
+			if slices.Contains(drawers, uid) {
 				continue
 			}
 			for _, c := range cs {
@@ -406,8 +438,8 @@ func TestGuessersNeverSeeWordBeforeRoundEnded(t *testing.T) {
 		}
 		h.advance(RevealFor)
 		if len(h.conns["a"].events("match_ended")) > 0 {
-			if round != 4 {
-				t.Fatalf("match ended after %d rounds, want 4 (a, b, c and the late joiner d)", round)
+			if round != 3 {
+				t.Fatalf("match ended after %d rounds, want 3 (a+b, c+d, then the late joiner e)", round)
 			}
 			return
 		}
