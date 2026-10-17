@@ -13,6 +13,11 @@ COPY pyproject.toml uv.lock .python-version ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
 COPY manage.py gunicorn.conf.py ./
 COPY config ./config
+COPY drawings ./drawings
+COPY sso ./sso
+# The admin's CSS and JS, served by WhiteNoise (settings.STATIC_ROOT). Settings need a secret
+# key to load; this one only exists during the build.
+RUN DJANGO_SECRET_KEY=collectstatic-only python manage.py collectstatic --noinput --verbosity 0
 
 # gunicorn keeps its control socket in the home directory, so the user needs one.
 RUN useradd --system --create-home --uid 10001 app

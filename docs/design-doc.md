@@ -146,6 +146,24 @@ Consumes `RoundFinished` and runs a Celery pipeline for each drawing:
 
 Processing is idempotent: a unique `(match_id, round_no)` constraint stops a replayed `RoundFinished` from creating a second drawing.
 
+Processes (one image): gunicorn serves the REST API and the admin; `assets-worker` runs Celery with Redis logical database 1 as its broker; `assets-migrate` applies the Django migrations before either starts. Celery tasks are acknowledged after they finish and redelivered when their worker dies (`acks_late`, `reject_on_worker_lost`, prefetch 1), so every task runs at least once and must be idempotent. There is no result backend: a drawing's state lives in Postgres.
+
+A drawing's `id` is a UUIDv7: random, so it can't be guessed, and time-ordered, so new rows land at the end of the primary-key index and the gallery can page by id. Its `status` is the only state machine:
+
+```mermaid
+stateDiagram-v2
+  [*] --> processing: RoundFinished
+  processing --> approved: AI approves
+  processing --> rejected: AI rejects
+  processing --> review: AI fails after the last attempt
+  review --> approved: moderator
+  review --> rejected: moderator
+```
+
+Progress inside `processing` is the pipeline's own columns (`replay_id`, `sha256`, the image keys), each filled once, so a redelivered task skips the steps already done. Every status change is one conditional `UPDATE ... WHERE status IN (...)` (`drawings/moderation.py`): under READ COMMITTED, of two concurrent decisions exactly one changes the row. The AI decides only from `processing` and a moderator only from `review`, so a late AI answer can't overrule the queue. Check constraints make a decided drawing always name who decided and when.
+
+Moderators sign in to the admin with Google (ADR 0001): `/admin/login/` sends the browser to the web app's `/moderate`, which calls `POST /admin/sso/` once with its access token. Role `moderator` makes a staff user in the `moderators` group (view drawings, approve or reject in the queue); `admin` makes a superuser. Drawings are read-only in the admin.
+
 The service also serves drawing metadata, presigned image URLs and replays over REST. Django admin is the moderation console. In Stage 6 it indexes drawings and active listings (from `market.listings.v1`) into Elasticsearch.
 
 Drawing metadata lives in Postgres because Django's ORM and admin are built for SQL databases. MongoDB holds the replays: large, write-once documents that are always read whole and whose stroke format may change over time.
@@ -205,7 +223,7 @@ The room client (task 2.3):
 | PostgreSQL | `notifier` | Endpoints and deliveries | notifier |
 | Redis | `room:*` | Room event streams, snapshots, leases, fencing counters | game-server |
 | Redis | `lobby:*` | Rooms, game-server registry, leaderboards | lobby |
-| Redis | Separate logical database | Celery broker and results | assets |
+| Redis | Logical database 1 | Celery broker (no result backend) | assets |
 | MongoDB | `assets.replays` | Stroke logs for replays | assets |
 | Object storage | `round-logs` bucket | Raw round stroke logs; a lifecycle rule deletes them after 7 days | game-server |
 | Object storage | `drawings` bucket | PNGs and thumbnails, content-addressed | assets |
@@ -277,7 +295,7 @@ Assets:
 - `GET /api/assets/drawings/{id}`, `GET /api/assets/drawings?author_id=...`
 - `GET /api/assets/drawings/{id}/replay`
 - `GET /api/assets/search?q=...` (Stage 6)
-- `/admin/`: Django admin for moderators
+- `/admin/`: Django admin for moderators. `/admin/login/` redirects to the web app's `/moderate`, which signs in through `GET /admin/sso/` (returns `{csrf_token}`) and `POST /admin/sso/?next=<admin page>` with the access token in `Authorization` and the CSRF token in `X-CSRFToken` (returns `{next}`; `401 UNAUTHENTICATED` for a missing or invalid token, `403 FORBIDDEN` without the `moderator` or `admin` role)
 
 Marketplace:
 

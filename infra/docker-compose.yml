@@ -34,6 +34,22 @@ x-game-events-env: &game-events-env
   S3_SECRET_KEY: ${S3_SECRET_KEY:?}
   ROUND_LOGS_BUCKET: round-logs
 
+# The assets database, broker and token verification, shared by the web process, the worker and
+# the migrate job.
+x-assets-env: &assets-env
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?}
+  DB_HOST: postgres
+  DB_NAME: assets
+  DB_USER: assets
+  DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
+  # Redis logical database 1 belongs to assets' Celery (design doc, section 5).
+  CELERY_BROKER_URL: redis://redis:6379/1
+  # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
+  AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
+  JWT_ISSUER: http://localhost:8080/api/auth
+  # The browser-facing origin, for Django's CSRF Origin check behind the gateway.
+  PUBLIC_BASE_URL: http://localhost:8080
+
 # Go services check their own /healthz (their runtime image has no shell).
 x-go-healthcheck: &go-healthcheck
   test: ["CMD", "/app", "healthcheck"]
@@ -217,27 +233,68 @@ services:
         condition: service_healthy
     healthcheck: *py-healthcheck
 
+  # One-shot job: applies the assets database migrations, then exits. The web process and the
+  # worker start only after it succeeds.
+  assets-migrate:
+    build: ../services/assets
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment:
+      <<: [*app-env, *assets-env]
+      SERVICE_INSTANCE_ID: assets-migrate
+      OTEL_SERVICE_NAME: assets
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # gunicorn: the REST API and the Django admin (the moderation console).
   assets:
     <<: *app
     build: ../services/assets
     environment:
-      <<: *app-env
+      <<: [*app-env, *assets-env]
       SERVICE_INSTANCE_ID: assets-1
       OTEL_SERVICE_NAME: assets
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?}
-      DB_HOST: postgres
-      DB_NAME: assets
-      DB_USER: assets
-      DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
     depends_on:
       otel-lgtm:
+        condition: service_healthy
+      assets-migrate:
+        condition: service_completed_successfully
+      redis:
         condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully
       seaweedfs-buckets:
         condition: service_completed_successfully
     healthcheck: *py-healthcheck
+
+  # The Celery worker: the drawing pipeline (design doc 4.5). Same image, same settings.
+  assets-worker:
+    <<: *app
+    build: ../services/assets
+    command: ["celery", "-A", "config", "worker", "--hostname", "worker@%h", "--concurrency", "2"]
+    environment:
+      <<: [*app-env, *assets-env]
+      SERVICE_INSTANCE_ID: assets-worker-1
+      OTEL_SERVICE_NAME: assets
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-worker-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
+      assets-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    # SIGTERM is a warm shutdown: the worker finishes its current tasks first.
+    stop_grace_period: 30s
+    healthcheck:
+      # The worker answers a broadcast ping over the broker. Loading Django takes a second or two.
+      test: ["CMD-SHELL", "celery -A config inspect ping --destination worker@$$HOSTNAME --timeout 5 >/dev/null"]
+      interval: 15s
+      timeout: 15s
+      start_period: 20s
+      retries: 5
 
   # ----------------------------------------------------------- Java services
 

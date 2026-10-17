@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - services/assets/**
+      - fixtures/jwt/**
       - .github/workflows/assets.yml
       - .github/workflows/_python.yml
       - scripts/test.sh
@@ -15,6 +16,7 @@ on:
     branches: [master]
     paths:
       - services/assets/**
+      - fixtures/jwt/**
       - .github/workflows/assets.yml
       - .github/workflows/_python.yml
       - scripts/test.sh

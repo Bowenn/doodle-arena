@@ -178,6 +178,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 
 ## Stage 3: Drawing lifecycle
 
+### 3.1 Assets skeleton
+
+- **One conditional UPDATE is the whole concurrency story.** Every status change is `UPDATE ... WHERE id = ? AND status IN (allowed)`, and the caller looks at the row count. Under READ COMMITTED, a second writer waits for the first to commit, then re-checks its WHERE clause against the new row, so of eight moderators clicking at once exactly one wins (a test proves it with eight connections and a barrier). No `SELECT ... FOR UPDATE`, no read-then-write window. The same call makes a redelivered Celery task a no-op.
+- **Who may decide from where is part of the state machine.** The AI decides only from `processing`, and a moderator only from `review`. Once a drawing has gone to the queue, a late AI answer (a retry that timed out but actually succeeded) can't overrule it. Check constraints back it up: a decided drawing always says who decided and when, so a buggy code path fails loudly in Postgres.
+- **UUIDv7 over UUIDv4 or a deterministic id.** v7 is still random enough that ids can't be guessed, but time-ordered, so inserts append to the B-tree instead of splitting random pages, and the gallery can page by id. A UUIDv5 of `(match_id, round_no)` would make replays map to the same id for free, but the `UNIQUE(match_id, round_no)` constraint already gives idempotency, and derivable ids leak structure.
+- **At-least-once tasks, on purpose.** `acks_late` plus `reject_on_worker_lost` plus prefetch 1 means a task whose worker dies is redelivered rather than lost; the price is that every task must be idempotent. There is no result backend, because the drawing's state lives in Postgres, and Redis' `visibility_timeout` must exceed the longest task and retry countdown, or the broker delivers it twice.
+- **Bridging an SPA's token into a server-rendered admin.** The browser can't attach a bearer token to a navigation, so the web app calls `POST /admin/sso/` once with the token in the `Authorization` header and gets a one-hour, `/admin/`-scoped, HttpOnly session. CSRF stays on: `GET /admin/sso/` hands out the token (another origin can't read it). The first live run failed: nginx forwards `Host` without the port, so Django's Origin check refused `http://localhost:8080`. The fix trusts the public origin explicitly instead of rewriting `Host` for every service.
+
 ## Stage 4: Economy
 
 ## Stage 5: Production readiness

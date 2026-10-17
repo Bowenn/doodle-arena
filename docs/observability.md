@@ -32,7 +32,7 @@ Configuration is the standard `OTEL_*` environment, set once in `infra/docker-co
 | Service | How | Logs to Loki |
 |---|---|---|
 | Go (lobby, game-server, notifier) | `internal/telemetry` (SDK with OTLP exporters, Go runtime metrics), `otelhttp` around the handlers | `slog` fans out to the JSON handler and the `otelslog` bridge |
-| Python (auth, ai, assets) | `telemetry.py` (SDK plus the FastAPI or Django, SQLAlchemy, psycopg and httpx instrumentations). Called at startup, or in gunicorn's `post_fork` for assets. Not `opentelemetry-instrument`, because the services' own logging config replaces root handlers and gunicorn forks after the agent starts its threads | an OTLP handler next to stdout in the logging config |
+| Python (auth, ai, assets) | `telemetry.py` (SDK plus the FastAPI or Django, SQLAlchemy, psycopg and httpx instrumentations). Called at startup, or in gunicorn's `post_fork` and Celery's `worker_process_init` for assets (the Celery instrumentation carries trace context from the sender to the task). Not `opentelemetry-instrument`, because the services' own logging config replaces root handlers and gunicorn forks after the agent starts its threads | an OTLP handler next to stdout in the logging config |
 | Java (marketplace) | OpenTelemetry Java agent, pinned and checksum-verified in the Dockerfile | the agent exports logback records; trace ids come from the MDC |
 | Gateway (Nginx) | `ngx_otel_module`: a server span per proxied API request, propagated upstream | no: its JSON access log (with `trace_id`) stays in stdout |
 
@@ -90,7 +90,8 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `lobby.servers.healthy` | Gauge | – (game servers whose heartbeat arrived in the last 6 s, draining ones included) | lobby |
 | `lobby.leaderboard.matches` | Counter | `result` = applied, duplicate (the match was counted before: a redelivery), skipped (an unset or unknown `oneof` case, or a malformed message) | lobby |
 | `assets.pipeline.duration` | Histogram (ms) | `step` = fetch, render, upload, moderate | assets |
-| `assets.jobs.oldest_age` | Gauge (s) | `queue` | assets |
+| `assets.jobs.oldest_age` | Gauge (s) | `queue` | assets (pool process 0 of each worker; from a `sent_at` header on every task message, 0 when the queue is empty; a missing series means no worker is running) |
+| `assets.admin.sign_ins` | Counter | `result` = ok, forbidden, unauthenticated | assets |
 | `assets.moderation` | Counter | `result` = approved, rejected, retry, manual | assets |
 | `market.purchases` | Counter | `result` = success, conflict, insufficient_funds | marketplace |
 | `market.idempotency.replays` | Counter | `operation` | marketplace |
@@ -145,6 +146,7 @@ Starting rules (tune the thresholds after the first load test):
 | SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
 | HighErrorRate | Server errors above 1% of requests for 5 minutes, per service | warning |
 | ConsumerLagGrowing | Kafka lag growing for 10 minutes for any consumer group | warning |
+| JobsBacklog | `assets.jobs.oldest_age` above 300 s for 5 minutes, or the series missing for 5 minutes (no worker) | warning |
 | DeadLetters | `notifier.dlq.size > 0` | warning |
 | StripeSignatureFailures | More than 5 invalid signatures in 10 minutes (a wrong secret or forged requests) | warning |
 | RefreshTokenReuse | `auth.refreshes{result=reuse_detected}` above its usual rate for 10 minutes (stolen tokens, or a client that refreshes concurrently) | warning |
