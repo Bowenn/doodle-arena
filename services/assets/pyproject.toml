@@ -4,25 +4,35 @@ version = "0.1.0"
 description = "Doodle Arena assets service: render, store, moderate and list drawings; replays"
 requires-python = "==3.14.*"
 dependencies = [
+    "boto3>=1.43.114",
     "celery[redis]>=5.6.3",
+    "confluent-kafka>=2.16.0",
     "django>=6.1.2",
+    "doodle-proto",
     "gunicorn>=26.2.0",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
+    "opentelemetry-instrumentation-botocore>=0.66b1",
     "opentelemetry-instrumentation-celery>=0.66b1",
     "opentelemetry-instrumentation-django>=0.66b1",
     "opentelemetry-instrumentation-logging>=0.66b1",
     "opentelemetry-instrumentation-psycopg>=0.66b1",
+    "opentelemetry-instrumentation-pymongo>=0.66b1",
     "opentelemetry-instrumentation-system-metrics>=0.66b1",
     "opentelemetry-sdk>=1.45.1",
+    "pillow>=13.0.0",
     "psycopg[binary]>=3.3.6",
     "pydantic-settings>=2.16.0",
     "pyjwt[crypto]>=2.15.1",
+    "pymongo>=4.19.0",
     "whitenoise>=6.12.0",
 ]
 
 [tool.uv]
 required-version = ">=0.13"
 package = false
+
+[tool.uv.sources]
+doodle-proto = { path = "../../proto/gen/python", editable = true }
 
 [tool.ruff]
 line-length = 100
@@ -56,11 +66,12 @@ DJANGO_SETTINGS_MODULE = "config.test_settings"
 
 [dependency-groups]
 dev = [
+    "boto3-stubs[s3]>=1.43.114",
     "celery-types>=0.26.0",
     "django-stubs>=6.1.2",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "pytest-django>=4.14.0",
     "ruff>=0.17.1",
-    "testcontainers[postgres,redis]>=4.15.0",
+    "testcontainers[kafka,mongodb,postgres,redis]>=4.15.0",
 ]

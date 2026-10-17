@@ -38,6 +38,17 @@ def send_to_review(drawing_id: uuid.UUID, reason: str = "") -> bool:
     return changed == 1
 
 
+def fail(drawing_id: uuid.UUID, reason: str) -> bool:
+    """Marks a drawing the pipeline can never build (a permanent error, not an outage). False if
+    it had already left processing."""
+    changed = Drawing.objects.filter(pk=drawing_id, status=Status.PROCESSING).update(
+        status=Status.FAILED, decision_reason=reason[:500], updated_at=timezone.now()
+    )
+    if changed:
+        log.error("drawing failed", extra={"drawing_id": str(drawing_id), "reason": reason})
+    return changed == 1
+
+
 def decide(
     drawing_id: uuid.UUID,
     *,

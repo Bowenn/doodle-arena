@@ -236,7 +236,9 @@ services:
   # One-shot job: applies the assets database migrations, then exits. The web process and the
   # worker start only after it succeeds.
   assets-migrate:
-    build: ../services/assets
+    build:
+      context: ..
+      dockerfile: services/assets/Dockerfile
     command: ["python", "manage.py", "migrate", "--noinput"]
     environment:
       <<: [*app-env, *assets-env]
@@ -250,7 +252,9 @@ services:
   # gunicorn: the REST API and the Django admin (the moderation console).
   assets:
     <<: *app
-    build: ../services/assets
+    build:
+      context: ..
+      dockerfile: services/assets/Dockerfile
     environment:
       <<: [*app-env, *assets-env]
       SERVICE_INSTANCE_ID: assets-1
@@ -272,7 +276,9 @@ services:
   # The Celery worker: the drawing pipeline (design doc 4.5). Same image, same settings.
   assets-worker:
     <<: *app
-    build: ../services/assets
+    build:
+      context: ..
+      dockerfile: services/assets/Dockerfile
     command: ["celery", "-A", "config", "worker", "--hostname", "worker@%h", "--concurrency", "2"]
     environment:
       <<: [*app-env, *assets-env]

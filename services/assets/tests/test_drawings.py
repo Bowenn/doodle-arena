@@ -151,3 +151,17 @@ def test_migrations_match_the_models() -> None:
     from django.core.management import call_command
 
     call_command("makemigrations", "--check", "--dry-run", verbosity=0)
+
+
+def test_fail_only_from_processing(make_drawing: Any) -> None:
+    drawing = make_drawing()
+
+    assert moderation.fail(drawing.id, "stroke log not found: m_1/1.binpb.gz")
+    assert not moderation.fail(drawing.id, "again")
+    assert not moderation.decide(drawing.id, approve=True, by=DecidedBy.AI)
+    assert not moderation.send_to_review(drawing.id)
+
+    drawing.refresh_from_db()
+    assert drawing.status == Status.FAILED
+    assert drawing.decision_reason == "stroke log not found: m_1/1.binpb.gz"
+    assert drawing.decided_by == ""
