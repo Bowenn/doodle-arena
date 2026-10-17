@@ -46,6 +46,7 @@ flowchart TB
   assets <-->|events| kafka
   market <-->|events| kafka
   kafka --> notifier
+  kafka -->|matches| lobby
   kafka -.->|Stage 6| analytics["Analytics<br/>Flink"]
   assets -->|HTTP| ai["AI service<br/>FastAPI"]
 ```
@@ -75,7 +76,7 @@ Until Will joins the project, Bowen covers every service, including marketplace 
 
 ### 4.1 Gateway (Nginx)
 
-- Routes `/api/auth/*` to auth, `/api/lobby/*` to lobby, `/api/assets/*` and `/admin/*` to assets, `/api/market/*` to marketplace, `/api/notifier/*` to notifier, `/ws/*` to game servers, and `/otlp/*` to the collector for browser telemetry.
+- Routes `/api/auth/*` to auth, `/api/lobby/*` to lobby, `/api/assets/*` and `/admin/*` to assets, `/api/market/*` to marketplace, `/api/notifier/*` to notifier, and `/ws/*` to game servers. A route `/otlp/*` to the collector, for browser telemetry, comes with task 5.4.
 - Passes the `Upgrade` and `Connection` headers for WebSockets, with a long read timeout.
 - Applies coarse per-IP rate limiting with `limit_req`, which is a leaky bucket. Fine-grained limits live in the services.
 - Serves `/healthz` for itself and `/healthz/<service>` for every service, including each game-server instance (used by `make smoke`). These are restricted to internal traffic in AWS.
@@ -90,8 +91,8 @@ Owns the Postgres database `auth`.
 - Google OAuth 2.0 authorization code flow, with PKCE and a `state` parameter. It requests only the `openid profile` scopes, so Google never sends an email address.
 - Issues a short-lived JWT access token (about 15 minutes) signed with RS256, with `aud` set to `doodle-api`. Public keys are served at `/api/auth/.well-known/jwks.json`.
 - Issues an opaque refresh token (32 random bytes, 30 days) in the cookie `da_refresh`: HttpOnly, SameSite=Strict, Path=`/api/auth`, and Secure in AWS. Refresh tokens are stored as SHA-256 hashes and rotated on every use. Every login starts a family. Reusing an already-used refresh token revokes the whole family.
-- `/refresh` locks the presented token (`SELECT … FOR UPDATE`), so concurrent uses of one token serialize: one wins, and the rest count as reuse. The web app therefore sends at most one refresh at a time (single-flight).
-- `/refresh` and `/logout` are cookie-authenticated POSTs. Besides SameSite=Strict, they refuse any `Origin` other than the web app's.
+- `/refresh` locks the presented token (`SELECT … FOR UPDATE`), so concurrent uses of one token serialize: one wins, and the rest count as reuse. The web app therefore sends at most one refresh at a time: single-flight within a tab, and a Web Lock (`doodle-auth-refresh`) across the tabs of the origin, which share the cookie. Without Web Locks (an old browser, or a page outside a secure context) only the per-tab single-flight applies.
+- `/refresh` and `/logout` are cookie-authenticated POSTs. Besides SameSite=Strict, they refuse any `Origin` other than the web app's. A request without an `Origin` header is allowed: SameSite=Strict already keeps the cookie off every cross-site request, and requiring the header would only break clients that omit it.
 - JWT claims: `sub` (user id), `roles` (`player`, `moderator`, `admin`), `name` (the display name, which the lobby copies into join tickets so game servers can show it; a rename shows after the next refresh), `iss`, `aud`, `iat`, `exp`, `jti`. The header carries `kid`, the RFC 7638 thumbprint of the signing key.
 - Stores the minimum user data: Google subject id, display name, avatar URL and roles. No email address.
 - API keys (Stage 4) for developers who register webhooks or call the public read API. Format `da_<prefix>_<secret>`, stored as the prefix plus a hash, with scopes and `last_used_at`. Other services verify keys through an internal endpoint and cache the result briefly.
@@ -103,10 +104,10 @@ Owns the Postgres database `auth`.
 Owns the Redis key prefix `lobby:*`.
 
 - REST: create a room, list public rooms, quick play, join a room, read the leaderboard.
-- Keeps a registry of game servers. Each game server sends a gRPC `Heartbeat` every 2 seconds with its addresses, load and per-room status (players, waiting or playing), and an entry expires after 6 seconds without one. The registry gRPC port (9090) is internal.
+- Keeps a registry of game servers. Each game server sends a gRPC `Heartbeat` every 2 seconds with its addresses, load and per-room status (connected players, held seats, waiting or playing), and an entry expires after 6 seconds without one. The registry gRPC port (9090) is internal.
 - Allocates new rooms to the least-loaded healthy game server through gRPC `AllocateRoom` (fewest sockets, then fewest rooms; draining servers are skipped). Each call has a 2-second deadline; if a server is full, draining or unreachable, the lobby tries the next one, up to three. Every request names the target (`server_id`), so a cached connection that reaches another instance after containers swap IP addresses is refused instead of creating a room there; on a refusal or a mismatched answer the lobby drops the connection, looks the name up again and asks the same server once more. A server that didn't answer is tried last for the next 10 seconds, so a server that heartbeats but can't be reached doesn't add its deadline to every create. The room is stored only after a server has taken it. The lobby's gRPC client takes no service config from DNS: gRPC's DNS resolver would otherwise also look up a `_grpc_config` TXT record before reporting any address, and a cold upstream took 5–8 s to answer it, longer than the first call's deadline.
-- On join, returns the room's WebSocket URL (`<ws_address>/rooms/<room_id>`, where `ws_address` is the gateway path the game server reports, such as `/ws/game-server-1`) and a join ticket: a token signed with the lobby's Ed25519 key, valid for 60 seconds and usable once, that names the user and the room (ADR 0005). The lobby doesn't enforce `max_players`: only the game server knows whether a joining player is already in the room (a reconnect), so it decides. Quick play uses the reported counts to pick the fullest waiting room with space.
-- Redis keys: `lobby:server:{server_id}` (the last heartbeat, 6-second TTL), `lobby:servers` (set of server ids), `lobby:room:{room_id}` (the room, expiring 10 minutes after its server last reported it; only the owning server's heartbeat refreshes it), `lobby:rooms:public` (sorted set by creation time, for the room list), `lobby:leaderboard:{week}` (sorted set of user ids by points; expires 35 days after its last write), `lobby:lb:seen:{match_id}` (a counted match, 8-day TTL), `lobby:names` (hash of user id to display name).
+- On join, returns the room's WebSocket URL (`<ws_address>/rooms/<room_id>`, where `ws_address` is the gateway path the game server reports, such as `/ws/game-server-1`) and a join ticket: a token signed with the lobby's Ed25519 key, valid for 60 seconds and usable once, that names the user and the room (ADR 0005). The lobby doesn't enforce `max_players`: only the game server knows whether a joining player is already in the room (a reconnect), so it decides. Quick play uses the reported status to pick the fullest waiting room with a free seat: it compares held seats, not connected players, with `max_players`, because a player who steps away keeps their seat and the game server would refuse the joiner (ADR 0008). It looks at the 60 newest public rooms.
+- Redis keys: `lobby:server:{server_id}` (the last heartbeat, 6-second TTL), `lobby:servers` (set of server ids), `lobby:room:{room_id}` (the room, expiring 10 minutes after its server last reported it; only the owning server's heartbeat refreshes it), `lobby:rooms:public` (sorted set by creation time, for the room list), `lobby:leaderboard:{week}` (sorted set of user ids by points; expires 35 days after its last write), `lobby:lb:seen:{match_id}` (a counted match, 8-day TTL), `lobby:names` (hash of user id to display name), `lobby:server_rooms:{server_id}` (set of the rooms placed on that server, so the reassigner finds a dead server's rooms), `lobby:room_hosts` (set of server ids with rooms, pruned lazily when a server's set is empty), `lobby:reassigner` (lock, 10-second TTL: every lobby instance tries every 2 seconds, and only the holder runs a reassignment pass, so a crashed holder can delay failover by up to 10 seconds).
 - Heartbeats and `AllocateRoom` aren't authenticated: for now the internal gRPC relies on network isolation (ADR 0006). So the lobby accepts only a `/ws…` gateway path as `ws_address` and `host:port` as `control_address`; a bogus heartbeat can't send players to another host.
 - Notices dead game servers through missed heartbeats and reassigns their rooms. Clients that reconnect get the new server's URL.
 - Consumes `MatchFinished` from `game.matches.v1` (consumer group `lobby-leaderboard`) to keep a weekly leaderboard: the sum of each player's match scores per ISO week, with the week taken from `ended_at` in UTC (Monday to Sunday, named like `2026-W42`). `ZINCRBY` isn't idempotent, so one Lua script does both steps: `SET NX lobby:lb:seen:{match_id}` (8-day TTL, longer than any week a match can count towards), and only if that marker is new, `ZINCRBY` for every result. A crash can't separate the marker from the increments, and two deliveries at the same moment can't both pass the check. Offsets are committed only after the script ran (at-least-once), and while Redis is down the consumer retries instead of moving past a match. An unset or unknown `oneof` case, or bytes that don't decode, is logged with topic, partition and offset, counted, committed and skipped (ADR 0004). Each record's `traceparent` continues the producer's trace (span `lobby.leaderboard.apply`).
@@ -114,7 +115,7 @@ Owns the Redis key prefix `lobby:*`.
 
 ### 4.4 Game server (Go)
 
-Owns the Redis key prefixes `room:*` and `rl:*`, and the bucket `round-logs`.
+Owns the Redis key prefix `room:*` and the bucket `round-logs`.
 
 - Runs each room as an actor: one goroutine owns all of a room's state. Details are in section 9.
 - Classic mode: one drawer, or two drawers sharing a canvas when a round starts with four or more present players. Everyone else guesses.
@@ -122,11 +123,11 @@ Owns the Redis key prefixes `room:*` and `rl:*`, and the bucket `round-logs`.
   - The first drawer picks the word. Both drawers get it and draw on the same canvas, and each can undo only their own strokes (strokes are keyed by user and `stroke_id`). Each drawer earns the drawer points.
   - If the first drawer leaves while choosing and the second is still there, the options pass to the second drawer, and `choosing` is sent again with the new order. The original deadline stays, so passing the choice back and forth can't stall a round. The one who left stays a drawer: they saw the options, so they must not guess that round.
 - Server-authoritative timers, scoring, hint reveals and answer checks. The first correct guess is the first one the room actor processes.
-- A per-player token bucket limits guesses and chat.
+- A per-player token bucket limits guesses and chat. It lives in memory, in the room actor, so it starts full again when another server takes the room over.
 - At the end of a round, it uploads the stroke log (a gzipped `doodle.game.v1.StrokeLog` at `<match_id>/<round_no>.binpb.gz`) to `round-logs` and publishes `RoundFinished` with the object key. At the end of a match, it publishes `MatchFinished` with placements but no coin amounts, because the marketplace decides rewards.
   - The room actor never does this I/O. It hands each finished round or match to a publisher with a bounded in-memory queue (1024) and one worker, which keeps a room's last `RoundFinished` ahead of its `MatchFinished`.
   - The upload comes first, so an event never points at a missing object. Each event has a 2-minute deadline and keeps its `event_id` across retries. Uploads retry with backoff. The producer is franz-go's idempotent producer with `acks=all`, which retries in order on its own without duplicates. The publisher retries only definite failures, and after the deadline it stops waiting and counts the event as failed. The record stays buffered and may still be delivered, so an event can arrive twice, which consumers absorb (at-least-once).
-  - When the queue is full (Kafka or S3 down for a long time), new events are dropped, logged with their ids and counted, rather than blocking rooms. A crash loses what is queued. Making this durable belongs with the Redis Stream event log (task 2.5), which could serve as the outbox.
+  - When the queue is full (Kafka or S3 down for a long time), new events are dropped, logged with their ids and counted, rather than blocking rooms. A crash loses what is queued. A durable outbox in the room's Redis keys, written in the same fenced commit as the round's end, is the next task, before rewards (task 4.4) depend on `MatchFinished`.
   - Every finished round is published, even one with no strokes. A match is published only if at least one round finished: one that ended during the countdown is not a result and earns nothing. Undo removes strokes from the canvas, so the stroke log contains only the strokes that remained. The canvas has a fixed 4:3 aspect, so events report 800 x 600.
 - Sends the lobby a `Heartbeat` every 2 seconds, starting at startup. Its gRPC client takes no service config from DNS (`WithDisableServiceConfig`), so the first heartbeat doesn't wait for a `_grpc_config.<host>` TXT lookup that Docker's DNS forwards upstream: a new server registers within milliseconds instead of up to 8 seconds.
 - At least two instances run locally, so failover can be tested. In Stage 6 the same binary also runs in a relay role for the live-stream room.
@@ -189,7 +190,7 @@ The room client (task 2.3):
 - Pages route by path (`/` is the lobby, `/rooms/<room_id>` a room), so an invite link opens the room. There is no router library.
 - State is a pure reducer over server messages: `welcome` replaces it, events apply only when `seq` is newer, and scores, phases and the word change only when the server says so. The chat feed isn't part of the view, so a reconnect keeps it.
 - The canvas has a fixed 4:3 aspect and two layers. The base layer paints only the server's `stroke_batch` events, so every player sees the same picture; the overlay paints the drawer's own stroke at once and drops it when the server's copy arrives, so drawing doesn't lag by a round trip. Points go out every 50 ms (`VITE_STROKE_BATCH_MS`, or `?batch_ms=` for one experiment) or at 512 points.
-- The connection asks the lobby for a new ticket on every attempt and reconnects with jittered exponential backoff (0.5 s doubling to 8 s, giving up after 12 attempts, about a minute, which matches the seat grace). Close codes 4000, 4003, 4004 and 4009 and a lobby `ROOM_NOT_FOUND` end the connection instead. A gap in `seq` or a `room_moved` reconnects at once.
+- The connection asks the lobby for a new ticket on every attempt and reconnects with jittered exponential backoff (0.5 s doubling to 8 s, giving up after 12 attempts, about a minute, which matches the seat grace). Close codes 4000, 4003, 4004 and 4009 and a lobby `ROOM_NOT_FOUND` or `SIGNED_OUT` end the connection instead (4004 is the client's own code for `ROOM_NOT_FOUND`; the server never sends it). A gap in `seq`, or a `resumed {seq}` ahead of the last applied event, reconnects at once; `room_moved` reconnects after the usual jittered backoff, so a fenced server's players don't all ask the lobby in the same millisecond.
 - The timer counts down to the server's deadline on the local clock. It is display only; the server ends phases. Clock skew shows as a timer that is a little off.
 - The ping round-trip time is shown next to the connection status; exporting it as `web.ws.rtt` comes with browser telemetry (task 5.4).
 
@@ -202,7 +203,6 @@ The room client (task 2.3):
 | PostgreSQL | `marketplace` | Accounts, ledger, balances, ownership, listings, idempotency keys, outbox, Stripe events | marketplace |
 | PostgreSQL | `notifier` | Endpoints and deliveries | notifier |
 | Redis | `room:*` | Room event streams, snapshots, leases, fencing counters | game-server |
-| Redis | `rl:*` | Rate-limit buckets | game-server |
 | Redis | `lobby:*` | Rooms, game-server registry, leaderboards | lobby |
 | Redis | Separate logical database | Celery broker and results | assets |
 | MongoDB | `assets.replays` | Stroke logs for replays | assets |
@@ -222,9 +222,9 @@ Contracts live in `proto/` and change only with human approval (see `.claude/rul
 | Service | Served by | Called by | Methods |
 |---|---|---|---|
 | `doodle.game.v1.ControlService` | Each game server | Lobby | `AllocateRoom(room_id, mode, settings, host_user_id, server_id)` (idempotent per `room_id`; refused with `FAILED_PRECONDITION` by any server that isn't `server_id`), `DrainServer()` before a deploy |
-| `doodle.lobby.v1.RegistryService` | Lobby | Game servers | `Heartbeat(server_id, ws_address, control_address, rooms[], sockets, draining)` every 2 seconds; `rooms` carries each room's players and phase |
+| `doodle.lobby.v1.RegistryService` | Lobby | Game servers | `Heartbeat(server_id, ws_address, control_address, rooms[], sockets, draining)` every 2 seconds; `rooms` carries each room's connected players, held seats and phase |
 
-Every call has a deadline. `AllocateRoom` returns `RESOURCE_EXHAUSTED` when the server is full and `FAILED_PRECONDITION` while it drains. Stage 7 may add `doodle.ai.v1` for the AI guesser.
+Every call has a deadline. `AllocateRoom` returns `INVALID_ARGUMENT` for a malformed room id, mode or settings, `FAILED_PRECONDITION` when it is meant for another server or this one drains, `RESOURCE_EXHAUSTED` when the server is full (`MAX_ROOMS`, 100 by default), `NOT_FOUND` for a room that has ended (its tombstone), `UNAVAILABLE` when the room store can't be reached or the room's previous copy here is still stopping, and `INTERNAL` when stored state can't be restored. For a room this server already runs it checks its lease first: a copy that lost the lease is stopped and the room taken again with a new token. Stage 7 may add `doodle.ai.v1` for the AI guesser.
 
 ### 6.2 Kafka event catalog
 
@@ -265,7 +265,9 @@ Auth:
 
 Lobby:
 
-- `POST /api/lobby/rooms` takes `{public, settings}` (both optional) and returns the room; `GET /api/lobby/rooms?limit=&cursor=` returns `{rooms, next_cursor}` with live player counts
+- `POST /api/lobby/rooms` takes `{public, mode, settings}` (all optional; `mode` is `classic`) and returns `201` with `{room_id, host_id, mode, public, settings, created_at}`. Settings and their ranges: `max_players` 2–8 (default 8), `choose_seconds` 5–30 (10), `draw_seconds` 30–180 (80), `word_options` 1–5 (3); out of range is `400 INVALID_SETTINGS`, unknown fields or a bad mode `400 INVALID_REQUEST`, and no game server able to take the room `503 NO_GAME_SERVER` with `Retry-After: 2`.
+- `GET /api/lobby/rooms?limit=<1..50>&cursor=` (limit 20 by default) returns `{rooms, next_cursor}`, each room with its connected `players`, `max_players` and `phase`; a bad cursor is `400 INVALID_REQUEST`.
+- Joining a room that doesn't exist is `404 ROOM_NOT_FOUND`; a room being moved is `503 ROOM_UNAVAILABLE` with `Retry-After: 2`. Without a valid token every lobby endpoint answers `401 UNAUTHENTICATED`.
 - `POST /api/lobby/rooms/{room_id}/join` and `POST /api/lobby/quickplay` return `{room_id, ws_url, ticket, expires_at}`, with `Cache-Control: no-store`
 - `GET /api/lobby/leaderboard?week=<YYYY-Www>&limit=<1..100>` returns `{week, entries: [{rank, user_id, name, score}], me: {rank, score} | null}`. The week defaults to the current ISO week (UTC) and the limit to 20; a malformed or nonexistent week (such as `2025-W53`) or a limit out of range is `400 INVALID_REQUEST`. Ranks use competition ranking: equal scores share a rank and the next one is skipped (1, 2, 2, 4). `me` is the caller's own place, even below the limit, and `null` if they scored nothing that week. `name` is empty for a player the lobby never saw join.
 
@@ -307,15 +309,15 @@ Client to server:
 
 Server to client, shared room events (each wrapped as `event {seq, type, data}` and stored in the room's event log): `player_joined {user_id, name}`, `player_left {user_id}`, `player_removed {user_id}` (seat freed after the rejoin grace), `host_changed {user_id}`, `match_started {match_id, order, deadline}`, `choosing {round_no, drawer_ids, deadline}` (`drawer_ids[0]` chooses; sent again within a round when the choice passes to the second drawer), `round_started {round_no, drawer_ids, word_length, deadline}`, `stroke_batch {user_id, stroke_id, points, color, width, done}`, `stroke_undone {stroke_id, user_id}`, `hint {mask}`, `chat {user_id, text}` (wrong guesses are shown as chat), `correct_guess {user_id, order}`, `round_ended {round_no, word, scores, round_points}`, `match_ended {match_id, results}` (results carry `placement` with competition ranking: 1, 2, 2, 4).
 
-Server to client, private messages (no `seq`, never stored in the shared log): `welcome {user_id, view, seq}`, `word_options {words}` (the first drawer), `your_word {word}` (drawers), `guess_result {correct}`, `rate_limited`, `room_moved {reason}`, `error {code, message}`, `pong {t}`.
+Server to client, private messages (no `seq`, never stored in the shared log): `welcome {user_id, view, seq}`, `word_options {words}` (the first drawer), `your_word {word}` (drawers), `guess_result {correct}`, `rate_limited`, `room_moved {reason}`, `resumed {seq}`, `error {code, message}`, `pong {t}`.
 
-`view` is built for each player from the room state (phase, host, players with scores, the round, the hint mask and the canvas). It contains the word only after the round has ended; drawers get the word through `your_word`, the only message that carries it during a round. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is. On `welcome`, a client replaces its state and then applies events with `seq` greater than `welcome.seq`. A member who reconnects with a `last_seq` the room still holds in memory (at most 200 events behind) gets no `welcome`: the server replays exactly the events after `last_seq`, then the player's private state (`your_word` or `word_options`), and the reconnect's own `player_joined` follows like any event. Further behind, or after a page reload (`last_seq` 0), it gets a full `welcome`.
+`view` is built for each player from the room state (phase, host, players with scores, the round, the hint mask and the canvas). It contains the word only after the round has ended; drawers get the word through `your_word`, the only message that carries it during a round. The stored snapshot (section 9) contains the word, so it is never sent to a client as it is. On `welcome`, a client replaces its state and then applies events with `seq` greater than `welcome.seq`. A member who reconnects with a `last_seq` the room still holds in memory (at most 200 events behind) gets no `welcome`. In order, it gets: the events after `last_seq`, replayed exactly; this step's own events (its `player_joined`, unless the server still counted its old socket as connected, and a `host_changed` if any); its private state (`your_word` or `word_options`); and last, `resumed {seq}`, the room's seq, so every resume gets an answer and the client can check that it has everything (ADR 0008). Further behind, or after a page reload (`last_seq` 0), it gets a full `welcome` and no `resumed`.
 
 Guess rules: a guess is compared after lowercasing and keeping only the letters a–z. A guess that contains the word without being it is answered only privately (`guess_result {correct: false}`) and never broadcast, because that would show everyone the word. Drawers, and players who already guessed, can't chat while a round runs. Guesses and chat pass a per-player token bucket (5 at once, then 1 per second); a rate-limited guess gets `rate_limited` and is not processed.
 
 `room_moved {reason}` (private) comes right before close 4010 when another server took the room over (ADR 0007).
 
-Close codes: 4000 bad first message, 4001 invalid or reused ticket, 4003 room full, 4008 no `hello` in time, 4010 the room isn't (or is no longer) on this server: ask the lobby again and resume there (sent after a takeover, and to a valid ticket for a room this server doesn't hold, because the room is moving), 4009 the same player connected again elsewhere, 1003 binary frame, 1008 flooding, 1009 message too big, 1011 room store (Redis) unavailable, 1013 too slow (the send queue filled up), 1001 server shutting down. After a close, a client asks the lobby for a new ticket (tickets are single-use) and reconnects.
+Close codes: 4000 bad first message, 4001 invalid or reused ticket, 4003 room full, 4008 no `hello` in time, 4010 the room isn't (or is no longer) on this server: ask the lobby again and resume there (sent after a takeover, and to a valid ticket for a room this server doesn't hold, because the room is moving; the server never sends 4004), 4009 the same player connected again elsewhere, 1003 binary frame, 1008 flooding, 1009 message too big, 1011 room store (Redis) unavailable, 1013 too slow (the send queue filled up), 1001 server shutting down. After a close, a client asks the lobby for a new ticket (tickets are single-use) and reconnects.
 
 ## 7. Key flows
 
@@ -459,7 +461,20 @@ Redis keys for each room:
 
 The `{id}` in each key is literal braces around the room id: a Redis Cluster hash tag, so all of a room's keys live in one slot and one script can touch them.
 
-Writes go through a Lua script that checks the lease holder and the fencing token before it appends events or writes the snapshot; ticket redemption and lease renewal check the lease too. A server whose check fails stops the room immediately and sends its sockets `room_moved`. The stream is trimmed to keep everything after the latest snapshot plus 500 events.
+Limits, besides the protocol's (section 6.4):
+
+| Limit | Value | What happens past it |
+|---|---|---|
+| Messages from one socket | 100 at once, then 50 per second | Closed with 1008 (flooding) |
+| Send queue per socket | 256 messages, 10-second write timeout | Closed with 1013 (too slow); the client resumes |
+| Points per round | 40,000 | `error {code: canvas_full}`; the stroke is dropped |
+| `stroke_id` | `[A-Za-z0-9_-]{1,32}`; `color` lowercase `#rrggbb` | `error {code: bad_request}` |
+| Rooms per server | `MAX_ROOMS`, 100 by default | `AllocateRoom` answers `RESOURCE_EXHAUSTED` |
+| Replay on resume | 200 events | A full `welcome` instead |
+
+Rules the actor applies that the protocol doesn't show: a player who joins during a match goes to the back of the draw order and draws in that match; drawers can't chat while choosing either; a heartbeat's `sockets` is the sum of connected players, not open sockets.
+
+Writes go through a Lua script that checks the lease holder and the fencing token before it appends events or writes the snapshot; ticket redemption and lease renewal compare the full lease value (`<server_id>:<token>`) too. A server whose check fails stops the room immediately and sends its sockets `room_moved`. The stream is trimmed to keep everything after the latest snapshot plus 500 events.
 
 **Write, then broadcast.** After each input, the actor commits the step's events (plus a snapshot when one is due) in one script call, and only then sends them to sockets and hands finished rounds to the Kafka publisher. A client never sees an event that a new owner can't replay. If Redis can't be reached, the room stops (close 1011) instead of running without durability; the lobby restores it once Redis is back.
 

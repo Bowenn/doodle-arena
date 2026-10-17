@@ -54,10 +54,13 @@ Keep this list accurate:
 - `make smoke`: checks every service's `/healthz` through the gateway (`http://localhost:8080/healthz/<service>`).
 - `make telemetry-check`: one request with a known trace id must reach Tempo and Loki, and every service must export metrics (Grafana: `http://localhost:3000`).
 - `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
-- `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows), `make logs s=<service>`, `make ps`.
+- `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows), `make logs s=<service>` (`s=game-server` follows both instances), `make ps`.
 - CI (`.github/workflows/`) runs the same `scripts/lint.sh` and `scripts/test.sh` per service, so `make lint s=<svc> && make test s=<svc>` predicts CI. Pin new actions to a full commit SHA with the version in a comment.
 - `make proto`: lint `proto/`, regenerate Go, Java and Python code into `proto/gen/`, and build it. `make test s=proto` checks without regenerating.
 - `scripts/fake-events.sh [-match-id <id>] [-dry-run]`: publish a fake `RoundFinished` and `MatchFinished` (and upload the stroke log). Read events back with `(cd tools/eventctl && go run . decode -topic <topic> -n <k>)`.
+- Drills against `make up` (they need `~/.docker/bin` on PATH; in a worktree, set `DRILL_JWT_KEY` to the main checkout's `secrets/jwt-private.pem` instead of copying it):
+  - `uv run --project services/auth --with websockets python scripts/drills/failover.py kill|pause [n]`: kill or freeze the room's game server mid-round and measure the resume.
+  - `node scripts/drills/web-seats.mts [room_id] [--seats n]` (Node 24): extra players running the web app's own client; with no room id, a bot-only match that exits 0 when every seat agrees.
 - Planned: `make seed` (later). Don't use it before it exists.
 
 ## Ground rules
@@ -106,7 +109,7 @@ Keep this list accurate:
 - WebSocket auth uses a short-lived join ticket from the lobby, never a JWT in the URL, because URLs end up in logs.
 - Nginx `limit_req` is a leaky bucket. The token bucket (per-player guess limit) lives in the game server.
 - MinIO's community edition is no longer maintained. Use SeaweedFS for S3-compatible storage locally.
-- Prefer official upstream Docker images (`postgres`, `redis`, `mongo`, `apache/kafka`, `grafana/otel-lgtm`, `chrislusf/seaweedfs`), pinned to a version tag.
+- Prefer official upstream Docker images (`postgres`, `redis`, `mongo`, `apache/kafka`, `grafana/otel-lgtm`, `chrislusf/seaweedfs`), pinned to a version tag. Distroless (the Go runtime) has no version tags, so it is pinned by digest.
 - Run Go tests with `-race`: most game-server bugs are concurrency bugs.
 - Local Postgres is published on host port 15432 (not 5432), so it doesn't clash with a Postgres installed on the host.
 - SeaweedFS has no S3 lifecycle API. The 7-day expiry on `round-logs` is a SeaweedFS TTL (`fs.configure`, in `infra/seaweedfs/create-buckets.sh`); in AWS it becomes an S3 lifecycle rule.

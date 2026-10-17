@@ -46,7 +46,8 @@ Services write one JSON object per line to stdout:
 {"timestamp":"2026-10-20T14:03:12.481Z","level":"info","service":"marketplace","version":"0.4.1","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","msg":"purchase completed","drawing_id":"d_81f2","user_id":"u_19ac","listing_id":"l_77e0","latency_ms":38}
 ```
 
-- Required fields: `timestamp`, `level`, `service`, `version`, `trace_id`, `span_id`, `msg`.
+- Required fields: `timestamp`, `level`, `service`, `version`, `trace_id`, `span_id`, `msg`. `trace_id` and `span_id` are there whenever the line belongs to a span: a request, a gRPC call, a Kafka record, or a room's own span (a round ending, a match starting, a player's connection). Lines outside any trace (startup, shutdown, a room closing on its own) carry no trace ids.
+- A few lines aren't JSON: the gateway's nginx error log (rate-limit and upstream warnings), the JVM and OpenTelemetry agent banners at marketplace start, and the Vite dev server behind `web`. Loki keeps them as plain text.
 - Domain fields where relevant: `room_id`, `match_id`, `user_id`, `drawing_id`, `listing_id`, `endpoint_id`.
 - Levels: `debug` (off by default), `info` (state changes), `warn` (handled problems such as retries), `error` (needs attention).
 - With the `trace_id`, Grafana can jump from a log line to its trace and back.
@@ -74,7 +75,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `game.rooms.active` | UpDownCounter | `mode` | game-server |
 | `game.broadcast.duration` | Histogram (ms) | `event_type` (time to marshal an event and queue it to every local socket, after the step's commit to Redis; it doesn't include the network write) | game-server |
 | `game.guesses` | Counter | `result` = correct, wrong, rate_limited | game-server |
-| `game.reconnects` | Counter | `result` = resumed (missed events replayed), snapshot (a full `welcome`), failed | game-server |
+| `game.reconnects` | Counter | `result` = resumed (missed events replayed), snapshot (a full `welcome`), failed (a join with `last_seq` that the room refused or never reached, for example a full room or one that just stopped) | game-server |
 | `game.room.takeovers` | Counter | – (rooms this server restored from another owner's state) | game-server |
 | `game.ws.slow_client_disconnects` | Counter | – | game-server |
 | `game.events.published` | Counter | `topic`, `result` = success, failed (retried until the 2-minute deadline), dropped (queue full, or shutting down) | game-server |
@@ -117,7 +118,8 @@ Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into
 - Propagate W3C trace context over HTTP, gRPC and Kafka message headers (`traceparent`). Without the Kafka header, a trace breaks at every async step.
 - The showcase trace follows a purchase across languages: gateway, marketplace (Java), Postgres, the outbox, Kafka, notifier (Go), and the outgoing webhook.
 - The gateway creates the root span with `ngx_otel_module`, which ships in the official `nginx` image's `-otel` variant. It starts a trace or continues the browser's `traceparent`.
-- Span names: `<service>.<operation>`, for example `market.purchase` or `assets.render`.
+- Span names: domain spans are `<service>.<operation>`, for example `market.purchase`, `lobby.quickplay` or `game.round.end` (the game server's prefix is `game`). HTTP, gRPC and database spans keep the names their instrumentation gives them, which follow the OpenTelemetry conventions, such as `POST /api/lobby/rooms/{room_id}/join`.
+- Span attributes for ids use dots: `room.id`, `match.id`, `user.id`, `round.no` (log fields keep `room_id` and the like). Ids are fine on spans, never on metrics.
 - Sampling:
   - Keep every trace for purchases, Stripe webhooks and rewards.
   - Sample game traffic. Trace rounds and room lifecycle events, not individual strokes.
