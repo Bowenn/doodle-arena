@@ -182,6 +182,27 @@ func (h *harness) join(uid string) *fakeConn {
 	return c
 }
 
+// resume reconnects uid on a new socket with the last seq it saw: a real resume (replay and
+// resumed), not a welcome.
+func (h *harness) resume(uid string, lastSeq int64) *fakeConn {
+	h.t.Helper()
+	c := &fakeConn{uid: uid}
+	if err := h.room.Join(context.Background(), c, "Name "+uid, lastSeq); err != nil {
+		h.t.Fatalf("resume %s: %v", uid, err)
+	}
+	h.conns[uid] = c
+	return c
+}
+
+// lastSeq is the seq of the last shared event c received.
+func lastSeq(c *fakeConn) int64 {
+	evs := c.events("")
+	if len(evs) == 0 {
+		return 0
+	}
+	return evs[len(evs)-1].Seq
+}
+
 func (h *harness) input(uid string, m protocol.ClientMsg) {
 	h.t.Helper()
 	if err := h.room.Input(context.Background(), h.conns[uid], m); err != nil {
@@ -406,7 +427,15 @@ func TestGuessersNeverSeeWordBeforeRoundEnded(t *testing.T) {
 			}
 		}
 		g1, g2 := guessers[0], guessers[1]
+		h.sync()
+		seen := lastSeq(h.conns[g1])
 		h.input(g1, protocol.Guess{Text: "is it " + strings.ToUpper(w.Word) + "s?"}) // contains the word
+		// g1 drops and resumes from before its own guess: the replay is checked too.
+		h.room.Leave(h.conns[g1])
+		h.sync()
+		resumed := h.resume(g1, seen)
+		history[g1] = append(history[g1], resumed)
+		marks[resumed] = 0
 		if round == 1 {
 			e := h.join("e") // late joiner mid-round
 			history["e"] = []*fakeConn{e}
@@ -416,7 +445,10 @@ func TestGuessersNeverSeeWordBeforeRoundEnded(t *testing.T) {
 		history[g2] = append(history[g2], reconnected)
 		marks[reconnected] = 0
 		h.advance(DefaultSettings.Draw * 75 / 100) // both hints
-		h.advance(DefaultSettings.Draw)            // time is up
+		if len(resumed.private("welcome")) != 0 || len(resumed.private("resumed")) != 1 {
+			t.Fatalf("round %d: %s's reconnect with last_seq %d wasn't a resume", round, g1, seen)
+		}
+		h.advance(DefaultSettings.Draw) // time is up
 
 		for uid, cs := range history {
 			if slices.Contains(drawers, uid) {
