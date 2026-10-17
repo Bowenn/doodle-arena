@@ -72,7 +72,7 @@ func (s *Service) Reassign(ctx context.Context) error {
 
 func (s *Service) reassign(ctx context.Context, r Room, all []registry.Server, hostAlive bool) {
 	ctx, span := s.tracer.Start(ctx, "lobby.reassign_room", trace.WithAttributes(
-		attribute.String("room_id", r.ID), attribute.String("from_server_id", r.ServerID), attribute.Bool("host_alive", hostAlive)))
+		attribute.String("room.id", r.ID), attribute.String("from_server_id", r.ServerID), attribute.Bool("host_alive", hostAlive)))
 	defer span.End()
 	from := r.ServerID
 	req := &gamev1.AllocateRoomRequest{

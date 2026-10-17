@@ -147,7 +147,7 @@ func (c *Consumer) handle(ctx context.Context, r *kgo.Record) bool {
 		c.count(ctx, "skipped")
 		return true
 	}
-	span.SetAttributes(attribute.String("match_id", m.ID))
+	span.SetAttributes(attribute.String("match.id", m.ID))
 
 	applied, err := c.applyWithRetry(ctx, m, where)
 	if err != nil {
