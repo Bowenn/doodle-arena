@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LobbyError, type JoinTicket } from '../lobby.ts'
-import { MAX_ATTEMPTS, RoomConnection, type ConnectionStatus } from './connection.ts'
-import type { RoomEvent, Welcome } from './protocol.ts'
+import {
+  HANDSHAKE_TIMEOUT_MS,
+  MAX_ATTEMPTS,
+  PONG_TIMEOUT_MS,
+  RoomConnection,
+  type ConnectionStatus,
+} from './connection.ts'
+import { PING_INTERVAL_MS, type RoomEvent, type Welcome } from './protocol.ts'
 
 class FakeSocket {
   static readonly CONNECTING = 0
@@ -194,7 +200,7 @@ describe('RoomConnection', () => {
     expect(join).toHaveBeenCalledTimes(1)
   })
 
-  it.each([4001, 4008, 1001, 1011, 1013])('retries on close code %i', async (code) => {
+  it.each([4001, 4008, 4010, 1001, 1011, 1013])('retries on close code %i', async (code) => {
     await connected()
     last().drop(code)
     expect(statuses.at(-1)?.kind).toBe('reconnecting')
@@ -216,14 +222,116 @@ describe('RoomConnection', () => {
     expect(FakeSocket.all).toHaveLength(1)
   })
 
-  it('pings every 15 seconds and reports the round-trip time', async () => {
+  it('pings every 5 seconds and reports the round-trip time', async () => {
     await connected()
     clock = 1000
-    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS)
     expect(last().sent.at(-1)).toEqual({ type: 'ping', data: { t: 1000 } })
     clock = 1042
     last().receive({ type: 'pong', data: { t: 1000 } })
     expect(rtts).toEqual([42])
+  })
+
+  it('treats a socket with no answer to a ping as dead and resumes elsewhere', async () => {
+    await connected(3)
+    last().receive(chat(4))
+    const dead = last()
+    await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS)
+    expect(dead.sent.at(-1)).toMatchObject({ type: 'ping' })
+    await vi.advanceTimersByTimeAsync(PONG_TIMEOUT_MS - 1)
+    expect(dead.closedWith).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(dead.closedWith).toBe(1000)
+    expect(statuses.at(-1)).toEqual({ kind: 'reconnecting', attempt: 1, delayMs: 500 })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(join).toHaveBeenCalledTimes(2)
+    last().open()
+    expect(last().sent[0]).toEqual({ type: 'hello', data: { ticket: 'ticket-2', last_seq: 4 } })
+
+    last().receive(welcome(4))
+
+    // The dead socket's late close and messages change nothing.
+    dead.receive(chat(5))
+    dead.drop(4010)
+    await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS - 1)
+    expect(join).toHaveBeenCalledTimes(2)
+    expect(events.map((e) => e.seq)).toEqual([4])
+  })
+
+  it('keeps a socket that answers every ping', async () => {
+    await connected()
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS)
+      last().receive({ type: 'pong', data: { t: 0 } })
+    }
+    expect(FakeSocket.all).toHaveLength(1)
+    expect(statuses.at(-1)).toEqual({ kind: 'open' })
+  })
+
+  it('counts any server message as an answer to a ping', async () => {
+    await connected(3)
+    await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS)
+    last().receive(chat(4))
+    await vi.advanceTimersByTimeAsync(PONG_TIMEOUT_MS)
+    expect(last().closedWith).toBeNull()
+    expect(FakeSocket.all).toHaveLength(1)
+  })
+
+  it('gives up on a socket that never opens', async () => {
+    conn.start()
+    await vi.advanceTimersByTimeAsync(0)
+    const stuck = last()
+    await vi.advanceTimersByTimeAsync(HANDSHAKE_TIMEOUT_MS)
+    expect(stuck.closedWith).toBe(1000)
+    expect(statuses.at(-1)).toEqual({ kind: 'reconnecting', attempt: 1, delayMs: 500 })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(FakeSocket.all).toHaveLength(2)
+
+    // It opening late changes nothing: no hello on it, no second retry.
+    stuck.open()
+    expect(stuck.sent).toHaveLength(0)
+  })
+
+  it('gives up on a socket that opens but never welcomes', async () => {
+    conn.start()
+    await vi.advanceTimersByTimeAsync(0)
+    last().open()
+    await vi.advanceTimersByTimeAsync(HANDSHAKE_TIMEOUT_MS - 1)
+    expect(FakeSocket.all).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(last().closedWith).toBe(1000)
+    expect(statuses.at(-1)?.kind).toBe('reconnecting')
+  })
+
+  it('does not time out a handshake that got its welcome', async () => {
+    await connected()
+    for (let t = 0; t < HANDSHAKE_TIMEOUT_MS; t += PING_INTERVAL_MS) {
+      await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS)
+      last().receive({ type: 'pong', data: { t: 0 } })
+    }
+    expect(last().closedWith).toBeNull()
+  })
+
+  it('does not ping before the server has answered hello', async () => {
+    conn.start()
+    await vi.advanceTimersByTimeAsync(0)
+    last().open()
+    await vi.advanceTimersByTimeAsync(HANDSHAKE_TIMEOUT_MS - 1)
+    expect(last().sent).toEqual([{ type: 'hello', data: { ticket: 'ticket-1', last_seq: 0 } }])
+  })
+
+  it('counts dead sockets toward giving up', async () => {
+    conn.start()
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(HANDSHAKE_TIMEOUT_MS)
+      const s = statuses.at(-1)!
+      expect(s.kind).toBe('reconnecting')
+      if (s.kind === 'reconnecting') await vi.advanceTimersByTimeAsync(s.delayMs)
+    }
+    await vi.advanceTimersByTimeAsync(HANDSHAKE_TIMEOUT_MS)
+    expect(statuses.at(-1)).toEqual({ kind: 'closed', reason: 'Lost the connection to the room.' })
   })
 
   it('resyncs through a new connection when an event is missing', async () => {
@@ -238,10 +346,22 @@ describe('RoomConnection', () => {
     expect(last().sent[0]).toEqual({ type: 'hello', data: { ticket: 'ticket-2', last_seq: 3 } })
   })
 
-  it('reconnects through the lobby on room_moved', async () => {
+  it('reconnects through the lobby after a short backoff on room_moved', async () => {
     await connected(3)
-    last().receive({ type: 'room_moved', data: { reason: 'failover' } })
+    const old = last()
+    old.receive({ type: 'room_moved', data: { reason: 'failover' } })
+    expect(old.closedWith).toBe(1000)
+    expect(statuses.at(-1)).toEqual({ kind: 'reconnecting', attempt: 1, delayMs: 500 })
     await vi.advanceTimersByTimeAsync(0)
+    expect(join).toHaveBeenCalledTimes(1)
+
+    old.drop(4010) // the server's close right after room_moved
+    await vi.advanceTimersByTimeAsync(500)
+    expect(join).toHaveBeenCalledTimes(2)
+    last().open()
+    expect(last().sent[0]).toEqual({ type: 'hello', data: { ticket: 'ticket-2', last_seq: 3 } })
+    last().receive(welcome(3))
+    await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS - 1)
     expect(join).toHaveBeenCalledTimes(2)
   })
 
