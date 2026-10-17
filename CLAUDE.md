@@ -54,7 +54,7 @@ Keep this list accurate:
 - `make smoke`: checks every service's `/healthz` through the gateway (`http://localhost:8080/healthz/<service>`).
 - `make telemetry-check`: one request with a known trace id must reach Tempo and Loki, and every service must export metrics (Grafana: `http://localhost:3000`).
 - `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
-- `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows), `make logs s=<service>` (`s=game-server` follows both instances), `make ps`.
+- `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows, `s=secrets` scans the git history with gitleaks), `make logs s=<service>` (`s=game-server` follows both instances), `make ps`.
 - CI (`.github/workflows/`) runs the same `scripts/lint.sh` and `scripts/test.sh` per service, so `make lint s=<svc> && make test s=<svc>` predicts CI. Pin new actions to a full commit SHA with the version in a comment.
 - `make proto`: lint `proto/`, regenerate Go, Java and Python code into `proto/gen/`, and build it. `make test s=proto` checks without regenerating.
 - `scripts/fake-events.sh [-match-id <id>] [-dry-run]`: publish a fake `RoundFinished` and `MatchFinished` (and upload the stroke log). Read events back with `(cd tools/eventctl && go run . decode -topic <topic> -n <k>)`.

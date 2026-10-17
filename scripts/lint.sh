@@ -21,6 +21,8 @@ run_one() {
     proto) ./scripts/proto.sh check ;;
     # actionlint checks workflow syntax, expressions and (with shellcheck installed) run scripts.
     ci) go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 ;;
+    # gitleaks scans every commit of the checked-out history (rules and exceptions: .gitleaks.toml).
+    secrets) go run github.com/zricethezav/gitleaks/v8@v8.28.0 git --redact --no-banner . ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm run lint) ;;
   esac
 }
