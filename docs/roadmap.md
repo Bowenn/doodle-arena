@@ -122,7 +122,7 @@ Tracks:
 ## Stage 5: Production readiness (both tracks, Day 7)
 
 - [ ] **5.1 Dashboards and alerts**: dashboards as code (a service overview plus one per deep part), alert rules, a Discord contact point, and runbooks in `docs/runbooks/`.
-- [ ] **5.2 AWS deployment**: the humans decide ADR 0003 first. Then Terraform, both S3 buckets, CloudWatch, the billing alarm and secrets.
+- [ ] **5.2 AWS deployment**: the humans decide ADR 0003 first. Then Terraform, both S3 buckets, CloudWatch, the billing alarm and secrets, and security groups that open the internal gRPC port only between the lobby and game servers (ADR 0006).
 - [ ] **5.3 First measurements**: a k6 load test with many small rooms, and a kill test of a game server mid-round. Record the numbers.
 - [ ] **5.4 Frontend performance**: Lighthouse CI and Core Web Vitals reporting.
 - [ ] **5.5 Hardening**: one deliberate refactor of agent-written code, fixing flaky tests, and a README with the architecture diagram and how to run everything.
