@@ -76,3 +76,26 @@ export function joinRoom(roomId: string): Promise<JoinTicket> {
 export function quickPlay(): Promise<JoinTicket> {
   return call('POST', '/api/lobby/quickplay', {})
 }
+
+export type LeaderboardEntry = {
+  rank: number
+  user_id: string
+  /** Empty if the lobby never saw the player join. */
+  name: string
+  score: number
+}
+
+/** One ISO week's leaderboard (weeks run Monday to Sunday, UTC). me is null if you scored nothing. */
+export type Board = {
+  week: string
+  entries: LeaderboardEntry[]
+  me: { rank: number; score: number } | null
+}
+
+/** week is an ISO week such as 2026-W42; without it, the server picks the current week. */
+export function getLeaderboard(week?: string, limit = 20): Promise<Board> {
+  const q = new URLSearchParams()
+  if (week) q.set('week', week)
+  q.set('limit', String(limit))
+  return call('GET', `/api/lobby/leaderboard?${q.toString()}`)
+}

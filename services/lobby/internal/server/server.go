@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/authn"
+	"github.com/Bowenn/gap-project_private/services/lobby/internal/leaderboard"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/registry"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/rooms"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -39,11 +40,21 @@ type Rooms interface {
 	QuickPlay(ctx context.Context, user rooms.User) (rooms.Join, error)
 }
 
-// Deps are what the API routes need. With a nil Rooms, only /healthz is served.
+// Leaderboard is the weekly leaderboard behind the API.
+type Leaderboard interface {
+	Board(ctx context.Context, week string, limit int, userID string) (leaderboard.Board, error)
+	RememberName(ctx context.Context, userID, name string) error
+}
+
+// Deps are what the API routes need. With a nil Rooms, only /healthz is served; with a nil
+// Leaderboard, the leaderboard route is left out.
 type Deps struct {
-	Verifier Verifier
-	Rooms    Rooms
-	Log      *slog.Logger
+	Verifier    Verifier
+	Rooms       Rooms
+	Leaderboard Leaderboard
+	Log         *slog.Logger
+	// Now picks the current week; nil means time.Now.
+	Now func() time.Time
 }
 
 // NewHandler returns the service's HTTP routes, traced with OpenTelemetry (a server span per
@@ -58,12 +69,19 @@ func NewHandler(info Info, deps Deps, opts ...otelhttp.Option) http.Handler {
 		}{"ok", info})
 	})
 	if deps.Rooms != nil {
-		a := &api{rooms: deps.Rooms, log: deps.Log}
+		now := deps.Now
+		if now == nil {
+			now = time.Now
+		}
+		a := &api{rooms: deps.Rooms, board: deps.Leaderboard, log: deps.Log, now: now}
 		auth := func(h http.HandlerFunc) http.Handler { return requireUser(deps.Verifier, deps.Log, h) }
 		mux.Handle("POST /api/lobby/rooms", auth(a.createRoom))
 		mux.Handle("GET /api/lobby/rooms", auth(a.listRooms))
 		mux.Handle("POST /api/lobby/rooms/{room_id}/join", auth(a.joinRoom))
 		mux.Handle("POST /api/lobby/quickplay", auth(a.quickPlay))
+		if deps.Leaderboard != nil {
+			mux.Handle("GET /api/lobby/leaderboard", auth(a.leaderboard))
+		}
 	}
 
 	opts = append([]otelhttp.Option{
@@ -95,7 +113,9 @@ func requireUser(v Verifier, log *slog.Logger, next http.Handler) http.Handler {
 
 type api struct {
 	rooms Rooms
+	board Leaderboard
 	log   *slog.Logger
+	now   func() time.Time
 }
 
 func userID(r *http.Request) string {
@@ -209,6 +229,7 @@ func (a *api) joinRoom(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	a.rememberName(r)
 	writeTicket(w, j)
 }
 
@@ -218,7 +239,49 @@ func (a *api) quickPlay(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, err)
 		return
 	}
+	a.rememberName(r)
 	writeTicket(w, j)
+}
+
+// rememberName keeps the player's display name for the leaderboard: MatchFinished carries
+// only user ids, and the name is in the access token. A failure costs only a name on the
+// board, so the join goes ahead.
+func (a *api) rememberName(r *http.Request) {
+	u := caller(r)
+	if a.board == nil || u.Name == "" {
+		return
+	}
+	if err := a.board.RememberName(r.Context(), u.ID, u.Name); err != nil {
+		a.log.WarnContext(r.Context(), "could not remember the display name", "user_id", u.ID, "err", err)
+	}
+}
+
+// leaderboard returns the top of a week's leaderboard (default: the current ISO week, UTC)
+// and the caller's own rank.
+func (a *api) leaderboard(w http.ResponseWriter, r *http.Request) {
+	week := leaderboard.Week(a.now())
+	if s := r.URL.Query().Get("week"); s != "" {
+		var err error
+		if week, err = leaderboard.ParseWeek(s); err != nil {
+			writeError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "week must be an ISO week such as 2026-W42")
+			return
+		}
+	}
+	limit := 20
+	if s := r.URL.Query().Get("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > leaderboard.MaxLimit {
+			writeError(w, r, http.StatusBadRequest, "INVALID_REQUEST", "limit must be between 1 and 100")
+			return
+		}
+		limit = n
+	}
+	b, err := a.board.Board(r.Context(), week, limit, userID(r))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, b)
 }
 
 // writeTicket sends a join response; it holds a credential, so nothing may cache it.
