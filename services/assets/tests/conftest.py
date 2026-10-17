@@ -2,6 +2,7 @@
 an in-memory substitute), migrated with the same Django migrations as production; the Celery
 tests use a real Redis broker."""
 
+import json
 import os
 import time
 from collections.abc import Iterator
@@ -124,3 +125,123 @@ def trusted_test_key(signer: Signer) -> Iterator[None]:
     authn.set_verifier_for_tests(authn.TokenVerifier(keys, Signer.issuer))
     yield
     authn.set_verifier_for_tests(None)
+
+
+MONGO_IMAGE = "mongo:8.0.34"
+SEAWEEDFS_IMAGE = "chrislusf/seaweedfs:4.48"
+S3_KEY, S3_SECRET = "testkey", "testsecret"
+
+
+@pytest.fixture(scope="session")
+def mongo_url() -> Iterator[str]:
+    from testcontainers.community.mongodb import MongoDbContainer
+
+    with MongoDbContainer(MONGO_IMAGE) as m:
+        yield m.get_connection_url().rstrip("/") + "/assets?authSource=admin"
+
+
+@pytest.fixture(scope="session")
+def s3_endpoint() -> Iterator[str]:
+    """SeaweedFS with an S3 gateway, configured like infra/seaweedfs/entrypoint.sh."""
+    import boto3
+    from testcontainers.core.container import DockerContainer
+
+    config = json.dumps(
+        {
+            "identities": [
+                {
+                    "name": "test",
+                    "credentials": [{"accessKey": S3_KEY, "secretKey": S3_SECRET}],
+                    "actions": ["Admin", "Read", "List", "Tagging", "Write"],
+                }
+            ]
+        }
+    )
+    container = (
+        DockerContainer(SEAWEEDFS_IMAGE)
+        .with_exposed_ports(8333)
+        .with_kwargs(entrypoint="sh")
+        .with_command(
+            [
+                "-c",
+                f"echo '{config}' > /tmp/s3.json && exec weed server -dir=/data "
+                "-ip.bind=0.0.0.0 -volume.max=0 -s3 -s3.port=8333 -s3.config=/tmp/s3.json",
+            ]
+        )
+    )
+    with container:
+        endpoint = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(8333)}"
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            region_name="us-east-1",
+            aws_access_key_id=S3_KEY,
+            aws_secret_access_key=S3_SECRET,
+        )
+        deadline = time.monotonic() + 60
+        while True:  # the S3 gateway answers a few seconds after the port opens
+            try:
+                for bucket in ("round-logs", "drawings"):
+                    client.create_bucket(Bucket=bucket)
+                break
+            except Exception:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.5)
+        yield endpoint
+
+
+@pytest.fixture
+def stores(settings: Any, s3_endpoint: str, mongo_url: str) -> Iterator[None]:
+    """Points assets at the test containers, with an empty replays collection."""
+    from drawings import storage
+
+    settings.S3_ENDPOINT = s3_endpoint
+    settings.S3_ACCESS_KEY, settings.S3_SECRET_KEY = S3_KEY, S3_SECRET
+    settings.MONGO_URL = mongo_url
+    storage.reset_clients_for_tests()
+    storage.replays().delete_many({})
+    client = storage.s3()
+    for bucket in ("round-logs", "drawings"):
+        for obj in client.list_objects_v2(Bucket=bucket).get("Contents", []):
+            client.delete_object(Bucket=bucket, Key=obj["Key"])
+    yield
+    storage.reset_clients_for_tests()
+
+
+def stroke_log_bytes(
+    match_id: str = "m_1",
+    round_no: int = 1,
+    strokes: list[dict[str, Any]] | None = None,
+    width: int = 800,
+    height: int = 600,
+) -> bytes:
+    """A gzipped doodle.game.v1.StrokeLog, as the game server uploads it."""
+    import gzip
+
+    from doodle.game.v1 import stroke_log_pb2
+
+    log = stroke_log_pb2.StrokeLog(
+        schema_version=1,
+        match_id=match_id,
+        room_id="r_1",
+        round_no=round_no,
+        canvas_width=width,
+        canvas_height=height,
+    )
+    log.round_started_at.FromDatetime(datetime(2026, 10, 17, 12, 0, tzinfo=UTC))
+    for i, s in enumerate(strokes if strokes is not None else [DEFAULT_STROKE]):
+        stroke = log.strokes.add(
+            stroke_id=f"s{i}",
+            user_id=s.get("user_id", "u_ada"),
+            color=s.get("color", "#1971c2"),
+            width=s.get("width", 60),
+            undone=s.get("undone", False),
+            server_received_ms=100 * i,
+        )
+        for x, y, t in s["points"]:
+            stroke.points.add(x=x, y=y, t_ms=t)
+    return gzip.compress(log.SerializeToString())
+
+
+DEFAULT_STROKE: dict[str, Any] = {"points": [(1000, 1000, 0), (5000, 5000, 40), (9000, 2000, 80)]}

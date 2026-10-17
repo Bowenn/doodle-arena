@@ -49,6 +49,8 @@ ignore = ["RUF012"]
 
 [tool.mypy]
 strict = true
+# The contracts are an editable install, whose import hook mypy can't follow; read the source.
+mypy_path = "../../proto/gen/python"
 plugins = ["pydantic.mypy", "mypy_django_plugin.main"]
 
 [[tool.mypy.overrides]]
