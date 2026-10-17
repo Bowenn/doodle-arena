@@ -16,6 +16,9 @@ import (
 // Allocator asks a game server to own a room.
 type Allocator interface {
 	AllocateRoom(ctx context.Context, controlAddress string, req *gamev1.AllocateRoomRequest) (*gamev1.AllocateRoomResponse, error)
+	// Forget drops the connection to an address, so the next call dials again and looks the
+	// name up afresh.
+	Forget(controlAddress string)
 }
 
 // GRPCAllocator calls doodle.game.v1.ControlService, keeping one connection per game server.
@@ -62,6 +65,17 @@ func (a *GRPCAllocator) conn(addr string) (*grpc.ClientConn, error) {
 	}
 	a.conns[addr] = c
 	return c, nil
+}
+
+// Forget implements Allocator. A cached connection keeps the IP address it resolved; after
+// game-server containers are recreated and swap addresses, it can reach the wrong instance.
+func (a *GRPCAllocator) Forget(addr string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if c, ok := a.conns[addr]; ok {
+		_ = c.Close()
+		delete(a.conns, addr)
+	}
 }
 
 // Close closes every connection.

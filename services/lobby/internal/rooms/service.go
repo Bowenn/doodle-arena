@@ -195,6 +195,14 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 	result := "exhausted"
 	for _, srv := range candidates[:min(maxAttempts, len(candidates))] {
 		err := s.allocateOn(ctx, srv, req)
+		if errors.Is(err, errMisrouted) || status.Code(err) == grpccodes.FailedPrecondition {
+			// Maybe a stale connection reached another instance (it refuses: server_id). Redial
+			// with a fresh name lookup and ask the same server once more; a draining server
+			// simply refuses again.
+			s.log.WarnContext(ctx, "redialing game server", "room_id", room.ID, "server_id", srv.ID, "err", err)
+			s.alloc.Forget(srv.ControlAddress)
+			err = s.allocateOn(ctx, srv, req)
+		}
 		if err == nil {
 			room.ServerID = srv.ID
 			if err := s.store.Save(ctx, room); err != nil {
@@ -250,16 +258,21 @@ func (s *Service) allocateOn(ctx context.Context, srv registry.Server, req *game
 	defer func() { endSpan(span, err) }()
 	ctx, cancel := context.WithTimeout(ctx, allocateTimeout)
 	defer cancel()
+	req.ServerId = srv.ID // the server refuses if it isn't this one
 	resp, err := s.alloc.AllocateRoom(ctx, srv.ControlAddress, req)
 	if err != nil {
 		return err
 	}
 	if resp.GetServerId() != srv.ID {
-		s.log.WarnContext(ctx, "game server answered with another id", "room_id", req.GetRoomId(),
-			"server_id", srv.ID, "answered_id", resp.GetServerId())
+		// A game server from before the server_id check took a room meant for another one.
+		// Never record it under the wrong server: joins would go to a server without it.
+		return fmt.Errorf("%w: asked %s, %s answered", errMisrouted, srv.ID, resp.GetServerId())
 	}
 	return nil
 }
+
+// errMisrouted means the connection for one game server reached another.
+var errMisrouted = errors.New("allocation reached another game server")
 
 func (s *Service) count(ctx context.Context, result string) {
 	s.allocations.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))

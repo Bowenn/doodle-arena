@@ -36,6 +36,18 @@ type fakeAllocator struct {
 	answers map[string]error
 	calls   []string
 	hosts   []string
+	targets []string
+	// misroute[addr] calls to addr reach the other server: it answers with another id, or
+	// refuses when refuse is set (as servers with the server_id check do).
+	misroute  map[string]int
+	refuse    bool
+	forgotten []string
+}
+
+func (f *fakeAllocator) Forget(addr string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forgotten = append(f.forgotten, addr)
 }
 
 func (f *fakeAllocator) AllocateRoom(_ context.Context, addr string, req *gamev1.AllocateRoomRequest) (*gamev1.AllocateRoomResponse, error) {
@@ -43,6 +55,14 @@ func (f *fakeAllocator) AllocateRoom(_ context.Context, addr string, req *gamev1
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, addr)
 	f.hosts = append(f.hosts, req.GetHostUserId())
+	f.targets = append(f.targets, req.GetServerId())
+	if f.misroute[addr] > 0 {
+		f.misroute[addr]--
+		if f.refuse {
+			return nil, status.Error(codes.FailedPrecondition, "this is another server")
+		}
+		return &gamev1.AllocateRoomResponse{ServerId: "gs-other"}, nil
+	}
 	if err := f.answers[addr]; err != nil {
 		return nil, err
 	}
@@ -75,7 +95,7 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		reg:    registry.New(rdb, time.Minute, quiet),
 		store:  NewStore(rdb),
-		alloc:  &fakeAllocator{answers: map[string]error{}},
+		alloc:  &fakeAllocator{answers: map[string]error{}, misroute: map[string]int{}},
 		clock:  &clock{t: time.Now()},
 		reader: reader,
 	}
@@ -171,7 +191,9 @@ func TestCreateGivesUpAfterThreeServers(t *testing.T) {
 		e.alloc.answers[id+":9090"] = status.Error(codes.FailedPrecondition, "draining")
 	}
 	_, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
-	if !errors.Is(err, ErrNoServers) || len(e.alloc.calls) != maxAttempts {
+	// Three servers, each asked twice: a refusal could come from a stale connection, so the
+	// lobby redials once before moving on.
+	if !errors.Is(err, ErrNoServers) || len(slices.Compact(slices.Clone(e.alloc.calls))) != maxAttempts || len(e.alloc.calls) != 2*maxAttempts {
 		t.Fatalf("err = %v, calls = %v", err, e.alloc.calls)
 	}
 	if got := e.allocations(t); got["exhausted"] != 1 {
@@ -529,4 +551,69 @@ func TestUnreachableServerIsTriedLast(t *testing.T) {
 	if err != nil || room.ServerID != "gs-1" {
 		t.Fatalf("room = %+v, err = %v", room, err)
 	}
+}
+
+// After game servers swap IP addresses, the cached connection for gs-1 reaches gs-2. The
+// room must never be recorded under the wrong server; the lobby redials and asks again.
+func TestStaleConnectionIsRedialed(t *testing.T) {
+	for _, refuse := range []bool{true, false} {
+		name := "old server answers with its own id"
+		if refuse {
+			name = "server refuses a request meant for another"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.beat(t, "gs-1", 0, false)
+			e.beat(t, "gs-2", 9, false)
+			e.alloc.refuse = refuse
+			e.alloc.misroute["gs-1:9090"] = 1
+
+			room, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if room.ServerID != "gs-1" {
+				t.Fatalf("room on %s, want gs-1 after the redial", room.ServerID)
+			}
+			if !slices.Equal(e.alloc.calls, []string{"gs-1:9090", "gs-1:9090"}) || !slices.Equal(e.alloc.forgotten, []string{"gs-1:9090"}) {
+				t.Fatalf("calls = %v, forgotten = %v", e.alloc.calls, e.alloc.forgotten)
+			}
+			if !slices.Equal(e.alloc.targets, []string{"gs-1", "gs-1"}) {
+				t.Fatalf("server_id sent = %v", e.alloc.targets)
+			}
+		})
+	}
+}
+
+// A draining server refuses twice; the lobby moves on to the next one.
+func TestRefusedTwiceMovesOn(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	e.beat(t, "gs-2", 9, false)
+	e.alloc.answers["gs-1:9090"] = status.Error(codes.FailedPrecondition, "draining")
+	room, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil || room.ServerID != "gs-2" {
+		t.Fatalf("room = %+v, err = %v", room, err)
+	}
+	if !slices.Equal(e.alloc.calls, []string{"gs-1:9090", "gs-1:9090", "gs-2:9090"}) {
+		t.Fatalf("calls = %v", e.alloc.calls)
+	}
+}
+
+func TestGRPCAllocatorForgetRedials(t *testing.T) {
+	a := NewGRPCAllocator()
+	defer a.Close()
+	first, err := a.conn("gs-1:9090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Forget("gs-1:9090")
+	second, err := a.conn("gs-1:9090")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("Forget kept the cached connection")
+	}
+	a.Forget("unknown:1") // no-op
 }
