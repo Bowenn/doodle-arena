@@ -99,7 +99,7 @@ TIME_ZONE = "UTC"
 # The admin's CSS and JS, collected into the image at build time and served by WhiteNoise. They
 # live under /admin/ so the gateway's /admin/ route covers them.
 STATIC_URL = "/admin/static/"
-STATIC_ROOT = BASE_DIR / "static"
+STATIC_ROOT: Path | None = BASE_DIR / "static"
 
 # Moderators sign in with Google through the web app, which hands its access token to
 # /admin/sso/ once (ADR 0001). There are no Django passwords. The session is scoped to /admin/

@@ -3,6 +3,7 @@ an in-memory substitute), migrated with the same Django migrations as production
 tests use a real Redis broker."""
 
 import os
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -81,3 +82,45 @@ def make_drawing() -> Any:
         return Drawing.objects.create(**round_fields(**overrides))
 
     return make
+
+
+class Signer:
+    """Signs access tokens like auth does, with a throwaway key the verifier trusts."""
+
+    issuer = "http://localhost:8080/api/auth"
+
+    def __init__(self) -> None:
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        self.private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    def token(self, sub: str, roles: list[str], ttl: int = 900, name: str = "Mo") -> str:
+        import jwt
+
+        now = int(time.time())
+        claims = {
+            "sub": sub,
+            "roles": roles,
+            "name": name,
+            "iss": self.issuer,
+            "aud": "doodle-api",
+            "iat": now,
+            "exp": now + ttl,
+        }
+        return jwt.encode(claims, self.private_key, "RS256", headers={"kid": "test-key"})
+
+
+@pytest.fixture(scope="session")
+def signer() -> Signer:
+    return Signer()
+
+
+@pytest.fixture(autouse=True)
+def trusted_test_key(signer: Signer) -> Iterator[None]:
+    """Every test's verifier trusts the signer's key, so no test ever fetches a JWKS."""
+    from config import authn
+
+    keys = authn.StaticKeys({"test-key": signer.private_key.public_key()})
+    authn.set_verifier_for_tests(authn.TokenVerifier(keys, Signer.issuer))
+    yield
+    authn.set_verifier_for_tests(None)
