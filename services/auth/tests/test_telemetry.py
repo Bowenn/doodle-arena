@@ -59,8 +59,23 @@ client.post(
     "/api/auth/refresh",
     headers={"Origin": "http://localhost:8080", "Cookie": "da_refresh=not-a-real-token"},
 )
+# Rejected (no state cookie), but the span must still not carry the code or the state.
+client.get("/api/auth/google/callback?code=c0de-secret&state=st4te-secret")
 shutdown()
 """
+
+
+@pytest.mark.parametrize(
+    ("query", "redacted"),
+    [
+        ("code=abc&state=xyz", "code=REDACTED&state=REDACTED"),
+        ("return_to=%2Frooms%2Fr1", "return_to=REDACTED"),
+        ("flag&a=1&a=2", "flag=REDACTED&a=REDACTED&a=REDACTED"),
+        ("", ""),
+    ],
+)
+def test_redact_query_keeps_names_only(query: str, redacted: str) -> None:
+    assert telemetry.redact_query(query) == redacted
 
 
 def test_exports_traces_metrics_and_logs_over_otlp(db: Engine, key_file: str) -> None:
@@ -95,8 +110,20 @@ def test_exports_traces_metrics_and_logs_over_otlp(db: Engine, key_file: str) ->
         assert resource["deployment.environment"] == "test"
 
         spans = collector.spans()
-        [server] = [s for s in spans if s.kind == Span.SpanKind.SPAN_KIND_SERVER]  # no /healthz
-        assert attributes(server.attributes)["url.path"] == "/api/auth/refresh"
+        servers = {
+            attributes(s.attributes)["url.path"]: s
+            for s in spans
+            if s.kind == Span.SpanKind.SPAN_KIND_SERVER
+        }
+        assert servers.keys() == {"/api/auth/refresh", "/api/auth/google/callback"}  # no /healthz
+        server = servers["/api/auth/refresh"]
+
+        # The OAuth code and state never leave the service, in any attribute of any span.
+        callback = attributes(servers["/api/auth/google/callback"].attributes)
+        assert callback["url.query"] == "code=REDACTED&state=REDACTED"
+        for s in spans:
+            for value in attributes(s.attributes).values():
+                assert "c0de-secret" not in value and "st4te-secret" not in value, s.name
         # The refresh token lookup shows up in the request's trace (SQLAlchemy and psycopg).
         db_spans = [
             s

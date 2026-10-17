@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,16 +166,16 @@ func TestRedisRedeemerIsSingleUse(t *testing.T) {
 	rdb := redistest.New(t)
 	r := NewRedisRedeemer(rdb, "gs-1", clock(now))
 	tk := Ticket{ID: "jti-1", UserID: "u-1", RoomID: "r1", ExpiresAt: now.Add(TTL)}
-	if err := r.Redeem(t.Context(), tk); !errors.Is(err, ErrNotOwner) {
+	if err := r.Redeem(t.Context(), tk, 7); !errors.Is(err, ErrNotOwner) {
 		t.Fatalf("without the lease: err = %v, want ErrNotOwner", err)
 	}
 	for _, id := range []string{"r1", "r2"} {
 		rdb.Set(t.Context(), roomstore.LeaseKey(id), roomstore.LeaseValue("gs-1", 7), time.Minute)
 	}
-	if err := r.Redeem(t.Context(), tk); err != nil {
+	if err := r.Redeem(t.Context(), tk, 7); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Redeem(t.Context(), tk); !errors.Is(err, ErrReused) {
+	if err := r.Redeem(t.Context(), tk, 7); !errors.Is(err, ErrReused) {
 		t.Fatalf("second redeem: err = %v, want ErrReused", err)
 	}
 	// The record outlives the ticket: exp + leeway, 65 s here.
@@ -183,19 +184,52 @@ func TestRedisRedeemerIsSingleUse(t *testing.T) {
 		t.Fatalf("ttl = %v, want (60s, 65s]", ttl)
 	}
 	// Another room's ticket with the same id is a different key.
-	if err := r.Redeem(t.Context(), Ticket{ID: "jti-1", RoomID: "r2", ExpiresAt: now.Add(TTL)}); err != nil {
+	if err := r.Redeem(t.Context(), Ticket{ID: "jti-1", RoomID: "r2", ExpiresAt: now.Add(TTL)}, 7); err != nil {
 		t.Fatal(err)
 	}
 	// A server whose id is a prefix of the owner's doesn't count as the owner.
-	if err := NewRedisRedeemer(rdb, "gs", clock(now)).Redeem(t.Context(), Ticket{ID: "j9", RoomID: "r1", ExpiresAt: now.Add(TTL)}); !errors.Is(err, ErrNotOwner) {
+	if err := NewRedisRedeemer(rdb, "gs", clock(now)).Redeem(t.Context(), Ticket{ID: "j9", RoomID: "r1", ExpiresAt: now.Add(TTL)}, 7); !errors.Is(err, ErrNotOwner) {
 		t.Fatalf("prefix id: err = %v", err)
+	}
+}
+
+// ADR 0007: the redemption is a write for the room like any other, so it is checked against
+// the exact lease, <server_id>:<token>, not just the server id.
+func TestRedisRedeemerChecksTheFencingToken(t *testing.T) {
+	rdb := redistest.New(t)
+	rdb.Set(t.Context(), roomstore.LeaseKey("r1"), roomstore.LeaseValue("gs-1", 6), time.Minute)
+	tk := func(id string) Ticket { return Ticket{ID: id, RoomID: "r1", ExpiresAt: now.Add(TTL)} }
+
+	tests := []struct {
+		name   string
+		server string
+		token  int64
+		want   error
+	}{
+		{"an older token of the same server", "gs-1", 5, ErrNotOwner},
+		{"a newer token of the same server", "gs-1", 7, ErrNotOwner},
+		{"the same token on another server", "gs-2", 6, ErrNotOwner},
+		{"the current lease", "gs-1", 6, nil},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id := fmt.Sprintf("jti-%d", i)
+			err := NewRedisRedeemer(rdb, tt.server, clock(now)).Redeem(t.Context(), tk(id), tt.token)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("err = %v, want %v", err, tt.want)
+			}
+			// A refused redemption leaves no record, so the ticket still works on the owner.
+			if used := rdb.Exists(t.Context(), roomstore.TicketKey("r1", id)).Val() == 1; used != (tt.want == nil) {
+				t.Fatalf("recorded = %v", used)
+			}
+		})
 	}
 }
 
 func TestRedisRedeemerFailsClosed(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 100 * time.Millisecond, MaxRetries: -1})
 	defer rdb.Close()
-	err := NewRedisRedeemer(rdb, "gs-1", clock(now)).Redeem(context.Background(), Ticket{ID: "x", RoomID: "r1", ExpiresAt: now.Add(TTL)})
+	err := NewRedisRedeemer(rdb, "gs-1", clock(now)).Redeem(context.Background(), Ticket{ID: "x", RoomID: "r1", ExpiresAt: now.Add(TTL)}, 1)
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}

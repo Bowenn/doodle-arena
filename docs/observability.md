@@ -56,6 +56,8 @@ Never log:
 - Secrets, tokens, API keys, Stripe payloads that contain secrets, or email addresses.
 - Individual strokes. Log once per round instead (`round finished`, with the stroke count).
 
+The same goes for span attributes, which end up in Tempo. Query strings are the usual leak: auth replaces every query value in its server spans with `REDACTED` (`server_request_hook` in `services/auth/app/telemetry.py`), and the gateway doesn't trace `/api/auth/google/callback`, whose query holds the OAuth code and state (its span would record them as `http.target`). It sends no trace context there either, so that request's trace starts at auth.
+
 Logs are not the audit trail. They can be sampled and they expire. The history of money and ownership lives in the marketplace's Postgres tables, as data that is never dropped.
 
 ## 3. Metrics

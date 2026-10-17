@@ -175,14 +175,17 @@ func Thumbprint(pub ed25519.PublicKey) string {
 
 // Redeemer records that a ticket has been used.
 type Redeemer interface {
-	// Redeem returns nil the first time, ErrReused after that, or ErrUnavailable when it
-	// can't tell (the join must then fail: single use can't be guaranteed).
-	Redeem(ctx context.Context, t Ticket) error
+	// Redeem returns nil the first time, ErrReused after that, ErrNotOwner when this server
+	// no longer holds the room's lease with token (the fencing token the room was taken with),
+	// or ErrUnavailable when it can't tell (the join must then fail: single use can't be
+	// guaranteed).
+	Redeem(ctx context.Context, t Ticket, token int64) error
 }
 
 // RedisRedeemer stores used ticket ids under the game server's own prefix
 // (room:{room_id}:ticket:{ticket_id}) with SET NX, only while this server holds the room's
-// lease: like every write to a room's keys, it is checked against the owner (ADR 0007).
+// lease with the room's fencing token: like every write to a room's keys, it is checked
+// against lease == <server_id>:<token> (ADR 0007).
 type RedisRedeemer struct {
 	rdb      redis.UniversalClient
 	serverID string
@@ -195,15 +198,14 @@ func NewRedisRedeemer(rdb redis.UniversalClient, serverID string, now func() tim
 }
 
 var redeemScript = redis.NewScript(`
-local lease = redis.call('GET', KEYS[1])
-if not lease or string.sub(lease, 1, string.len(ARGV[1]) + 1) ~= ARGV[1] .. ':' then return -1 end
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return -1 end
 if redis.call('SET', KEYS[2], '1', 'NX', 'PX', ARGV[2]) then return 1 end
 return 0
 `)
 
 // Redeem implements Redeemer. The record lives as long as the ticket could still verify
 // (exp plus the leeway), so a replay can never outlive it.
-func (r *RedisRedeemer) Redeem(ctx context.Context, t Ticket) error {
+func (r *RedisRedeemer) Redeem(ctx context.Context, t Ticket, token int64) error {
 	ttl := t.ExpiresAt.Add(Leeway).Sub(r.now())
 	if ttl < time.Second {
 		ttl = time.Second
@@ -211,7 +213,7 @@ func (r *RedisRedeemer) Redeem(ctx context.Context, t Ticket) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	res, err := redeemScript.Run(ctx, r.rdb, []string{roomstore.LeaseKey(t.RoomID), roomstore.TicketKey(t.RoomID, t.ID)},
-		r.serverID, ttl.Milliseconds()).Int()
+		roomstore.LeaseValue(r.serverID, token), ttl.Milliseconds()).Int()
 	switch {
 	case err != nil:
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)

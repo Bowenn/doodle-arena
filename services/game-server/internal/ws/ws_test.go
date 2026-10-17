@@ -27,18 +27,23 @@ type roomTable map[string]*room.Room
 
 func (t roomTable) Room(id string) *room.Room { return t[id] }
 
-// memRedeemer is single use in memory; err makes it fail like a Redis outage.
+// memRedeemer is single use in memory, for the room's lease with token lease (the room's
+// fencing token, like Redis); err makes it fail like a Redis outage.
 type memRedeemer struct {
-	mu   sync.Mutex
-	used map[string]bool
-	err  error
+	mu    sync.Mutex
+	used  map[string]bool
+	lease int64
+	err   error
 }
 
-func (m *memRedeemer) Redeem(_ context.Context, t ticket.Ticket) error {
+func (m *memRedeemer) Redeem(_ context.Context, t ticket.Ticket, token int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.err != nil {
 		return m.err
+	}
+	if token != m.lease {
+		return ticket.ErrNotOwner
 	}
 	if m.used[t.ID] {
 		return ticket.ErrReused
@@ -64,13 +69,13 @@ func newEnv(t *testing.T, maxPlayers int, hello time.Duration) *env {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := room.DefaultSettings
 	s.MaxPlayers = maxPlayers
-	r, err := room.New(room.Config{ID: "r1", Mode: "classic", HostID: "u1", Settings: s, Log: log, Metrics: room.NoopMetrics()})
+	r, err := room.New(room.Config{ID: "r1", Mode: "classic", HostID: "u1", Settings: s, Log: log, Metrics: room.NoopMetrics(), Token: roomToken})
 	if err != nil {
 		t.Fatal(err)
 	}
 	go r.Run(ctx)
 	rooms := roomTable{"r1": r}
-	red := &memRedeemer{used: map[string]bool{}}
+	red := &memRedeemer{used: map[string]bool{}, lease: roomToken}
 	h, err := NewHandler(Config{
 		ServerID: "gs-1", Rooms: rooms, Verifier: ticket.NewVerifier([]ed25519.PublicKey{pub}, time.Now),
 		Redeemer: red, Origins: []string{"localhost:8080"}, HelloTimeout: hello, Log: log,
@@ -204,6 +209,28 @@ func TestTicketChecks(t *testing.T) {
 	}
 	if e.redeemer.used["j3"] {
 		t.Fatal("an invalid ticket was redeemed")
+	}
+}
+
+// The room was taken with this fencing token.
+const roomToken = 7
+
+// A ticket is redeemed against the room's own fencing token: once the lease carries a newer
+// one (a takeover), the join is refused as moved, and the client asks the lobby again.
+func TestRedeemChecksTheRoomsFencingToken(t *testing.T) {
+	e := newEnv(t, 8, time.Second)
+	e.join("u1", "j1")
+	e.redeemer.mu.Lock()
+	e.redeemer.lease = roomToken + 1
+	e.redeemer.mu.Unlock()
+
+	c := e.dial("/ws/gs-1/rooms/r1", nil)
+	write(t, c, "hello", map[string]any{"ticket": e.sign("u2", "r1", "j2")})
+	if got := closeCode(t, c); got != protocol.CloseRoomMoved {
+		t.Fatalf("close = %d, want %d (room moved)", got, protocol.CloseRoomMoved)
+	}
+	if e.redeemer.used["j2"] {
+		t.Fatal("a ticket was redeemed against a lease this room no longer holds")
 	}
 }
 

@@ -79,7 +79,7 @@ Until Will joins the project, Bowen covers every service, including marketplace 
 - Passes the `Upgrade` and `Connection` headers for WebSockets, with a long read timeout.
 - Applies coarse per-IP rate limiting with `limit_req`, which is a leaky bucket. Fine-grained limits live in the services.
 - Serves `/healthz` for itself and `/healthz/<service>` for every service, including each game-server instance (used by `make smoke`). These are restricted to internal traffic in AWS.
-- Only routes; it doesn't verify tokens (ADR 0001). It strips any client-supplied `X-User-*` and `X-Roles` headers, and never routes to a service's internal port.
+- Only routes; it doesn't verify tokens (ADR 0001). It refuses (400 `IDENTITY_HEADER`) any request that carries an `X-User-*` or `X-Roles` header, on every route; nginx can't match header names by pattern, so a small njs check (`services/gateway/identity.js`) does it. It never routes to a service's internal port.
 - Locally, the whole system is one origin, `http://localhost:8080`: the gateway also proxies the Vite dev server for the web app, so there is no CORS and the refresh cookie is first-party. TLS terminates at the gateway (or the load balancer in front of it) only in AWS.
 - WebSockets use `/ws/<server_id>/rooms/<room_id>`: an explicit map sends each `server_id` to its game-server instance, and unknown ids get 404 (ADR 0002).
 
