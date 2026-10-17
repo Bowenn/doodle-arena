@@ -53,6 +53,11 @@ func (a *GRPCAllocator) conn(addr string) (*grpc.ClientConn, error) {
 	c, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		// No service config from DNS. Otherwise the DNS resolver also looks up a TXT record
+		// (_grpc_config.<host>) and reports the addresses only after it: Docker's DNS forwards
+		// that query upstream, which took 5-8 s when cold, so the first AllocateRoom calls of a
+		// fresh lobby ran out of time on every server.
+		grpc.WithDisableServiceConfig(),
 		// Keep reconnects fast (gRPC's default backoff grows to 2 minutes): a game server that
 		// restarted must be reachable again by the time its heartbeats return.
 		grpc.WithConnectParams(grpc.ConnectParams{
