@@ -105,7 +105,7 @@ func (tb *table) startRound() string {
 	tb.t.Helper()
 	tb.send(tb.g.host, protocol.Start{})
 	tb.toNext() // Starting -> Choosing
-	tb.send(tb.g.drawer, protocol.ChooseWord{Index: 0})
+	tb.send(tb.g.chooser(), protocol.ChooseWord{Index: 0})
 	if tb.g.Phase() != PhaseDrawing {
 		tb.t.Fatalf("phase = %s, want drawing", tb.g.Phase())
 	}
@@ -159,8 +159,8 @@ func TestFullMatchAndRematch(t *testing.T) {
 		if tb.g.Phase() != PhaseChoosing {
 			t.Fatalf("phase = %s, want choosing", tb.g.Phase())
 		}
-		drawers = append(drawers, tb.g.drawer)
-		if opts := tb.private(tb.g.drawer, "word_options"); len(opts) == 0 {
+		drawers = append(drawers, tb.g.chooser())
+		if opts := tb.private(tb.g.chooser(), "word_options"); len(opts) == 0 {
 			t.Fatal("drawer got no word options")
 		}
 		tb.toNext() // choose timeout auto-picks options[0]
@@ -260,8 +260,8 @@ func TestDrawerLeaving(t *testing.T) {
 		tb.send("host", protocol.Start{})
 		tb.toNext()
 		tb.leave("host")
-		if tb.g.Phase() != PhaseChoosing || tb.g.drawer != "b" {
-			t.Fatalf("phase = %s, drawer = %s", tb.g.Phase(), tb.g.drawer)
+		if tb.g.Phase() != PhaseChoosing || !slices.Equal(tb.g.drawers, []string{"b"}) {
+			t.Fatalf("phase = %s, drawers = %v", tb.g.Phase(), tb.g.drawers)
 		}
 		if len(tb.events("round_ended")) != 0 {
 			t.Fatal("a round without a word was revealed")
@@ -524,32 +524,31 @@ func TestFinishedMatchRecord(t *testing.T) {
 	tb.join("host", "b", "c", "d")
 	tb.send("host", protocol.Start{})
 	firstRound := tb.now.Add(StartingFor)
-	tb.playRound("b") // host draws: b 100, host 10
-	tb.playRound()    // b draws, nobody guesses
-	tb.playRound("d") // c draws: d 100, c 10
-	tb.playRound()    // d draws
-	tb.toNext()       // everyone has drawn
+	tb.playRound("c")    // host and b draw: c 100, host 10, b 10
+	tb.playRound("host") // c and d draw: host 100, c 10, d 10
+	tb.toNext()          // everyone has drawn
 	if tb.g.Phase() != PhaseMatchEnd {
 		t.Fatalf("phase = %s", tb.g.Phase())
 	}
 
 	f := tb.g.TakeFinished()
-	if len(f) != 5 || f[4].Match == nil {
-		t.Fatalf("finished = %d items, want 4 rounds then the match", len(f))
+	if len(f) != 3 || f[2].Match == nil {
+		t.Fatalf("finished = %d items, want 2 rounds then the match", len(f))
 	}
-	for i, x := range f[:4] {
-		if x.Round == nil || x.Round.RoundNo != i+1 {
-			t.Fatalf("item %d = %+v, want round %d", i, x, i+1)
+	wantDrawers := [][]string{{"host", "b"}, {"c", "d"}}
+	for i, x := range f[:2] {
+		if x.Round == nil || x.Round.RoundNo != i+1 || !slices.Equal(x.Round.DrawerIDs, wantDrawers[i]) {
+			t.Fatalf("item %d = %+v, want round %d drawn by %v", i, x, i+1, wantDrawers[i])
 		}
 	}
-	m := *f[4].Match
-	if m.MatchID != tb.g.MatchID() || m.RoomID != "r1" || m.Rounds != 4 {
+	m := *f[2].Match
+	if m.MatchID != tb.g.MatchID() || m.RoomID != "r1" || m.Rounds != 2 {
 		t.Fatalf("match = %+v", m)
 	}
 	if !m.StartedAt.Equal(firstRound) || !m.EndedAt.Equal(tb.now) {
 		t.Fatalf("started %v (want %v), ended %v", m.StartedAt, firstRound, m.EndedAt)
 	}
-	want := []PlayerResult{{"b", 100, 1}, {"d", 100, 1}, {"host", 10, 3}, {"c", 10, 3}}
+	want := []PlayerResult{{"host", 110, 1}, {"c", 110, 1}, {"b", 10, 3}, {"d", 10, 3}}
 	if !slices.Equal(m.Results, want) {
 		t.Fatalf("results = %v, want %v", m.Results, want)
 	}

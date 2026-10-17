@@ -138,7 +138,7 @@ type Game struct {
 	usedWords map[string]bool
 
 	roundNo      int
-	drawer       string
+	drawers      []string // one, or two sharing the canvas; drawers[0] chooses the word
 	options      []string
 	word         string
 	drawStart    time.Time
@@ -217,6 +217,27 @@ func (g *Game) presentCount(now time.Time) int {
 	return n
 }
 
+// isDrawer reports whether uid draws this round.
+func (g *Game) isDrawer(uid string) bool { return uid != "" && slices.Contains(g.drawers, uid) }
+
+// chooser is the drawer who picks the word: drawers[0], or "" between rounds.
+func (g *Game) chooser() string {
+	if len(g.drawers) == 0 {
+		return ""
+	}
+	return g.drawers[0]
+}
+
+// presentDrawer returns the first drawer other than except who is present, or "".
+func (g *Game) presentDrawer(now time.Time, except string) string {
+	for _, id := range g.drawers {
+		if p, ok := g.players[id]; ok && id != except && g.present(p, now) {
+			return id
+		}
+	}
+	return ""
+}
+
 // Connected counts players with an open connection.
 func (g *Game) Connected() int {
 	n := 0
@@ -286,10 +307,12 @@ func (g *Game) Leave(now time.Time, uid string) {
 	switch {
 	case g.phase.Playing() && g.presentCount(now) < 2:
 		g.endMatch(now)
-	case uid == g.drawer && g.phase == PhaseChoosing:
-		g.nextRound(now) // nobody saw a word yet: just pick the next drawer
-	case uid == g.drawer && g.phase == PhaseDrawing:
-		g.endRound(now)
+	case uid == g.chooser() && g.phase == PhaseChoosing:
+		g.passChoice(now, g.presentDrawer(now, uid))
+	case g.isDrawer(uid) && g.phase == PhaseDrawing:
+		if g.presentDrawer(now, uid) == "" {
+			g.endRound(now) // nobody is left to draw
+		}
 	case g.phase == PhaseDrawing:
 		g.endRoundIfAllGuessed(now)
 	}
@@ -306,8 +329,8 @@ func (g *Game) Handle(now time.Time, uid string, msg protocol.ClientMsg) string 
 	case protocol.Start:
 		g.handleStart(now, uid)
 	case protocol.ChooseWord:
-		if g.phase != PhaseChoosing || uid != g.drawer {
-			g.fail(uid, "not_your_turn", "only the drawer can choose, while choosing")
+		if g.phase != PhaseChoosing || uid != g.chooser() {
+			g.fail(uid, "not_your_turn", "only the first drawer can choose, while choosing")
 			return ""
 		}
 		if m.Index >= len(g.options) {
@@ -339,8 +362,8 @@ func (g *Game) handleStart(now time.Time, uid string) {
 }
 
 func (g *Game) handleStroke(now time.Time, uid string, m protocol.StrokeBatch) {
-	if g.phase != PhaseDrawing || uid != g.drawer {
-		g.fail(uid, "not_your_turn", "only the drawer can draw, while drawing")
+	if g.phase != PhaseDrawing || !g.isDrawer(uid) {
+		g.fail(uid, "not_your_turn", "only the drawers can draw, while drawing")
 		return
 	}
 	if g.canvasPoints+len(m.Points) > maxCanvasPoints {
@@ -382,15 +405,15 @@ func (g *Game) handleGuess(now time.Time, p *player, text string) string {
 		g.send(p.id, "rate_limited", map[string]any{})
 		return GuessRateLimited
 	}
-	if g.phase == PhaseChoosing && p.id == g.drawer {
-		g.fail(p.id, "cannot_chat_now", "the drawer can't chat while choosing a word")
+	if g.phase == PhaseChoosing && g.isDrawer(p.id) {
+		g.fail(p.id, "cannot_chat_now", "the drawers can't chat while choosing a word")
 		return ""
 	}
 	if g.phase != PhaseDrawing {
 		g.emit("chat", map[string]any{"user_id": p.id, "text": text})
 		return ""
 	}
-	if p.id == g.drawer || p.guessed {
+	if g.isDrawer(p.id) || p.guessed {
 		// They know the word; their chat could give it away.
 		g.fail(p.id, "cannot_chat_now", "you know the word; chat opens after the round")
 		return ""
@@ -403,10 +426,7 @@ func (g *Game) handleGuess(now time.Time, p *player, text string) string {
 		p.score += points
 		p.guessed = true
 		g.roundPoints[p.id] += points
-		if d, ok := g.players[g.drawer]; ok {
-			d.score += DrawerPointsPerGuess
-			g.roundPoints[d.id] += DrawerPointsPerGuess
-		}
+		g.creditDrawers()
 		g.emit("correct_guess", map[string]any{"user_id": p.id, "order": g.correct})
 		g.send(p.id, "guess_result", map[string]any{"correct": true})
 		g.endRoundIfAllGuessed(now)
@@ -449,14 +469,13 @@ func (g *Game) Advance(now time.Time) {
 // afterGrace applies, once the takeover grace is over, what a leave would have done for the
 // players who never came back.
 func (g *Game) afterGrace(now time.Time) {
-	d, drawerHere := g.players[g.drawer]
-	drawerHere = drawerHere && d.connected
+	// The grace is over, so present now means connected.
 	switch {
 	case g.phase.Playing() && g.Connected() < 2:
 		g.endMatch(now)
-	case g.drawer != "" && !drawerHere && g.phase == PhaseChoosing:
-		g.nextRound(now)
-	case g.drawer != "" && !drawerHere && g.phase == PhaseDrawing:
+	case g.phase == PhaseChoosing && g.presentDrawer(now, "") != g.chooser():
+		g.passChoice(now, g.presentDrawer(now, ""))
+	case g.phase == PhaseDrawing && g.presentDrawer(now, "") == "":
 		g.endRound(now)
 	case g.phase == PhaseDrawing:
 		g.endRoundIfAllGuessed(now)
@@ -547,14 +566,22 @@ func (g *Game) nextRound(now time.Time) {
 		g.endMatch(now)
 		return
 	}
-	next := ""
+	// With enough players, the next two in the draw order share the canvas. Each player still
+	// draws once per match, so the last round can have a single drawer (5 players: 2, 2, 1).
+	want := 1
+	if g.presentCount(now) >= PairFrom {
+		want = 2
+	}
+	var next []string
 	for _, id := range g.drawOrder {
 		if p, ok := g.players[id]; ok && g.present(p, now) && !g.drawn[id] {
-			next = id
-			break
+			next = append(next, id)
+			if len(next) == want {
+				break
+			}
 		}
 	}
-	if next == "" {
+	if len(next) == 0 {
 		g.endMatch(now)
 		return
 	}
@@ -562,17 +589,48 @@ func (g *Game) nextRound(now time.Time) {
 	if g.roundNo == 1 {
 		g.matchStart = now
 	}
-	g.drawer = next
-	g.drawn[next] = true
+	g.drawers = next
+	for _, id := range next {
+		g.drawn[id] = true
+	}
 	g.options = g.picker.Options(g.settings.WordOptions, g.usedWords)
 	g.phase = PhaseChoosing
 	g.deadline = now.Add(g.settings.Choose)
-	g.emit("choosing", map[string]any{"round_no": g.roundNo, "drawer_ids": []string{next}, "deadline": g.deadline.UnixMilli()})
-	g.sendPrivate(next)
+	g.announceChoosing()
+}
+
+// announceChoosing tells the room who is choosing; only the first drawer gets the options.
+func (g *Game) announceChoosing() {
+	g.emit("choosing", map[string]any{"round_no": g.roundNo, "drawer_ids": slices.Clone(g.drawers), "deadline": g.deadline.UnixMilli()})
+	g.sendPrivate(g.chooser())
+}
+
+// passChoice handles the chooser leaving while choosing. If another drawer is still here, the
+// word options go to them; the one who left stays a drawer (they saw the options, so they
+// must not guess this round). The deadline stays: two drawers leaving and rejoining in turn
+// could otherwise pass the choice back and forth and stall the room. If no drawer is here,
+// nobody saw a word yet, and the next round simply starts.
+func (g *Game) passChoice(now time.Time, next string) {
+	if next == "" {
+		g.nextRound(now)
+		return
+	}
+	g.drawers = append([]string{next}, slices.DeleteFunc(slices.Clone(g.drawers), func(id string) bool { return id == next })...)
+	g.announceChoosing()
+}
+
+// creditDrawers gives every drawer their points for one correct guess.
+func (g *Game) creditDrawers() {
+	for _, id := range g.drawers {
+		if d, ok := g.players[id]; ok {
+			d.score += DrawerPointsPerGuess
+			g.roundPoints[id] += DrawerPointsPerGuess
+		}
+	}
 }
 
 func (g *Game) resetRound() {
-	g.drawer, g.word, g.options = "", "", nil
+	g.drawers, g.word, g.options = nil, "", nil
 	g.hintsGiven, g.correct, g.canvasPoints = 0, 0, 0
 	g.revealed = map[int]bool{}
 	g.roundPoints = map[string]int{}
@@ -590,15 +648,17 @@ func (g *Game) beginDrawing(now time.Time, word string) {
 	g.drawStart = now
 	g.deadline = now.Add(g.settings.Draw)
 	g.emit("round_started", map[string]any{
-		"round_no": g.roundNo, "drawer_ids": []string{g.drawer}, "word_length": len(word), "deadline": g.deadline.UnixMilli(),
+		"round_no": g.roundNo, "drawer_ids": slices.Clone(g.drawers), "word_length": len(word), "deadline": g.deadline.UnixMilli(),
 	})
-	g.sendPrivate(g.drawer)
+	for _, id := range g.drawers {
+		g.sendPrivate(id)
+	}
 }
 
 func (g *Game) endRoundIfAllGuessed(now time.Time) {
 	guessers, guessed := 0, 0
 	for _, p := range g.players {
-		if g.present(p, now) && p.id != g.drawer {
+		if g.present(p, now) && !g.isDrawer(p.id) {
 			guessers++
 			if p.guessed {
 				guessed++
@@ -613,7 +673,7 @@ func (g *Game) endRoundIfAllGuessed(now time.Time) {
 func (g *Game) endRound(now time.Time) {
 	g.roundsFinished++
 	g.finished = append(g.finished, Finished{Round: &FinishedRound{
-		MatchID: g.matchID, RoomID: g.roomID, RoundNo: g.roundNo, Word: g.word, DrawerIDs: []string{g.drawer},
+		MatchID: g.matchID, RoomID: g.roomID, RoundNo: g.roundNo, Word: g.word, DrawerIDs: slices.Clone(g.drawers),
 		Correct: g.correct, Canvas: slices.Clone(g.canvas), DrawStart: g.drawStart, EndedAt: now,
 	}})
 	g.phase = PhaseReveal
@@ -629,7 +689,7 @@ func (g *Game) endMatch(now time.Time) {
 	}
 	g.phase = PhaseMatchEnd
 	g.deadline = time.Time{}
-	g.drawer = ""
+	g.drawers = nil
 	results := make([]map[string]any, 0, len(g.players))
 	final := make([]PlayerResult, 0, len(g.players))
 	placement := 0
@@ -739,9 +799,7 @@ func (g *Game) ViewFor(uid string) View {
 	if !g.deadline.IsZero() {
 		v.Deadline = g.deadline.UnixMilli()
 	}
-	if g.drawer != "" {
-		v.DrawerIDs = []string{g.drawer}
-	}
+	v.DrawerIDs = cloneOrNil(g.drawers)
 	for _, id := range g.joinOrder() {
 		p := g.players[id]
 		v.Players = append(v.Players, PlayerView{UserID: id, Name: p.name, Score: p.score, Connected: p.connected, Guessed: p.guessed})
@@ -756,16 +814,17 @@ func (g *Game) ViewFor(uid string) View {
 	return v
 }
 
-// sendPrivate gives a drawer what only they may see: the word options while choosing, the
-// word while drawing. This and the Reveal views are the only ways the word leaves the room.
+// sendPrivate gives a drawer what only they may see: the word options while choosing (the
+// first drawer only), the word while drawing (every drawer). This and the Reveal views are
+// the only ways the word leaves the room.
 func (g *Game) sendPrivate(uid string) {
-	if uid == "" || uid != g.drawer {
+	if !g.isDrawer(uid) {
 		return
 	}
-	switch g.phase {
-	case PhaseChoosing:
+	switch {
+	case g.phase == PhaseChoosing && uid == g.chooser():
 		g.send(uid, "word_options", map[string]any{"words": g.options})
-	case PhaseDrawing:
+	case g.phase == PhaseDrawing:
 		g.send(uid, "your_word", map[string]any{"word": g.word})
 	}
 }

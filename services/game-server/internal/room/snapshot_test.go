@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -79,9 +80,14 @@ func TestSnapshotPlusEventsRebuildsTheGame(t *testing.T) {
 		t.Run(fmt.Sprint("seed ", seed), func(t *testing.T) {
 			r := newRecorder(t, seed)
 			act := rand.New(rand.NewPCG(seed, 99))
-			users := []string{"p0", "p1", "p2", "p3", "p4"}
+			// Up to 6 players, so rounds with two drawers (4 or more present) come up often.
+			users := []string{"p0", "p1", "p2", "p3", "p4", "p5"}
 			for step := range 1500 {
 				uid := users[act.IntN(len(users))]
+				drawer := uid // either drawer of a pair, or anyone between rounds
+				if len(r.g.drawers) > 0 {
+					drawer = r.g.drawers[act.IntN(len(r.g.drawers))]
+				}
 				switch n := act.IntN(100); {
 				case n < 6:
 					_ = r.g.Join(r.now, uid, "Name "+uid, act.IntN(2) == 0)
@@ -90,15 +96,15 @@ func TestSnapshotPlusEventsRebuildsTheGame(t *testing.T) {
 				case n < 12:
 					r.g.Handle(r.now, r.g.host, protocol.Start{})
 				case n < 16:
-					r.g.Handle(r.now, r.g.drawer, protocol.ChooseWord{Index: act.IntN(3)})
+					r.g.Handle(r.now, r.g.chooser(), protocol.ChooseWord{Index: act.IntN(3)})
 				case n < 55:
 					pts := make([][]int, 1+act.IntN(20))
 					for i := range pts {
 						pts[i] = []int{act.IntN(10001), act.IntN(10001), i}
 					}
-					r.g.Handle(r.now, r.g.drawer, protocol.StrokeBatch{StrokeID: fmt.Sprint("s", act.IntN(6)), Points: pts, Color: "#123456", Width: 3})
+					r.g.Handle(r.now, drawer, protocol.StrokeBatch{StrokeID: fmt.Sprint("s", act.IntN(6)), Points: pts, Color: "#123456", Width: 3})
 				case n < 60:
-					r.g.Handle(r.now, r.g.drawer, protocol.Undo{StrokeID: fmt.Sprint("s", act.IntN(6))})
+					r.g.Handle(r.now, drawer, protocol.Undo{StrokeID: fmt.Sprint("s", act.IntN(6))})
 				case n < 75:
 					text := "nope"
 					if act.IntN(3) == 0 {
@@ -134,9 +140,9 @@ func TestRestoreGivesPlayersAGraceToComeBack(t *testing.T) {
 	r.now = r.now.Add(StartingFor)
 	r.g.Advance(r.now)
 	r.commit()
-	r.g.Handle(r.now, r.g.drawer, protocol.ChooseWord{Index: 0})
+	r.g.Handle(r.now, r.g.chooser(), protocol.ChooseWord{Index: 0})
 	r.commit()
-	drawer, word := r.g.drawer, r.g.word
+	drawer, word := r.g.chooser(), r.g.word
 
 	// The new owner restores 2 s later: everybody is disconnected, nothing ends yet.
 	took := r.now.Add(2 * time.Second)
@@ -144,7 +150,7 @@ func TestRestoreGivesPlayersAGraceToComeBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.Connected() != 0 || g.Phase() != PhaseDrawing || g.word != word || g.drawer != drawer {
+	if g.Connected() != 0 || g.Phase() != PhaseDrawing || g.word != word || g.chooser() != drawer {
 		t.Fatalf("restored: connected %d phase %s", g.Connected(), g.Phase())
 	}
 	if g.deadline != r.g.deadline {
@@ -224,5 +230,96 @@ func TestRecentEvents(t *testing.T) {
 	r.g.log = r.g.log[2:] // pretend the buffer dropped the oldest
 	if _, ok := r.g.RecentEvents(0); ok {
 		t.Fatal("claimed to cover events it no longer has")
+	}
+}
+
+// Rooms stored before task 2.6a have a single "drawer" and no "drawers". A new server must
+// still restore them: the drawer keeps drawing and earns points for the events after the
+// snapshot.
+func TestRestoreReadsOldSingleDrawerSnapshots(t *testing.T) {
+	r := newRecorder(t, 7)
+	for _, u := range []string{"p0", "p1", "p2"} {
+		_ = r.g.Join(r.now, u, u, false)
+	}
+	r.g.Handle(r.now, "p0", protocol.Start{})
+	r.commit()
+	r.now = r.now.Add(StartingFor)
+	r.g.Advance(r.now)
+	r.commit()
+	r.g.Handle(r.now, "p0", protocol.ChooseWord{Index: 0})
+	r.commit()
+	r.g.Handle(r.now, "p1", protocol.Guess{Text: r.g.word}) // after the snapshot
+	r.commit()
+
+	// Rewrite the snapshot the way a pre-2.6a server stored it.
+	var old map[string]any
+	if err := json.Unmarshal([]byte(snapJSON(t, r.snap)), &old); err != nil {
+		t.Fatal(err)
+	}
+	delete(old, "drawers")
+	old["drawer"] = "p0"
+	b, _ := json.Marshal(old)
+	var s Snapshot
+	if err := json.Unmarshal(b, &s); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := restore(s, r.events, rand.New(rand.NewPCG(1, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(g.drawers, []string{"p0"}) || g.Phase() != PhaseDrawing {
+		t.Fatalf("drawers = %v, phase = %s", g.drawers, g.Phase())
+	}
+	if g.players["p0"].score != DrawerPointsPerGuess {
+		t.Fatalf("drawer score = %d, want the points of the replayed correct guess", g.players["p0"].score)
+	}
+	if a, b := snapJSON(t, g.Snapshot()), snapJSON(t, r.g.Snapshot()); a != b {
+		t.Fatalf("restored state differs\nrestored: %s\nlive:     %s", a, b)
+	}
+	g.Handle(r.now, "p0", stroke("s1", 2))
+	if len(g.canvas) != 1 {
+		t.Fatal("the restored drawer can't draw")
+	}
+}
+
+// After a takeover, if the first drawer never comes back while choosing, the options pass to
+// the second drawer once the grace is over.
+func TestRestorePassesTheChoiceAfterTheGrace(t *testing.T) {
+	r := newRecorder(t, 8)
+	r.g.settings.Choose = 2 * TakeoverGrace // so the choice is still open when the grace ends
+	for _, u := range []string{"p0", "p1", "p2", "p3", "p4"} {
+		_ = r.g.Join(r.now, u, u, false)
+	}
+	r.g.Handle(r.now, "p0", protocol.Start{})
+	r.commit()
+	r.now = r.now.Add(StartingFor)
+	r.g.Advance(r.now)
+	r.commit()
+	if !slices.Equal(r.g.drawers, []string{"p0", "p1"}) {
+		t.Fatalf("drawers = %v", r.g.drawers)
+	}
+
+	took := r.now.Add(time.Second)
+	g, err := RestoreGame(r.snap, r.events, rand.New(rand.NewPCG(5, 5)), took)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"p1", "p2", "p3", "p4"} { // everyone but the first drawer
+		if err := g.Join(took.Add(time.Second), u, u, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.TakeOut()
+	g.Advance(took.Add(TakeoverGrace))
+	if !slices.Equal(g.drawers, []string{"p1", "p0"}) || g.Phase() != PhaseChoosing {
+		t.Fatalf("drawers = %v, phase = %s; want the choice passed to p1", g.drawers, g.Phase())
+	}
+	got := false
+	for _, o := range g.TakeOut() {
+		got = got || (o.To == "p1" && o.Type == "word_options")
+	}
+	if !got {
+		t.Fatal("p1 got no word options")
 	}
 }

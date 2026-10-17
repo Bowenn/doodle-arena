@@ -254,6 +254,29 @@ export function isDrawer(s: RoomState): boolean {
   return s.drawerIds.includes(s.me)
 }
 
+/** Whether this player picks the word: with two drawers, only the first one does. */
+export function isChooser(s: RoomState): boolean {
+  return s.drawerIds.length > 0 && s.drawerIds[0] === s.me
+}
+
+/** Who is choosing, as the phase bar says it to everyone but the chooser. With two drawers,
+ * the second one learns that the first is choosing the word they will draw together. */
+export function choosingLabel(s: RoomState): string {
+  if (s.drawerIds.length === 0) return ''
+  const line = `${nameOf(s, s.drawerIds[0])} is choosing a word.`
+  return isDrawer(s) ? `${line} You draw it together.` : line
+}
+
+/** Who is drawing: "Ada is drawing", "Ada and Bob are drawing", or "You and Bob are
+ * drawing" (this player first). */
+export function drawingLabel(s: RoomState): string {
+  const others = s.drawerIds.filter((id) => id !== s.me).map((id) => nameOf(s, id))
+  if (!isDrawer(s)) {
+    return others.length > 1 ? `${others.join(' and ')} are drawing` : `${others[0] ?? 'Someone'} is drawing`
+  }
+  return others.length ? `You and ${others.join(' and ')} are drawing` : 'Your turn to draw'
+}
+
 export function connectedCount(s: RoomState): number {
   return s.players.filter((p) => p.connected).length
 }

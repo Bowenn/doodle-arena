@@ -47,8 +47,11 @@ type Snapshot struct {
 	Drawn     []string `json:"drawn"`
 	UsedWords []string `json:"used_words"`
 
-	RoundNo     int            `json:"round_no"`
-	Drawer      string         `json:"drawer"`
+	RoundNo int      `json:"round_no"`
+	Drawers []string `json:"drawers"`
+	// Drawer is the single drawer of snapshots written before task 2.6a. It is only read:
+	// a room stored by an older server restores with Drawers = [Drawer].
+	Drawer      string         `json:"drawer,omitempty"`
 	Options     []string       `json:"options"`
 	Word        string         `json:"word"`
 	DrawStart   time.Time      `json:"draw_start"`
@@ -114,7 +117,7 @@ func (g *Game) Snapshot() Snapshot {
 	s := Snapshot{
 		RoomID: g.roomID, HostID: g.hostID, Host: g.host, NextJoin: g.nextJoin,
 		Phase: g.phase, Deadline: g.deadline, MatchID: g.matchID,
-		DrawOrder: cloneOrNil(g.drawOrder), RoundNo: g.roundNo, Drawer: g.drawer, Options: cloneOrNil(g.options),
+		DrawOrder: cloneOrNil(g.drawOrder), RoundNo: g.roundNo, Drawers: cloneOrNil(g.drawers), Options: cloneOrNil(g.options),
 		Word: g.word, DrawStart: g.drawStart, HintsGiven: g.hintsGiven, Correct: g.correct,
 		MatchStart: g.matchStart, RoundsFinished: g.roundsFinished,
 		Seq: g.seq, Empty: g.empty,
@@ -181,9 +184,12 @@ func restore(s Snapshot, events []StoredEvent, rng *rand.Rand) (*Game, error) {
 			Draw: time.Duration(s.Settings.DrawMS) * time.Millisecond, WordOptions: s.Settings.WordOptions},
 		players: map[string]*player{}, nextJoin: s.NextJoin, phase: s.Phase, deadline: s.Deadline,
 		matchID: s.MatchID, drawOrder: slices.Clone(s.DrawOrder), drawn: map[string]bool{}, usedWords: map[string]bool{},
-		roundNo: s.RoundNo, drawer: s.Drawer, options: slices.Clone(s.Options), word: s.Word, drawStart: s.DrawStart,
+		roundNo: s.RoundNo, drawers: slices.Clone(s.Drawers), options: slices.Clone(s.Options), word: s.Word, drawStart: s.DrawStart,
 		hintsGiven: s.HintsGiven, revealed: map[int]bool{}, correct: s.Correct, roundPoints: map[string]int{},
 		matchStart: s.MatchStart, roundsFinished: s.RoundsFinished, seq: s.Seq, empty: s.Empty,
+	}
+	if len(g.drawers) == 0 && s.Drawer != "" {
+		g.drawers = []string{s.Drawer}
 	}
 	for _, p := range s.Players {
 		g.players[p.ID] = &player{id: p.ID, name: p.Name, joinOrder: p.JoinOrder, connected: p.Connected,
@@ -331,10 +337,7 @@ func (g *Game) apply(ev StoredEvent) error {
 			p.guessed = true
 		}
 		g.roundPoints[d.UserID] += points
-		if dr, ok := g.players[g.drawer]; ok {
-			dr.score += DrawerPointsPerGuess
-			g.roundPoints[dr.id] += DrawerPointsPerGuess
-		}
+		g.creditDrawers()
 	case "chat":
 		// No state.
 	default:
@@ -368,7 +371,7 @@ func (g *Game) IsMember(uid string) bool {
 // String keeps snapshots readable in test failures without the canvas.
 func (s Snapshot) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "room %s seq %d phase %s round %d drawer %s players %d strokes %d",
-		s.RoomID, s.Seq, s.Phase, s.RoundNo, s.Drawer, len(s.Players), len(s.Canvas))
+	fmt.Fprintf(&b, "room %s seq %d phase %s round %d drawers %v players %d strokes %d",
+		s.RoomID, s.Seq, s.Phase, s.RoundNo, s.Drawers, len(s.Players), len(s.Canvas))
 	return b.String()
 }

@@ -133,6 +133,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Isolate the measurement from the shared stack.** Other work was running on the local stack, and the upstream DNS caches the "no such name" answer after one lookup, so restarting the real game servers would have disturbed others and been warm after the first try. Instead, the real image ran next to a stub lobby under a fresh network alias per run: cold every time, and nothing shared was restarted.
 - **Make the helper testable.** The dial options moved from `main` into `heartbeat.Dial`, so a unit test can point them at a fake DNS server that never answers TXT queries (a `dns://` target) and assert that the first heartbeat still succeeds.
 
+### 2.6a Shared canvas
+
+- **Pairing is a rule over the draw order, not a new data model.** A round's drawer became a list. From four present players (counting the 15-second takeover grace), the next two who haven't drawn share the canvas; each player still draws once per match, so 5 players play 2, 2, 1. The proto already had `drawer_ids` and `DrawerIDs`, so the contract didn't change: designing it as a list in task 2.2 paid off here.
+- **Who chooses, and what happens when they leave.** Only the first drawer gets the options. If they leave while choosing, the options pass to the second drawer and `choosing` is sent again. The one who left stays a drawer, because they saw the options: as a guesser they would know the answer is one of three words. One drawer leaving no longer ends the round; both leaving does.
+- **An automated review caught a stall.** My first version gave the new chooser the full 10 seconds. Two players leaving and rejoining in turn could then keep a round in choosing forever. The fix keeps the original deadline, and a test passes the choice back and forth 20 times and checks the timer still fires. The rejected alternative, one hand-over per round with a fresh timer, is fairer to the second drawer but adds state for a rare case.
+- **Changing a stored format without breaking stored rooms.** The Redis snapshot replaced `drawer` with `drawers`. A room written by an older server still restores, as `[drawer]`, and a test feeds the new code an old-shaped snapshot. Rolling back is not safe the other way round: an older server ignores `drawers`, so in a pair round it would treat the second drawer as a guesser who knows the word. Deploys must not mix versions while pair rounds run, or the snapshot needs a version field.
+- **Identity is (user, stroke id), everywhere.** Two drawers can both send `s1`. Undo, the client's state, the canvas painter's per-stroke "last point" and the local overlay all key strokes by user plus id, and the tests use colliding ids on purpose. Server-side, undo was already own-strokes-only; the property test now runs up to 6 players, so random walks cover pair rounds, undos across drawers and hand-overs.
+
 ## Stage 3: Drawing lifecycle
 
 ## Stage 4: Economy

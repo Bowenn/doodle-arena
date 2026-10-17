@@ -128,6 +128,33 @@ describe('Room', () => {
     expect(batch.width).toBe(60)
   })
 
+  it('lets the second of two drawers wait for the choice, then draw and undo only their own strokes', async () => {
+    const four = [
+      ...PLAYERS,
+      { user_id: 'c', name: 'Cy', score: 0, connected: true, guessed: false },
+      { user_id: 'd', name: 'Di', score: 0, connected: true, guessed: false },
+    ]
+    const ws = await joined('b', view({ players: four }))
+    ws.event(3, 'choosing', { round_no: 1, drawer_ids: ['a', 'b'], deadline: Date.now() + 10_000 })
+    expect(screen.getByText('Ada is choosing a word. You draw it together.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'dog' })).toBeNull()
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Chat' }).disabled).toBe(true)
+
+    ws.event(4, 'round_started', { round_no: 1, drawer_ids: ['a', 'b'], word_length: 3, deadline: Date.now() + 80_000 })
+    ws.receive('your_word', { word: 'dog' })
+    expect(screen.getByText('You and Ada are drawing')).toBeTruthy()
+    expect(screen.getByLabelText('Word').textContent).toBe('d o g')
+
+    const line = { points: [[1, 2, 0]], color: '#000000', width: 40, done: true }
+    ws.event(5, 'stroke_batch', { user_id: 'b', stroke_id: 's1', ...line })
+    ws.event(6, 'stroke_batch', { user_id: 'a', stroke_id: 's1', ...line }) // Ada's is newer
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(sentOf(ws, 'undo')).toEqual([{ stroke_id: 's1' }])
+    ws.event(7, 'stroke_batch', { user_id: 'a', stroke_id: 's2', ...line })
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(sentOf(ws, 'undo')).toEqual([{ stroke_id: 's1' }, { stroke_id: 's1' }]) // never Ada's s2
+  })
+
   it('sends guesses and shows what the server decides', async () => {
     const ws = await joined('b', view({ phase: 'drawing', drawer_ids: ['a'], round_no: 1, word_length: 5, mask: '_____', deadline: Date.now() + 30_000 }))
     expect(screen.getByLabelText('Word').textContent).toBe('_ _ _ _ _')

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { RoomEvent, View, Welcome } from './protocol.ts'
-import { canStart, isDrawer, roomReducer, wordLine, type RoomState } from './roomState.ts'
+import {
+  canStart,
+  choosingLabel,
+  drawingLabel,
+  isChooser,
+  isDrawer,
+  roomReducer,
+  wordLine,
+  type RoomState,
+} from './roomState.ts'
 
 function view(over: Partial<View> = {}): View {
   return {
@@ -187,6 +196,64 @@ describe('roomReducer', () => {
     expect(s.notice?.tone).toBe('bad')
     s = roomReducer(s, { type: 'private', msg: { type: 'guess_result', data: { correct: true } } })!
     expect(s.notice?.tone).toBe('good')
+  })
+})
+
+describe('two drawers', () => {
+  const PAIR = [
+    { user_id: 'a', name: 'Ada', score: 0, connected: true, guessed: false },
+    { user_id: 'b', name: 'Bob', score: 0, connected: true, guessed: false },
+    { user_id: 'c', name: 'Cy', score: 0, connected: true, guessed: false },
+    { user_id: 'd', name: 'Di', score: 0, connected: true, guessed: false },
+  ]
+  const choosing = (seq: number, ids: string[]): RoomEvent => ({
+    seq,
+    type: 'choosing',
+    data: { round_no: 1, drawer_ids: ids, deadline: 2000 },
+  })
+
+  it('names the chooser to the second drawer and to guessers', () => {
+    const second = apply(start(welcome(5, { players: PAIR }, 'b')), choosing(6, ['a', 'b']))
+    expect(isDrawer(second)).toBe(true)
+    expect(isChooser(second)).toBe(false)
+    expect(choosingLabel(second)).toBe('Ada is choosing a word. You draw it together.')
+
+    const guesser = apply(start(welcome(5, { players: PAIR }, 'c')), choosing(6, ['a', 'b']))
+    expect(isDrawer(guesser)).toBe(false)
+    expect(choosingLabel(guesser)).toBe('Ada is choosing a word.')
+  })
+
+  it('follows the choice when the first drawer leaves and it is chosen again', () => {
+    let s = apply(start(welcome(5, { players: PAIR }, 'b')), choosing(6, ['a', 'b']))
+    s = apply(s, { seq: 7, type: 'player_left', data: { user_id: 'a' } }, choosing(8, ['b', 'a']))
+    expect(isChooser(s)).toBe(true)
+    s = roomReducer(s, { type: 'private', msg: { type: 'word_options', data: { words: ['cat', 'dog', 'sun'] } } })!
+    expect(s.wordOptions).toEqual(['cat', 'dog', 'sun'])
+  })
+
+  it('says who is drawing, from each seat', () => {
+    const drawing = (me: string, ids: string[]) =>
+      apply(start(welcome(5, { players: PAIR }, me)), {
+        seq: 6,
+        type: 'round_started',
+        data: { round_no: 1, drawer_ids: ids, word_length: 3, deadline: 3000 },
+      })
+    expect(drawingLabel(drawing('c', ['a', 'b']))).toBe('Ada and Bob are drawing')
+    expect(drawingLabel(drawing('b', ['a', 'b']))).toBe('You and Ada are drawing')
+    expect(drawingLabel(drawing('c', ['a']))).toBe('Ada is drawing')
+    expect(drawingLabel(drawing('a', ['a']))).toBe('Your turn to draw')
+  })
+
+  it('keeps two drawers’ strokes with the same id apart', () => {
+    let s = start(welcome(5, { players: PAIR, phase: 'drawing', drawer_ids: ['a', 'b'] }, 'c'))
+    s = apply(
+      s,
+      { seq: 6, type: 'stroke_batch', data: batch('s1', 'a') },
+      { seq: 7, type: 'stroke_batch', data: batch('s1', 'b') },
+      { seq: 8, type: 'stroke_batch', data: batch('s1', 'a') },
+      { seq: 9, type: 'stroke_undone', data: { stroke_id: 's1', user_id: 'b' } },
+    )
+    expect(s.strokes.map((b) => `${b.user_id}:${b.stroke_id}`)).toEqual(['a:s1', 'a:s1'])
   })
 })
 

@@ -51,6 +51,17 @@ describe('CanvasPainter', () => {
     expect(calls).toEqual(['clear', 'dot 10,10'])
   })
 
+  it('continues each drawer’s stroke separately when two drawers use the same id', () => {
+    const { ctx, calls } = fakeContext()
+    const p = new CanvasPainter()
+    const first = [batch('s1', [[0, 0, 0], [1000, 0, 10]], 'a'), batch('s1', [[0, 5000, 0], [1000, 5000, 10]], 'b')]
+    p.paint(ctx, first, 100, 100)
+    calls.length = 0
+
+    p.paint(ctx, [...first, batch('s1', [[2000, 0, 20]], 'a'), batch('s1', [[2000, 5000, 20]], 'b')], 100, 100)
+    expect(calls).toEqual(['move 10,0', 'line 20,0', 'move 10,50', 'line 20,50'])
+  })
+
   it('repaints when the same number of batches is a different list', () => {
     const { ctx, calls } = fakeContext()
     const p = new CanvasPainter()

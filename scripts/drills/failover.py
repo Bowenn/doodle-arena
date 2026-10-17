@@ -8,6 +8,10 @@ local development key in secrets/, through auth's own TokenIssuer:
 
     uv run --project services/auth --with websockets python scripts/drills/failover.py kill
     uv run --project services/auth --with websockets python scripts/drills/failover.py pause
+    uv run --project services/auth --with websockets python scripts/drills/failover.py kill 5
+
+An optional player count (default 3) plays the round with more bots: from 4, two of them share
+the canvas, and the drill also checks that both drawers get their word back after the move.
 
 kill:  docker kill on the owner. pause: docker pause for 9 s (the lobby reassigns the room
 after 6 s without heartbeats), then unpause: the zombie's next lease renewal or write fails
@@ -127,7 +131,7 @@ class Bot:
         return bad
 
 
-async def main(mode):
+async def main(mode, players):
     room = call(
         "POST",
         "/api/lobby/rooms",
@@ -135,7 +139,8 @@ async def main(mode):
         {"settings": {"draw_seconds": 120, "choose_seconds": 30}},
     )
     rid = room["room_id"]
-    bots = [Bot(u, rid) for u in ("drill-host", "drill-b", "drill-c")]
+    users = ["drill-host"] + [f"drill-{chr(ord('b') + i)}" for i in range(players - 1)]
+    bots = [Bot(u, rid) for u in users]
     stop = asyncio.Event()
     # The host joins first: whoever joins before the lobby's host becomes host (design doc, 7.3).
     tasks = [asyncio.create_task(bots[0].run(stop))]
@@ -157,6 +162,8 @@ async def main(mode):
         sys.exit("no drawer got word options: is the stack healthy?")
     await drawer.send("choose_word", {"index": 0})
     await asyncio.sleep(0.5)
+    drawers = [b for b in bots if any(p["type"] == "your_word" for p in b.private)]
+    print(f"{len(drawers)} drawer(s): {', '.join(b.user for b in drawers)}")
     for i in range(10):
         await drawer.send(
             "stroke_batch",
@@ -222,6 +229,11 @@ async def main(mode):
             f"resumed after {took}, seq gaps/duplicates {b.gaps()}"
         )
         ok &= bool(b.resumed_at) and b.server != owner and not b.gaps()
+    for b in drawers:
+        # A resume replays the private state too: each drawer has its word again.
+        words = [p for p in b.private if p["type"] == "your_word"]
+        print(f"  drawer {b.user}: your_word {len(words)} times")
+        ok &= len(words) >= 2
     worst = max((b.resumed_at or 1e9) - t0 for b in bots)
     print(f"recovery (slowest bot): {worst:.1f} s" if ok else "FAILED")
     if mode == "pause":
@@ -242,4 +254,9 @@ async def main(mode):
 
 
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else "kill"))
+    asyncio.run(
+        main(
+            sys.argv[1] if len(sys.argv) > 1 else "kill",
+            int(sys.argv[2]) if len(sys.argv) > 2 else 3,
+        )
+    )

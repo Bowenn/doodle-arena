@@ -32,6 +32,9 @@ const (
 	CanvasHeight = 600
 )
 
+// PairFrom is how many present players a round needs for two drawers to share the canvas.
+const PairFrom = 4
+
 // Points.
 const (
 	DrawerPointsPerGuess = 10
