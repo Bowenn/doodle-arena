@@ -105,6 +105,24 @@ def test_moderator_gets_a_one_hour_admin_session(browser: Client, signer: Any) -
     assert browser.session.get_expiry_date() == expiry
 
 
+def test_sign_in_works_behind_the_gateway(browser: Client, signer: Any) -> None:
+    """Nginx forwards Host without the port, while the browser's Origin has it."""
+    token = signer.token("u_mod", ["moderator"])
+    gateway = {"Origin": "http://localhost:8080", "Host": "localhost"}
+    csrf_token = browser.get(SSO, headers=gateway).json()["csrf_token"]
+
+    resp = browser.post(
+        SSO, headers={**gateway, "X-CSRFToken": csrf_token, "Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200
+
+    evil = {**gateway, "Origin": "http://evil.example"}
+    resp = browser.post(
+        SSO, headers={**evil, "X-CSRFToken": csrf_token, "Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 403
+
+
 def test_admin_role_is_superuser(browser: Client, signer: Any) -> None:
     assert sign_in(browser, signer.token("u_root", ["player", "admin"])).status_code == 200
 

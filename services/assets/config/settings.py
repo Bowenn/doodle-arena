@@ -30,6 +30,9 @@ class Env(BaseSettings):
     jwt_issuer: str = "http://localhost:8080/api/auth"
     # The Celery broker: assets' own logical Redis database (design doc, section 5).
     celery_broker_url: str = "redis://redis:6379/1"
+    # The origin browsers see (the gateway). Nginx forwards Host without the port, so Django's
+    # CSRF Origin check needs to be told which origin is ours.
+    public_base_url: str = "http://localhost:8080"
     # Set in AWS, where the gateway terminates TLS. Locally everything is plain HTTP.
     secure_cookies: bool = False
 
@@ -113,6 +116,7 @@ SESSION_COOKIE_SECURE = env.secure_cookies
 CSRF_COOKIE_PATH = "/admin/"
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = env.secure_cookies
+CSRF_TRUSTED_ORIGINS = [env.public_base_url]
 # Admin messages ("2 drawings approved") stay in the session rather than in a site-wide cookie.
 MESSAGE_STORAGE = "django.contrib.messages.storage.session.SessionStorage"
 # Where admin's own login page sends the browser: the web app's sign-in handoff.

@@ -47,6 +47,8 @@ x-assets-env: &assets-env
   # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
   AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
   JWT_ISSUER: http://localhost:8080/api/auth
+  # The browser-facing origin, for Django's CSRF Origin check behind the gateway.
+  PUBLIC_BASE_URL: http://localhost:8080
 
 # Go services check their own /healthz (their runtime image has no shell).
 x-go-healthcheck: &go-healthcheck
