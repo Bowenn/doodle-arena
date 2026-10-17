@@ -68,7 +68,8 @@ Tracks:
   - ADR 0002 is decided (2026-10-16): direct URLs `/ws/<server_id>/rooms/<room_id>`, mapped by the gateway. Access tokens and tickets carry the display name; `AllocateRoom` names the host.
 - [x] **2.3 Web room UI**: canvas with batched strokes, guess box, scores and timer.
   - Lobby page and `/rooms/<id>` invite links; a pure reducer over server messages; strokes batched every 50 ms (`VITE_STROKE_BATCH_MS`, `?batch_ms=`) with widths in normalized units; reconnect with a fresh ticket, `last_seq` and jittered backoff. Checked live on 2026-10-16 with one signed-in browser and two scripted players, through two full matches.
-- [ ] **2.4 Events out**: the stroke log upload (claim check), `RoundFinished` and `MatchFinished`.
+- [x] **2.4 Events out**: the stroke log upload (claim check), `RoundFinished` and `MatchFinished`.
+  - Decided 2026-10-16: a bounded in-memory queue that drops new events when full (2.5's Redis Stream can become the durable outbox), a fixed 4:3 canvas (800 x 600), and every round published but no match without a finished round.
 - [ ] **2.5 Reliability**: the Redis Stream event log with explicit `seq` IDs, snapshots, reconnect with resume, the lease and fencing token through Lua, and failover through the lobby, with two game-server instances in Compose. The humans decide ADR 0002 first.
 - [ ] **2.6 Shared canvas and leaderboard**: two drawers per round with own-stroke undo; a weekly leaderboard built from `MatchFinished`.
 
@@ -80,7 +81,7 @@ Tracks:
 - [ ] Test: a client that disconnects mid-round resumes without missing events.
 - [ ] Test: after a takeover, the old owner's writes are rejected by the fencing check.
 - [ ] Killing a game server mid-round moves the room to the other instance. Recovery time is recorded in the evidence log.
-- [ ] `RoundFinished` and `MatchFinished` appear in Kafka with trace context.
+- [x] `RoundFinished` and `MatchFinished` appear in Kafka with trace context (`TestPublishThroughKafkaAndSeaweedFS` in `services/game-server/internal/events` against real `apache/kafka` and SeaweedFS; and a match played through the gateway, decoded with `eventctl decode`, with the full trace in Tempo).
 
 ## Stage 3: Drawing lifecycle (Track B, Day 4)
 
@@ -186,5 +187,7 @@ Record every number you might put on a resume or mention in an interview.
 |---|---|---|---|---|
 | 2026-10-16 | End-to-end telemetry: one request through the gateway | Trace with gateway and auth spans in Tempo; auth log line with the same trace_id in Loki; all 7 services export metrics | `make telemetry-check` (also runs in CI's stack job), then Grafana Explore: Tempo trace → Related logs | Task 1.5 PR |
 | 2026-10-16 | Dead game server detection (registry) | Stopped `game-server-1` dropped out of the registry 4 s after `docker compose stop` (TTL 6 s after the last 2 s heartbeat); `lobby.servers.healthy` went from 2 to 1 | `docker compose stop game-server-1`, polling `EXISTS lobby:server:game-server-1`, then Prometheus via Grafana | Task 2.1 PR |
+| 2026-10-16 | Events out after a played match | 3 `RoundFinished` and 1 `MatchFinished`, keyed by room id, with `traceparent`. Tempo shows `game.round.end` → `game.round.publish` → `S3.PutObject` and `game.rounds.v1 publish`. Event published 25–95 ms after the round ended (the first after a start took about 1.2 s to connect to Kafka) | 3-player match over WebSockets through the gateway, `eventctl decode`, the stroke log fetched from SeaweedFS and decoded with `buf convert`, Tempo API | Task 2.4 PR |
+| 2026-10-16 | Kafka outage during a match | Kafka stopped for 24 s while a full match (3 rounds) ran: the match played normally, and all 4 events were published 7 s after Kafka restarted, in order, nothing dropped | `docker compose stop kafka`, the e2e match, `start kafka`, game-server logs and `game.events.published` | Task 2.4 PR |
 | 2026-10-16 | Game-server registration at cold start | First successful heartbeat about 4 s after start (8 s before capping gRPC's reconnect backoff at 2 s) | Container logs: `grpc listening` to `heartbeat recovered` | Task 2.1 PR |
 | 2026-10-16 | Browser WebSocket round-trip time (ping/pong) | 2–6 ms on one machine through the gateway | The room page's ping every 15 s, shown next to the connection status | Task 2.3 PR |

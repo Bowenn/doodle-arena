@@ -75,6 +75,9 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `game.reconnects` | Counter | `result` = resumed, snapshot, failed (until task 2.5 every reconnect is a snapshot: a full `welcome`) | game-server |
 | `game.room.takeovers` | Counter | – | game-server |
 | `game.ws.slow_client_disconnects` | Counter | – | game-server |
+| `game.events.published` | Counter | `topic`, `result` = success, failed (retried until the 2-minute deadline), dropped (queue full, or shutting down) | game-server |
+| `game.events.queued` | UpDownCounter | – (finished rounds and matches waiting for the publisher) | game-server |
+| `game.events.publish.duration` | Histogram (ms) | `topic` (for rounds it includes the stroke-log upload; retries included) | game-server |
 | `auth.logins` | Counter | `result` = success, failed | auth |
 | `auth.refreshes` | Counter | `result` = rotated, reuse_detected, expired, invalid | auth |
 | `lobby.allocations` | Counter | `result` = success, no_servers, exhausted (every tried server full or draining), error | lobby |
