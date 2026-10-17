@@ -162,6 +162,13 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Single-flight has a scope.** The refresh was single-flight per tab, but the refresh cookie is per origin, so two tabs refreshing at once looked like token theft and logged the user out. A Web Lock makes the critical section match the shared resource. The same theme: a zero score still created a leaderboard entry, because `ZINCRBY key 0 member` creates the member.
 - **Tests should prove the claim in the roadmap.** The takeover-resume test resumed every client from its latest seq, so nothing was replayed, and the word-leak test's "reconnect" was really a fresh welcome. Both now go through a real replay. Each new behaviour test was checked against the old code (mutation spot checks), so it fails without the fix.
 
+### Secret scanning (before making the repo public)
+
+- **Scan history, not the working tree.** Deleting a secret in a later commit doesn't remove it from history, and going public publishes every commit, branch, PR and Actions log at once. gitleaks scans every commit (CI checks out with `fetch-depth: 0`). A scan of all branches found 13 hits, all JWT test fixtures; separate searches for private-key headers, Google client secrets, Stripe and AWS keys found nothing.
+- **Allowlist by reasoning, not by noise.** The fixture tokens are safe because their signing key is generated per run and never written down, so nobody can sign new tokens with it. The exception is scoped to one rule and one file, and a planted token in any other file is still caught (checked in a scratch repo).
+- **Verify your security config fails when it should.** The first config used a top-level `[[allowlists]]` with `targetRules`; gitleaks 8.28 loaded it and silently ignored it when extending the default rules. A positive run and a negative run (a planted leak elsewhere) showed the per-rule form was the one that actually works.
+- **Some checks shouldn't be path-filtered.** Service workflows run only when their files change, but a secret can land anywhere, so `secrets.yml` runs on every PR. It always reports a status, which also makes it usable as a required check once `master` has branch protection.
+
 ## Stage 3: Drawing lifecycle
 
 ## Stage 4: Economy
