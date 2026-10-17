@@ -146,6 +146,12 @@ func run(cfg config, logger *slog.Logger) error {
 		return fmt.Errorf("grpc listen: %w", err)
 	}
 
+	// Moves the rooms of dead or restarted game servers (ADR 0007); one lobby at a time.
+	reassignCtx, stopReassign := context.WithCancel(context.Background())
+	reassignDone := make(chan struct{})
+	go func() { svc.RunReassigner(reassignCtx, rdb, cfg.instance); close(reassignDone) }()
+	defer func() { stopReassign(); <-reassignDone }()
+
 	serveErr := make(chan error, 2)
 	go func() {
 		logger.Info("listening", "addr", srv.Addr, "instance", cfg.instance)

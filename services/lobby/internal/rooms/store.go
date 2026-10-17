@@ -6,6 +6,9 @@
 //	lobby:room:{room_id}  string, the room as JSON. Expires RoomTTL after the owning game server
 //	                      last reported it, so finished rooms disappear on their own.
 //	lobby:rooms:public    sorted set of public room ids, scored by creation time (ms)
+//	lobby:server_rooms:{server_id}  set of the room ids placed on that game server, so the
+//	                      reassigner finds a dead server's rooms (its heartbeat is gone too)
+//	lobby:room_hosts      set of server ids that have rooms
 package rooms
 
 import (
@@ -24,7 +27,12 @@ import (
 // RoomTTL is how long a room record outlives the last heartbeat that reported it.
 const RoomTTL = 10 * time.Minute
 
-const publicKey = "lobby:rooms:public"
+const (
+	publicKey = "lobby:rooms:public"
+	hostsKey  = "lobby:room_hosts"
+)
+
+func serverRoomsKey(serverID string) string { return "lobby:server_rooms:" + serverID }
 
 func roomKey(id string) string { return "lobby:room:" + id }
 
@@ -69,12 +77,65 @@ func (s *Store) Save(ctx context.Context, r Room) error {
 		if r.Public {
 			p.ZAdd(ctx, publicKey, redis.Z{Score: float64(r.CreatedAt.UnixMilli()), Member: r.ID})
 		}
+		if r.ServerID != "" {
+			p.SAdd(ctx, serverRoomsKey(r.ServerID), r.ID)
+			p.SAdd(ctx, hostsKey, r.ServerID)
+		}
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("save room %s: %w", r.ID, err)
 	}
 	return nil
+}
+
+// Move records that a room now lives on r.ServerID instead of from.
+func (s *Store) Move(ctx context.Context, r Room, from string) error {
+	if err := s.Save(ctx, r); err != nil {
+		return err
+	}
+	if from != "" && from != r.ServerID {
+		return s.Unindex(ctx, from, r.ID)
+	}
+	return nil
+}
+
+// Unindex drops a room id from a server's index (the room moved, ended or expired).
+func (s *Store) Unindex(ctx context.Context, serverID, roomID string) error {
+	if err := s.rdb.SRem(ctx, serverRoomsKey(serverID), roomID).Err(); err != nil {
+		return fmt.Errorf("unindex room %s: %w", roomID, err)
+	}
+	return nil
+}
+
+// Hosts returns the servers that have rooms in the index, forgetting those with none left.
+func (s *Store) Hosts(ctx context.Context) ([]string, error) {
+	hosts, err := s.rdb.SMembers(ctx, hostsKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("list room hosts: %w", err)
+	}
+	var out []string
+	for _, h := range hosts {
+		n, err := s.rdb.SCard(ctx, serverRoomsKey(h)).Result()
+		if err != nil {
+			return nil, fmt.Errorf("count rooms of %s: %w", h, err)
+		}
+		if n == 0 {
+			_ = s.rdb.SRem(ctx, hostsKey, h).Err()
+			continue
+		}
+		out = append(out, h)
+	}
+	return out, nil
+}
+
+// RoomsOf returns the ids of the rooms placed on a server.
+func (s *Store) RoomsOf(ctx context.Context, serverID string) ([]string, error) {
+	ids, err := s.rdb.SMembers(ctx, serverRoomsKey(serverID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("list rooms of %s: %w", serverID, err)
+	}
+	return ids, nil
 }
 
 // Get returns one room.
@@ -127,14 +188,17 @@ func (s *Store) Touch(ctx context.Context, serverID string, ids []string) error 
 }
 
 // Remove deletes a room that has ended.
-func (s *Store) Remove(ctx context.Context, id string) error {
+func (s *Store) Remove(ctx context.Context, r Room) error {
 	_, err := s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
-		p.Del(ctx, roomKey(id))
-		p.ZRem(ctx, publicKey, id)
+		p.Del(ctx, roomKey(r.ID))
+		p.ZRem(ctx, publicKey, r.ID)
+		if r.ServerID != "" {
+			p.SRem(ctx, serverRoomsKey(r.ServerID), r.ID)
+		}
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("remove room %s: %w", id, err)
+		return fmt.Errorf("remove room %s: %w", r.ID, err)
 	}
 	return nil
 }

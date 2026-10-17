@@ -39,8 +39,9 @@ const (
 	maxAttempts = 3
 	// reportGrace is how long a new room may be missing from its server's heartbeats (the
 	// next heartbeat is at most 2 s away). After that, a room its live server doesn't report
-	// has ended.
-	reportGrace = 30 * time.Second
+	// is reassigned: the server restarted, or the room ended (the game server then answers
+	// NOT_FOUND and the room is removed).
+	reportGrace = 10 * time.Second
 	// suspectFor is how long Create skips a server whose AllocateRoom failed in transport
 	// (unreachable or timed out), unless no other server is left.
 	suspectFor = 10 * time.Second
@@ -97,6 +98,7 @@ type Service struct {
 	log         *slog.Logger
 	tracer      trace.Tracer
 	allocations metric.Int64Counter
+	reassigns   metric.Int64Counter
 
 	// suspect holds game servers that heartbeat but didn't answer AllocateRoom, until when
 	// to skip them. Without it, such a server never gets rooms, so it stays the least loaded
@@ -115,9 +117,15 @@ func NewService(store *Store, servers Servers, alloc Allocator, tickets TicketSi
 	if err != nil {
 		return nil, fmt.Errorf("lobby.allocations: %w", err)
 	}
+	reassigns, err := otel.Meter("lobby").Int64Counter("lobby.reassignments",
+		metric.WithDescription("Rooms the reassigner handled, by result: moved, ended or failed"),
+		metric.WithUnit("{room}"))
+	if err != nil {
+		return nil, fmt.Errorf("lobby.reassignments: %w", err)
+	}
 	return &Service{
 		store: store, servers: servers, alloc: alloc, tickets: tickets, now: now, log: log,
-		tracer: otel.Tracer("lobby"), allocations: allocations, suspect: make(map[string]time.Time),
+		tracer: otel.Tracer("lobby"), allocations: allocations, reassigns: reassigns, suspect: make(map[string]time.Time),
 	}, nil
 }
 
@@ -194,15 +202,7 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 	}
 	result := "exhausted"
 	for _, srv := range candidates[:min(maxAttempts, len(candidates))] {
-		err := s.allocateOn(ctx, srv, req)
-		if errors.Is(err, errMisrouted) || status.Code(err) == grpccodes.FailedPrecondition {
-			// Maybe a stale connection reached another instance (it refuses: server_id). Redial
-			// with a fresh name lookup and ask the same server once more; a draining server
-			// simply refuses again.
-			s.log.WarnContext(ctx, "redialing game server", "room_id", room.ID, "server_id", srv.ID, "err", err)
-			s.alloc.Forget(srv.ControlAddress)
-			err = s.allocateOn(ctx, srv, req)
-		}
+		err := s.tryAllocate(ctx, srv, req)
 		if err == nil {
 			room.ServerID = srv.ID
 			if err := s.store.Save(ctx, room); err != nil {
@@ -226,6 +226,20 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 	}
 	s.count(ctx, result)
 	return Room{}, ErrNoServers
+}
+
+// tryAllocate asks one server, redialing once if the answer came from the wrong instance.
+func (s *Service) tryAllocate(ctx context.Context, srv registry.Server, req *gamev1.AllocateRoomRequest) error {
+	err := s.allocateOn(ctx, srv, req)
+	if errors.Is(err, errMisrouted) || status.Code(err) == grpccodes.FailedPrecondition {
+		// Maybe a stale connection reached another instance (it refuses: server_id). Redial
+		// with a fresh name lookup and ask the same server once more; a draining server
+		// simply refuses again.
+		s.log.WarnContext(ctx, "redialing game server", "room_id", req.GetRoomId(), "server_id", srv.ID, "err", err)
+		s.alloc.Forget(srv.ControlAddress)
+		err = s.allocateOn(ctx, srv, req)
+	}
+	return err
 }
 
 // withoutSuspects moves suspect servers to the end, keeping the order otherwise, so they are
@@ -301,7 +315,8 @@ func (s *Service) join(ctx context.Context, user User, roomID string) (Join, err
 		return Join{}, err
 	}
 	if _, ok := srv.Room(room.ID); !ok && s.now().Sub(room.CreatedAt) > reportGrace {
-		return Join{}, ErrRoomNotFound
+		// Its server no longer runs it: the reassigner moves it (or finds it ended).
+		return Join{}, ErrRoomUnavailable
 	}
 	ticket, exp, err := s.tickets.Sign(user.ID, user.Name, room.ID)
 	if err != nil {
@@ -317,8 +332,8 @@ func (s *Service) join(ctx context.Context, user User, roomID string) (Join, err
 }
 
 // List returns a page of public rooms with their live player counts. Rooms whose server is
-// gone are hidden (failover may still bring them back); rooms their live server no longer
-// reports have ended and are removed.
+// gone, or doesn't report them, are hidden: the reassigner moves them, or removes them if the
+// game server says they ended.
 func (s *Service) List(ctx context.Context, after *Cursor, n int) ([]Listing, *Cursor, error) {
 	page, next, err := s.store.PublicPage(ctx, after, n)
 	if err != nil {
@@ -341,9 +356,6 @@ func (s *Service) List(ctx context.Context, after *Cursor, n int) ([]Listing, *C
 		st, reported := srv.Room(r.ID)
 		if !reported {
 			if s.now().Sub(r.CreatedAt) > reportGrace {
-				if err := s.store.Remove(ctx, r.ID); err != nil {
-					return nil, nil, err
-				}
 				continue
 			}
 			st = registry.Room{ID: r.ID, Phase: registry.PhaseWaiting}
