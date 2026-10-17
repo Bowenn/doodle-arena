@@ -158,6 +158,10 @@ type Game struct {
 	out    []Out
 	empty  time.Time // when the last player left (or the room was created); zero if occupied
 	closed bool
+
+	// graceUntil: after a takeover, disconnected players count as present until then, so the
+	// match doesn't end before they could resume on this server (TakeoverGrace).
+	graceUntil time.Time
 }
 
 // NewGame creates an empty room. rng drives word options, hints and match ids; tests seed it.
@@ -195,6 +199,22 @@ func (g *Game) TakeFinished() []Finished {
 	f := g.finished
 	g.finished = nil
 	return f
+}
+
+// present reports whether p takes part right now: connected, or within the takeover grace.
+func (g *Game) present(p *player, now time.Time) bool {
+	return p.connected || now.Before(g.graceUntil)
+}
+
+// presentCount counts the players taking part (see present).
+func (g *Game) presentCount(now time.Time) int {
+	n := 0
+	for _, p := range g.players {
+		if g.present(p, now) {
+			n++
+		}
+	}
+	return n
 }
 
 // Connected counts players with an open connection.
@@ -255,7 +275,7 @@ func (g *Game) Leave(now time.Time, uid string) {
 		g.empty = now
 	}
 	switch {
-	case g.phase.Playing() && g.Connected() < 2:
+	case g.phase.Playing() && g.presentCount(now) < 2:
 		g.endMatch(now)
 	case uid == g.drawer && g.phase == PhaseChoosing:
 		g.nextRound(now) // nobody saw a word yet: just pick the next drawer
@@ -398,6 +418,9 @@ func (g *Game) handleGuess(now time.Time, p *player, text string) string {
 func (g *Game) Advance(now time.Time) {
 	for range 16 { // a few transitions can be due at once, but never a loop
 		switch {
+		case !g.graceUntil.IsZero() && !now.Before(g.graceUntil):
+			g.graceUntil = time.Time{}
+			g.afterGrace(now)
 		case g.phase == PhaseDrawing && g.hintsGiven < len(hintAt) && !now.Before(g.hintTime(g.hintsGiven)):
 			g.hintsGiven++
 			revealMore(g.word, g.revealed, g.rng)
@@ -411,6 +434,23 @@ func (g *Game) Advance(now time.Time) {
 			}
 			return
 		}
+	}
+}
+
+// afterGrace applies, once the takeover grace is over, what a leave would have done for the
+// players who never came back.
+func (g *Game) afterGrace(now time.Time) {
+	d, drawerHere := g.players[g.drawer]
+	drawerHere = drawerHere && d.connected
+	switch {
+	case g.phase.Playing() && g.Connected() < 2:
+		g.endMatch(now)
+	case g.drawer != "" && !drawerHere && g.phase == PhaseChoosing:
+		g.nextRound(now)
+	case g.drawer != "" && !drawerHere && g.phase == PhaseDrawing:
+		g.endRound(now)
+	case g.phase == PhaseDrawing:
+		g.endRoundIfAllGuessed(now)
 	}
 }
 
@@ -436,6 +476,7 @@ func (g *Game) NextDeadline() time.Time {
 		}
 	}
 	consider(g.deadline)
+	consider(g.graceUntil)
 	if g.phase == PhaseDrawing && g.hintsGiven < len(hintAt) {
 		consider(g.hintTime(g.hintsGiven))
 	}
@@ -493,13 +534,13 @@ func (g *Game) startMatch(now time.Time) {
 
 func (g *Game) nextRound(now time.Time) {
 	g.resetRound()
-	if g.Connected() < 2 {
+	if g.presentCount(now) < 2 {
 		g.endMatch(now)
 		return
 	}
 	next := ""
 	for _, id := range g.drawOrder {
-		if p, ok := g.players[id]; ok && p.connected && !g.drawn[id] {
+		if p, ok := g.players[id]; ok && g.present(p, now) && !g.drawn[id] {
 			next = id
 			break
 		}
@@ -548,7 +589,7 @@ func (g *Game) beginDrawing(now time.Time, word string) {
 func (g *Game) endRoundIfAllGuessed(now time.Time) {
 	guessers, guessed := 0, 0
 	for _, p := range g.players {
-		if p.connected && p.id != g.drawer {
+		if g.present(p, now) && p.id != g.drawer {
 			guessers++
 			if p.guessed {
 				guessed++
