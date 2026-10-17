@@ -93,6 +93,8 @@ export type ServerMessage =
   | { type: 'event'; data: RoomEvent }
   | { type: 'pong'; data: { t: number } }
   | { type: 'room_moved'; data: { reason: string } }
+  // The last message of every resume (ADR 0008): the room's seq once the replay is done.
+  | { type: 'resumed'; data: { seq: number } }
   | PrivateMessage
 
 export type ClientMessage =

@@ -189,6 +189,11 @@ export class RoomConnection {
       case 'pong':
         this.on.rtt?.(this.now() - msg.data.t)
         return
+      case 'resumed':
+        // The replay is done (ADR 0008). If the server is ahead of what we applied, some
+        // events never arrived: resync the same way as for a gap.
+        if (msg.data.seq > this.lastSeq) this.reconnectNow()
+        return
       case 'room_moved':
         // The room is on another server now; the lobby knows where. A zombie that wakes up
         // fences all its rooms at once, so back off (with jitter) rather than have every
