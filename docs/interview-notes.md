@@ -119,6 +119,13 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Names without a contract change.** `MatchFinished` carries only user ids. Options were adding names to the event (a contract change for display data), calling auth for every read (synchronous coupling on a read path), or caching. The lobby already sees each player's name in their access token on every join, so it keeps `lobby:names`. How it fails: a name is as old as the player's last join, and a player who never joined through this lobby shows as "Player <id>".
 - **Ranks people expect.** Ranks use competition ranking (1, 2, 2, 4), and the caller's own rank comes back even when they are below the list: one more than the number of players with strictly more points (`ZCOUNT (score +inf`). The reads aren't one atomic snapshot, which is fine: the design doc already calls the leaderboard eventually consistent. Each apply runs in a `lobby.leaderboard.apply` span that kotel parents on the record's `traceparent`, so a match's trace runs from the game server's round end through Kafka into the lobby's Redis write.
 
+### Game-server heartbeat cold start (lobby fix follow-up)
+
+- **One root cause, two clients.** After the lobby's `AllocateRoom` client was fixed, the same `grpc.NewClient` defaults sat in the game server's heartbeat client. Fixing one call site and grepping for the pattern is cheaper than waiting for the second incident.
+- **Measure the cold case, not the average.** Before the fix, 6 of 10 cold starts registered in about 0.3 s and 4 of 10 took 6–8 s: every beat had a 1-second deadline and failed until the TXT lookup ended. An average of these numbers hides the bimodal shape; the tail is what an operator sees after a deploy. After: 10 of 10 in 3–18 ms.
+- **Isolate the measurement from the shared stack.** Other work was running on the local stack, and the upstream DNS caches the "no such name" answer after one lookup, so restarting the real game servers would have disturbed others and been warm after the first try. Instead, the real image ran next to a stub lobby under a fresh network alias per run: cold every time, and nothing shared was restarted.
+- **Make the helper testable.** The dial options moved from `main` into `heartbeat.Dial`, so a unit test can point them at a fake DNS server that never answers TXT queries (a `dns://` target) and assert that the first heartbeat still succeeds.
+
 ## Stage 3: Drawing lifecycle
 
 ## Stage 4: Economy
