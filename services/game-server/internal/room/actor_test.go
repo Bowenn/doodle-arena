@@ -3,6 +3,7 @@ package room
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -546,6 +547,53 @@ func TestShutdownClosesSockets(t *testing.T) {
 	<-r.Done()
 	if c.closed != 1001 {
 		t.Fatalf("close code = %d, want 1001", c.closed)
+	}
+}
+
+// game.reconnects counts each resume by how it went, including the refused ones.
+func TestReconnectMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	m, err := NewMetrics(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("t"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := DefaultSettings
+	s.MaxPlayers = 2
+	h := newHarness(t, "a", s, m)
+	a := h.join("a")
+	h.join("b")
+	h.sync()
+	evs := a.events("")
+	lastSeen := evs[len(evs)-1].Seq
+
+	// a comes back with what it saw: resumed.
+	if err := h.room.Join(context.Background(), &fakeConn{uid: "a"}, "Name a", lastSeen); err != nil {
+		t.Fatal(err)
+	}
+	// z claims a seq but holds no seat in a full room: refused, failed.
+	if err := h.room.Join(context.Background(), &fakeConn{uid: "z"}, "Name z", lastSeen); !errors.Is(err, ErrRoomFull) {
+		t.Fatalf("err = %v, want ErrRoomFull", err)
+	}
+	h.sync()
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, mt := range sm.Metrics {
+			if mt.Name != "game.reconnects" {
+				continue
+			}
+			for _, dp := range mt.Data.(metricdata.Sum[int64]).DataPoints {
+				v, _ := dp.Attributes.Value(attribute.Key("result"))
+				got[v.AsString()] = dp.Value
+			}
+		}
+	}
+	if got["resumed"] != 1 || got["failed"] != 1 || got["snapshot"] != 0 {
+		t.Fatalf("reconnects = %v, want 1 resumed and 1 failed", got)
 	}
 }
 
