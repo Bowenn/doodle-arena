@@ -239,7 +239,7 @@ func TestTakeoverAcrossServers(t *testing.T) {
 		}
 	}
 	// gs-1's zombie writes are rejected (stale token).
-	if err := store.Handle("r1", "gs-1", 1).Commit(ctx, []room.StoredEvent{{Seq: 99, Type: "chat", Data: []byte(`{}`)}}, nil); !errors.Is(err, roomstore.ErrFenced) {
+	if err := store.Handle("r1", "gs-1", 1).Commit(ctx, []room.StoredEvent{{Seq: 99, Type: "chat", Data: []byte(`{}`)}}, nil, nil); !errors.Is(err, roomstore.ErrFenced) {
 		t.Fatalf("zombie commit: err = %v", err)
 	}
 

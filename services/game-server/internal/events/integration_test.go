@@ -10,6 +10,7 @@ import (
 
 	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/kafkatest"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -63,8 +64,8 @@ func TestPublishThroughKafkaAndSeaweedFS(t *testing.T) {
 	roundSpan.End()
 	matchCtx, matchSpan := tp.Tracer("t").Start(context.Background(), "game.match.end")
 	matchSpan.End()
-	pub.RoundFinished(roundCtx, finishedRound())
-	pub.MatchFinished(matchCtx, finishedMatch())
+	pub.RoundFinished(roundCtx, finishedRound(), room.OutboxEntry{})
+	pub.MatchFinished(matchCtx, finishedMatch(), room.OutboxEntry{})
 	pub.Close()
 	select {
 	case <-pub.Done():

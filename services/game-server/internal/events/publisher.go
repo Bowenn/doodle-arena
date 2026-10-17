@@ -114,16 +114,25 @@ func New(cfg Config) (*Publisher, error) {
 	}, nil
 }
 
-// RoundFinished queues a finished round. It never blocks: the room actor calls it.
-func (p *Publisher) RoundFinished(ctx context.Context, r room.FinishedRound) {
-	p.enqueue(job{ctx: context.WithoutCancel(ctx), eventID: p.cfg.NewID(), round: &r},
+// RoundFinished queues a finished round, with the event_id its outbox entry fixed. It never
+// blocks: the room actor calls it.
+func (p *Publisher) RoundFinished(ctx context.Context, r room.FinishedRound, e room.OutboxEntry) {
+	p.enqueue(job{ctx: context.WithoutCancel(ctx), eventID: p.eventID(e), round: &r},
 		"room_id", r.RoomID, "match_id", r.MatchID, "round_no", r.RoundNo)
 }
 
 // MatchFinished queues a finished match. It never blocks.
-func (p *Publisher) MatchFinished(ctx context.Context, m room.FinishedMatch) {
-	p.enqueue(job{ctx: context.WithoutCancel(ctx), eventID: p.cfg.NewID(), match: &m},
+func (p *Publisher) MatchFinished(ctx context.Context, m room.FinishedMatch, e room.OutboxEntry) {
+	p.enqueue(job{ctx: context.WithoutCancel(ctx), eventID: p.eventID(e), match: &m},
 		"room_id", m.RoomID, "match_id", m.MatchID)
+}
+
+// eventID is the entry's, so every delivery of one event has the same id.
+func (p *Publisher) eventID(e room.OutboxEntry) string {
+	if e.EventID != "" {
+		return e.EventID
+	}
+	return p.cfg.NewID()
 }
 
 func (p *Publisher) enqueue(j job, logAttrs ...any) {

@@ -208,8 +208,8 @@ func gunzipStrokeLog(t *testing.T, b []byte) *gamev1.StrokeLog {
 
 func TestPublishesRoundThenMatch(t *testing.T) {
 	f := newFixture(t, &fakeS3{}, &fakeKafka{}, nil)
-	f.pub.RoundFinished(context.Background(), finishedRound())
-	f.pub.MatchFinished(context.Background(), finishedMatch())
+	f.pub.RoundFinished(context.Background(), finishedRound(), room.OutboxEntry{})
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{})
 	go f.pub.Run(context.Background())
 	f.drain()
 
@@ -258,7 +258,7 @@ func TestPublishesRoundThenMatch(t *testing.T) {
 
 func TestUploadIsRetriedBeforeTheRoundIsPublished(t *testing.T) {
 	f := newFixture(t, &fakeS3{failures: 2}, &fakeKafka{}, nil)
-	f.pub.RoundFinished(context.Background(), finishedRound())
+	f.pub.RoundFinished(context.Background(), finishedRound(), room.OutboxEntry{})
 	go f.pub.Run(context.Background())
 	f.drain()
 	if f.s3.calls != 3 || len(f.kafka.all()) != 1 {
@@ -268,7 +268,7 @@ func TestUploadIsRetriedBeforeTheRoundIsPublished(t *testing.T) {
 
 func TestNoClaimCheckWithoutTheObject(t *testing.T) {
 	f := newFixture(t, &fakeS3{failures: 1 << 30}, &fakeKafka{}, func(c *Config) { c.JobTimeout = 50 * time.Millisecond })
-	f.pub.RoundFinished(context.Background(), finishedRound())
+	f.pub.RoundFinished(context.Background(), finishedRound(), room.OutboxEntry{})
 	go f.pub.Run(context.Background())
 	f.drain()
 	if n := len(f.kafka.all()); n != 0 {
@@ -282,7 +282,7 @@ func TestNoClaimCheckWithoutTheObject(t *testing.T) {
 func TestProduceIsRetriedWithTheSameEventID(t *testing.T) {
 	k := &fakeKafka{err: errors.New("broker down")}
 	f := newFixture(t, &fakeS3{}, k, nil)
-	f.pub.MatchFinished(context.Background(), finishedMatch())
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{})
 	f.run(t)
 	time.Sleep(20 * time.Millisecond) // a few failed attempts
 	k.mu.Lock()
@@ -307,12 +307,12 @@ func TestFullQueueDropsInsteadOfBlocking(t *testing.T) {
 	k := &fakeKafka{block: make(chan struct{})}
 	f := newFixture(t, &fakeS3{}, k, func(c *Config) { c.QueueSize = 2 })
 	f.run(t)
-	f.pub.MatchFinished(context.Background(), finishedMatch()) // taken by the worker, blocked in produce
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{}) // taken by the worker, blocked in produce
 	time.Sleep(20 * time.Millisecond)
 	done := make(chan struct{})
 	go func() {
 		for range 5 { // 2 fit in the queue, 3 are dropped
-			f.pub.MatchFinished(context.Background(), finishedMatch())
+			f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{})
 		}
 		close(done)
 	}()
@@ -334,14 +334,14 @@ func TestFullQueueDropsInsteadOfBlocking(t *testing.T) {
 func TestShutdownDrainsTheQueueThenDropsLateWork(t *testing.T) {
 	f := newFixture(t, &fakeS3{}, &fakeKafka{}, nil)
 	for range 3 {
-		f.pub.RoundFinished(context.Background(), finishedRound())
+		f.pub.RoundFinished(context.Background(), finishedRound(), room.OutboxEntry{})
 	}
 	go f.pub.Run(context.Background())
 	f.drain()
 	if n := len(f.kafka.all()); n != 3 {
 		t.Fatalf("records = %d, want every queued round published before Run returned", n)
 	}
-	f.pub.MatchFinished(context.Background(), finishedMatch())
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{})
 	if got := f.results(t); got[TopicMatches+"/dropped"] != 1 {
 		t.Fatalf("published = %v, want work after Close dropped", got)
 	}
@@ -351,8 +351,8 @@ func TestKafkaOutageLongerThanTheDeadline(t *testing.T) {
 	k := &fakeKafka{block: make(chan struct{})}
 	defer close(k.block)
 	f := newFixture(t, &fakeS3{}, k, func(c *Config) { c.JobTimeout = 50 * time.Millisecond })
-	f.pub.MatchFinished(context.Background(), finishedMatch())
-	f.pub.MatchFinished(context.Background(), finishedMatch())
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{})
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{})
 	go f.pub.Run(context.Background())
 	done := make(chan struct{})
 	go func() { f.drain(); close(done) }()
@@ -374,8 +374,8 @@ func TestKafkaOutageLongerThanTheDeadline(t *testing.T) {
 func TestCancelledRunDropsWhatIsLeft(t *testing.T) {
 	k := &fakeKafka{block: make(chan struct{})}
 	f := newFixture(t, &fakeS3{}, k, nil)
-	f.pub.MatchFinished(context.Background(), finishedMatch())
-	f.pub.MatchFinished(context.Background(), finishedMatch())
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{})
+	f.pub.MatchFinished(context.Background(), finishedMatch(), room.OutboxEntry{})
 	ctx, cancel := context.WithCancel(context.Background())
 	go f.pub.Run(ctx)
 	f.pub.Close()

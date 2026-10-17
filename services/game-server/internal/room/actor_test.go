@@ -674,18 +674,24 @@ func TestGuessMetrics(t *testing.T) {
 
 // recordingSink records what the room hands to the publisher, with the span it came with.
 type recordingSink struct {
-	mu    sync.Mutex
-	items []any // FinishedRound or FinishedMatch
-	spans []trace.SpanContext
+	mu      sync.Mutex
+	items   []any // FinishedRound or FinishedMatch
+	entries []OutboxEntry
+	spans   []trace.SpanContext
 }
 
-func (s *recordingSink) RoundFinished(ctx context.Context, r FinishedRound) { s.add(ctx, r) }
-func (s *recordingSink) MatchFinished(ctx context.Context, m FinishedMatch) { s.add(ctx, m) }
+func (s *recordingSink) RoundFinished(ctx context.Context, r FinishedRound, e OutboxEntry) {
+	s.add(ctx, r, e)
+}
+func (s *recordingSink) MatchFinished(ctx context.Context, m FinishedMatch, e OutboxEntry) {
+	s.add(ctx, m, e)
+}
 
-func (s *recordingSink) add(ctx context.Context, item any) {
+func (s *recordingSink) add(ctx context.Context, item any, e OutboxEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.items = append(s.items, item)
+	s.entries = append(s.entries, e)
 	s.spans = append(s.spans, trace.SpanContextFromContext(ctx))
 }
 

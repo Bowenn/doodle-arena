@@ -56,8 +56,9 @@ var (
 	ErrClosed = errors.New("room has ended")
 	// ErrUnavailable means Redis couldn't be reached or answered with an error.
 	ErrUnavailable = errors.New("room store unavailable")
-	// ErrOutboxPending means the room can't close yet: its outbox still has entries.
-	ErrOutboxPending = errors.New("room outbox not empty")
+	// ErrOutboxPending means the room can't close yet: its outbox still has entries. It is the
+	// room package's, so the actor recognizes it.
+	ErrOutboxPending = room.ErrOutboxPending
 )
 
 // Keys of a room.
@@ -355,8 +356,8 @@ func (s *Store) Handle(roomID, serverID string, token int64) *Handle {
 }
 
 // Commit implements room.Durable.
-func (h *Handle) Commit(ctx context.Context, events []room.StoredEvent, snap *room.Snapshot) error {
-	return h.store.Commit(ctx, h.roomID, h.serverID, h.token, events, snap, nil)
+func (h *Handle) Commit(ctx context.Context, events []room.StoredEvent, snap *room.Snapshot, outbox []room.OutboxEntry) error {
+	return h.store.Commit(ctx, h.roomID, h.serverID, h.token, events, snap, outbox)
 }
 
 // Close implements room.Durable.
