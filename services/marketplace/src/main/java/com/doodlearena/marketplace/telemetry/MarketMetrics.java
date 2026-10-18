@@ -44,6 +44,10 @@ public class MarketMetrics {
 		.setDescription("Records read from game.matches.v1, by outcome")
 		.build();
 
+	private final LongCounter stripeWebhooks = this.meter.counterBuilder("market.stripe.webhooks")
+		.setDescription("Stripe webhook requests, by outcome")
+		.build();
+
 	public Meter meter() {
 		return this.meter;
 	}
@@ -56,6 +60,11 @@ public class MarketMetrics {
 	/** One record from game.matches.v1: paid, duplicate, ineligible, skipped or failed. */
 	public void matchReceived(String result) {
 		this.matchesReceived.add(1, Attributes.of(RESULT, result));
+	}
+
+	/** processed, duplicate, ignored, unknown_session or invalid_signature. */
+	public void stripeWebhook(String result) {
+		this.stripeWebhooks.add(1, Attributes.of(RESULT, result));
 	}
 
 	/** success, conflict (the listing was sold or cancelled) or insufficient_funds. */

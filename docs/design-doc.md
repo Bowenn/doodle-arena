@@ -325,8 +325,9 @@ Marketplace:
 - `POST /api/market/listings/{id}/purchase` (requires `Idempotency-Key`, no body) returns `200 {sale_id, listing_id, drawing_id, seller_id, buyer_id, price, completed_at}`, `409 LISTING_NOT_AVAILABLE` (sold or cancelled: a lost race), `422 INSUFFICIENT_FUNDS`, `422 CANNOT_BUY_OWN_LISTING` or `404 LISTING_NOT_FOUND`.
 - Every endpoint that takes an `Idempotency-Key` answers `400 IDEMPOTENCY_KEY_REQUIRED` without one (1 to 255 printable characters), and can also return `409 IDEMPOTENCY_KEY_IN_PROGRESS` (the same key is still being processed) or `422 IDEMPOTENCY_KEY_REUSED` (the same key with a different method, path or body). Clients tell these apart by `error.code`, not by the status code. A key remembers successes and business outcomes (403, 404, 409, 422), which are replayed byte for byte with `Idempotency-Replayed: true`; a new attempt needs a new key (ADR 0012).
 - `GET /api/market/drawings/{id}/ownership-history` returns `{drawing_id, owner_id, version, author_ids, events: [{kind, from_owner, to_owner, sale_id, created_at}]}`: the current owner, authors in drawing order, and every change of hands oldest first (`kind` is `MINT`, with no `from_owner` or `sale_id`, or `SALE`). Any signed-in player may read it; a drawing that was never minted, or a malformed id, is `404 DRAWING_NOT_FOUND`.
-- `GET /api/market/coin-packs`, `POST /api/market/coin-packs/{id}/checkout` (returns a Stripe Checkout URL)
-- `POST /api/market/stripe/webhook` (verified by Stripe signature, no JWT)
+- `GET /api/market/coin-packs` returns `{packs: [{pack_id, coins, price_cents, currency}]}`: `small` (100 coins, $0.99), `medium` (550, $4.99), `large` (1,200, $9.99), from config.
+- `POST /api/market/coin-packs/{id}/checkout` (requires `Idempotency-Key`, no body) returns `200 {session_id, checkout_url}`: the browser goes to `checkout_url` and comes back to `/wallet?checkout=success&session_id=…` or `/wallet?checkout=cancelled`. `404 COIN_PACK_NOT_FOUND`, `502 STRIPE_UNAVAILABLE` when Stripe fails, `503 STRIPE_NOT_CONFIGURED` without a Stripe key.
+- `POST /api/market/stripe/webhook` (no JWT; verified by the `Stripe-Signature` header) returns `200 {received, result}` with `result` one of `processed`, `duplicate`, `ignored`, `unknown_session`; `400 INVALID_SIGNATURE` for a missing, wrong or more than 5-minute-old signature; `503 STRIPE_NOT_CONFIGURED` without a webhook secret.
 
 Notifier (authenticated with an API key):
 
@@ -418,12 +419,12 @@ Target: players resume within 10 seconds. Measure this and record it in the evid
 
 ### 7.7 Buying coins with Stripe
 
-1. The web app calls `POST /api/market/coin-packs/{id}/checkout`. The marketplace creates a Stripe Checkout Session with `user_id` and `pack_id` in the metadata, using a Stripe idempotency key.
+1. The web app calls `POST /api/market/coin-packs/{id}/checkout` with an `Idempotency-Key` (claimed as in ADR 0012, around the Stripe call). The marketplace creates a Stripe Checkout Session with the pack's price inline (`price_data`, so the Stripe account needs no Products), the user in `client_reference_id` and the metadata (`user_id`, `pack_id`), and a Stripe idempotency key derived from the user and our key, so a retried request gets the same session. It records the sale in `stripe_checkouts`.
 2. The user pays with a Stripe test card.
-3. Stripe sends `checkout.session.completed` to the webhook endpoint. The marketplace verifies the signature, records the Stripe event id (a duplicate is ignored), and credits the coins with the idempotency key `stripe:<session_id>`. That debits `stripe_clearing` and credits the user.
-4. It writes `CoinsCredited` to the outbox and returns `2xx` quickly.
+3. Stripe sends `checkout.session.completed` (and, for delayed payment methods, `checkout.session.async_payment_succeeded`) to the webhook endpoint. The marketplace verifies the signature (HMAC-SHA256 of the timestamp and raw body, at most 5 minutes old) and, in one transaction, records the Stripe event id (a redelivered event is a duplicate), looks up the session in `stripe_checkouts` (a session it didn't create, or whose metadata names another user, is logged and not credited), and credits the coins recorded there, never an amount from the event, with the ledger key `stripe:<session_id>`, so a second event about the same session pays nothing. That debits `stripe_clearing` and credits the user.
+4. It writes `CoinsCredited` (reason `STRIPE_PURCHASE`, reference the session id) to the outbox and returns `2xx` quickly. Every answer after a valid signature is `2xx`, so Stripe doesn't retry a case that retrying can't fix. Refunds and disputes aren't handled yet.
 
-Locally, use the Stripe CLI (`stripe listen --forward-to ...`) to forward webhooks.
+Locally, the Stripe CLI forwards the two checkout events to the gateway (`stripe listen --events checkout.session.completed,checkout.session.async_payment_succeeded --forward-to localhost:8080/api/market/stripe/webhook`; docs/setup.md).
 
 ### 7.8 Listing and buying a drawing
 
@@ -458,7 +459,8 @@ Tables (the Flyway migrations are the source of truth):
 - `ownership_events(event_id BIGINT identity, drawing_id, from_owner, to_owner, sale_id, kind MINT|SALE, source_event_id, created_at)`: append-only provenance (a trigger refuses `UPDATE`, `DELETE` and `TRUNCATE`). A `MINT` has no `from_owner` or `sale_id`, a `SALE` has both (a `CHECK`), and a partial unique index allows one `MINT` per drawing. `source_event_id` is the `DrawingApproved`'s `event_id`. The identity gives a drawing's history a strict order
 - `listings(listing_id UUIDv7, drawing_id, seller_id, price 1..1000000, status ACTIVE|SOLD|CANCELLED, buyer_id, sale_id, created_at, closed_at)`, with a partial unique index on `drawing_id WHERE status = 'ACTIVE'` and a `CHECK` on the shape of each status (a sold listing has a buyer and a sale id)
 - `idempotency_keys(user_id, key, operation, request_hash, status IN_PROGRESS|DONE, claim_token, locked_until, response_code, response_body TEXT, created_at, completed_at)`, primary key `(user_id, key)`, kept for 24 hours (ADR 0012)
-- `stripe_events(stripe_event_id PK, type, processed_at)`
+- `stripe_checkouts(session_id PK, user_id, pack_id, coins, amount_cents, currency, created_at)`: every Checkout Session the marketplace created; the webhook credits these coins
+- `stripe_events(stripe_event_id PK, type, session_id, result, processed_at)`: every verified webhook event, once
 - `outbox(event_id, topic, key, payload, traceparent, created_at, published_at)`: `event_id` is also the event's `meta.event_id`
 
 Every money movement goes through one ledger posting (`LedgerService.post`, task 4.1), inside the caller's transaction when there is one:
@@ -643,13 +645,14 @@ Releases:
 | D36 | The marketplace's outbox relay runs inside the marketplace process every 500 ms with `FOR UPDATE SKIP LOCKED` and an idempotent producer | One deployable; several instances share the outbox safely; a Kafka outage only delays events |
 | D37 | Match rewards are one ledger transaction per match (`reward:<match_id>`) that also writes a `CoinsCredited` per player; only matches with two or more players pay | All or nothing per match, one lock on the system account per match instead of one per player, and dedupe on the natural key |
 | D38 | Kafka clients authenticate with SASL/SCRAM-SHA-512, one user per service; `StandardAuthorizer` ACLs (deny by default) let only each topic's producer write it and only its consumers read it and use their own groups; Kafka gets its own Compose network; `SASL_SSL` in AWS (ADR 0013) | Only the game server can mint coins through `MatchFinished` and only assets can mint drawings; configuration-only client changes and the same secret pattern as Postgres; the ACLs stay if the mechanism later becomes mTLS or MSK IAM |
+| D39 | Coin packs live in config and are priced inline in Stripe Checkout; checkout takes an Idempotency-Key (ADR 0012) with a derived Stripe idempotency key; the webhook credits the coins recorded at checkout, deduped by Stripe event id and by the ledger key `stripe:<session_id>`; tests run against stripe-mock | Every environment works without setting up Stripe Products; a retried click gets the same session; a redelivered or second event never pays twice; the API calls are checked against Stripe's real shapes in CI |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 15. Open questions
 
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
-- Coin pack prices (task 4.5). Reward amounts are set (section 7.9) and configurable; anti-farming (daily caps, bot-only matches) waits for the Stage 6 analytics.
+- Coin pack prices and reward amounts are set (sections 6.3 and 7.9) and configurable; anti-farming (daily caps, bot-only matches) waits for the Stage 6 analytics.
 - Before task 4.6: royalties for co-drawn drawings. Today, when one of two co-authors sells for the first time, the other gets nothing, and only `drawer_ids[0]` ever becomes the owner. (The buyer who is also an author no longer needs care: the ledger merges postings to one account before locking, since task 4.1.)
 - `docs/keyword-coverage.md` mentions two things this doc doesn't design yet: Redis cache-aside for listings and wallet reads (which Redis key prefix does the marketplace own, and should balances be cached at all, given they need strong consistency?), and a MongoDB replica set.
 

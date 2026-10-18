@@ -53,6 +53,18 @@ app:
     jwks-url: ${AUTH_JWKS_URL:http://localhost:8080/api/auth/.well-known/jwks.json}
     issuer: ${JWT_ISSUER:http://localhost:8080/api/auth}
     audience: doodle-api
+  stripe:
+    # Test-mode keys only (docs/setup.md). Without a secret key, checkout and the webhook answer 503.
+    secret-key: ${STRIPE_SECRET_KEY:}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    api-base: ${STRIPE_API_BASE:https://api.stripe.com}
+    # Where Checkout sends the browser back to (the web app's wallet page, task 4.8).
+    public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+    # The coin packs for sale (design doc, section 7.7), priced inline in Checkout.
+    coin-packs:
+      - { id: small, coins: 100, price-cents: 99, currency: usd }
+      - { id: medium, coins: 550, price-cents: 499, currency: usd }
+      - { id: large, coins: 1200, price-cents: 999, currency: usd }
   rewards:
     # Coins per placement (design doc, section 7.9): 1st, 2nd, 3rd; everyone else gets participation-coins.
     # Players with equal scores share a placement, so they get the same amount.

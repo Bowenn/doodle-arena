@@ -64,6 +64,23 @@ Put secrets in `.env`, which is gitignored. `.env.example` lists the variable na
 
 The stack is one origin, `http://localhost:8080`. Cookies are not `Secure` locally (`COOKIE_SECURE=false`, because Safari won't send `Secure` cookies to plain-http localhost); they are in AWS. `make up` adds any variable that appears in `.env.example` to an existing `.env` without changing values already there.
 
+### Stripe (task 4.5)
+
+Coin packs use Stripe Checkout in test mode. Without keys the stack still runs; coin packs answer 503.
+
+1. Create a Stripe account (or a sandbox) and stay in test mode. Copy the test secret key (`sk_test_…`) into `.env` as `STRIPE_SECRET_KEY`.
+2. Install the Stripe CLI (`brew install stripe/stripe-cli/stripe`) and run `stripe login`.
+3. Forward webhooks to the gateway: `stripe listen --events checkout.session.completed,checkout.session.async_payment_succeeded --forward-to localhost:8080/api/market/stripe/webhook` (current CLI versions require `--events`). It prints a signing secret (`whsec_…`) that stays the same for your account; put it into `.env` as `STRIPE_WEBHOOK_SECRET`.
+4. Recreate the marketplace so it reads them: `docker compose -f infra/docker-compose.yml --env-file .env up -d marketplace`.
+5. Pay with Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC. `stripe events resend <evt_id>` redelivers an event (the marketplace answers `duplicate`).
+
+Two things that silently lose the webhook:
+
+- **The CLI and the key must be the same Stripe account.** `stripe login` may pick your main test account while `STRIPE_SECRET_KEY` belongs to a sandbox: the payment then happens in the sandbox and its event has no listener (`pending_webhooks: 0`). Run the listener as the key's account: `stripe listen --api-key "$(grep '^STRIPE_SECRET_KEY=' .env | cut -d= -f2-)" --events … --forward-to …`, and use the `whsec_` that this listener prints.
+- **The marketplace reads `.env` only when it is created.** After changing either value, recreate it (step 4); a marketplace started with an old `whsec_` answers every webhook 400.
+
+Only test keys belong in `.env`; never commit it.
+
 ## 4. Working as two people
 
 - Each person works on their own track (see `docs/roadmap.md`) in their own branches.

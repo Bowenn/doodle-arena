@@ -65,7 +65,12 @@ public class SecurityConfig {
 	SecurityFilterChain api(HttpSecurity http, JsonMapper json) throws Exception {
 		AuthenticationEntryPoint unauthenticated = (request, response, ex) -> write(response, request, json,
 				HttpServletResponse.SC_UNAUTHORIZED, "UNAUTHENTICATED", "a valid access token is required");
-		http.authorizeHttpRequests((requests) -> requests.requestMatchers("/healthz").permitAll().anyRequest().authenticated())
+		http.authorizeHttpRequests((requests) -> requests
+				// Stripe signs its webhook instead (StripeWebhookController).
+				.requestMatchers("/healthz", "/api/market/stripe/webhook")
+				.permitAll()
+				.anyRequest()
+				.authenticated())
 			.sessionManagement((sessions) -> sessions.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.csrf((csrf) -> csrf.disable())
 			.oauth2ResourceServer((server) -> server.jwt(Customizer.withDefaults()).authenticationEntryPoint(unauthenticated))

@@ -428,8 +428,13 @@ services:
       # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
       AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
       JWT_ISSUER: http://localhost:8080/api/auth
-      # DrawingApproved in (task 4.2); MatchFinished and the outbox later in Stage 4.
+      # DrawingApproved and MatchFinished in, the outbox out.
       KAFKA_BROKERS: kafka:9092
+      # Stripe test mode (docs/setup.md). Empty is allowed: coin packs then answer 503.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # Where Stripe Checkout sends the browser back to.
+      PUBLIC_BASE_URL: http://localhost:8080
     depends_on:
       otel-lgtm:
         condition: service_healthy
