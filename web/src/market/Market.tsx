@@ -61,7 +61,7 @@ export function Market({ meId, onOpen, onWallet }: Props) {
       ) : (
         <ul className="gallery-grid">
           {listings.map((l) => (
-            <li key={l.listing_id}>
+            <li key={l.listing_id} className="market-card">
               <DrawingThumb drawingId={l.drawing_id} drawing={drawings.get(l.drawing_id)} onOpen={onOpen} />
               <span className="price">{coins(l.price)}</span>
               <span className="muted">Sold by {l.seller_id === meId ? 'you' : playerLabel(l.seller_id)}</span>

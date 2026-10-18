@@ -49,7 +49,7 @@ export function MyDrawings({ onOpen }: Props) {
       ) : (
         <ul className="gallery-grid">
           {owned.map((o) => (
-            <li key={o.drawing_id}>
+            <li key={o.drawing_id} className="market-card">
               <DrawingThumb drawingId={o.drawing_id} drawing={drawings.get(o.drawing_id)} onOpen={onOpen} />
               <SellControls owned={o} onChange={update} />
             </li>

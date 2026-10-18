@@ -433,3 +433,12 @@ table.ledger td.debit {
   align-items: flex-start;
   gap: 0.25rem;
 }
+.market-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+.market-card .drawing-card {
+  align-self: stretch;
+}
