@@ -1,0 +1,5 @@
+# Findings that are known not to be secrets, by fingerprint (commit:file:rule:line). Keep each one
+# explained; prefer fixture values that don't look like keys.
+
+# A made-up API key in the developer settings test (task 4.8): it was never issued by auth.
+245f9fa9be45eafcc754a25b37395b1e9bbe827e:web/src/developer/Developer.test.tsx:generic-api-key:56
