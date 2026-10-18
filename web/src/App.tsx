@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, loginUrl, logout, type Me } from './auth.ts'
+import { DrawingPage } from './gallery/DrawingPage.tsx'
+import { Gallery } from './gallery/Gallery.tsx'
 import { Leaderboard } from './Leaderboard.tsx'
 import { Lobby } from './Lobby.tsx'
 import { Moderate } from './Moderate.tsx'
@@ -16,19 +18,30 @@ function roomFromPath(path: string): string | null {
   return /^\/rooms\/([a-z0-9]{1,64})$/.exec(path)?.[1] ?? null
 }
 
+/** The drawing id in a /drawings/<uuid> path. */
+function drawingFromPath(path: string): string | null {
+  return /^\/drawings\/([0-9a-f-]{36})$/.exec(path)?.[1] ?? null
+}
+
 export default function App() {
   const [view, setView] = useState<View>({ kind: 'loading' })
   const [path, setPath] = useState(() => window.location.pathname)
+  const [search, setSearch] = useState(() => window.location.search)
 
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname)
+    const onPop = () => {
+      setPath(window.location.pathname)
+      setSearch(window.location.search)
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
   function go(to: string) {
     window.history.pushState(null, '', to)
-    setPath(to)
+    const url = new URL(to, window.location.origin)
+    setPath(url.pathname)
+    setSearch(url.search)
   }
 
   useEffect(() => {
@@ -54,6 +67,7 @@ export default function App() {
   if (view.kind === 'signed-in') {
     const { me } = view
     const roomId = roomFromPath(path)
+    const drawingId = drawingFromPath(path)
     return (
       <>
         <header className="topbar">
@@ -79,13 +93,32 @@ export default function App() {
           </span>
         </header>
         {roomId ? (
-          <Room key={roomId} roomId={roomId} onLeave={() => go('/')} />
+          <Room
+            key={roomId}
+            roomId={roomId}
+            onLeave={() => go('/')}
+            onMatchDrawings={(matchId) => go(`/gallery?match_id=${encodeURIComponent(matchId)}`)}
+          />
+        ) : drawingId ? (
+          <DrawingPage key={drawingId} drawingId={drawingId} meId={me.id} onBack={() => go('/gallery')} />
+        ) : path === '/gallery' ? (
+          <Gallery
+            key={search}
+            meId={me.id}
+            matchId={new URLSearchParams(search).get('match_id')}
+            onOpen={(id) => go(`/drawings/${id}`)}
+            onBack={() => go('/')}
+          />
         ) : path === '/moderate' ? (
           <Moderate onBack={() => go('/')} />
         ) : path === '/leaderboard' ? (
           <Leaderboard meId={me.id} onBack={() => go('/')} />
         ) : (
-          <Lobby onEnter={(id) => go(`/rooms/${id}`)} onLeaderboard={() => go('/leaderboard')} />
+          <Lobby
+            onEnter={(id) => go(`/rooms/${id}`)}
+            onLeaderboard={() => go('/leaderboard')}
+            onGallery={() => go('/gallery')}
+          />
         )}
       </>
     )

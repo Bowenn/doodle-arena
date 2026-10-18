@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createRoom, listRooms, LobbyError, quickPlay, type RoomListing } from './lobby.ts'
 
-type Props = { onEnter: (roomId: string) => void; onLeaderboard: () => void }
+type Props = { onEnter: (roomId: string) => void; onLeaderboard: () => void; onGallery: () => void }
 
-export function Lobby({ onEnter, onLeaderboard }: Props) {
+export function Lobby({ onEnter, onLeaderboard, onGallery }: Props) {
   const [rooms, setRooms] = useState<RoomListing[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -52,6 +52,16 @@ export function Lobby({ onEnter, onLeaderboard }: Props) {
           }}
         >
           Weekly leaderboard
+        </a>
+        <a
+          href="/gallery"
+          className="leaderboard-link"
+          onClick={(e) => {
+            e.preventDefault()
+            onGallery()
+          }}
+        >
+          Drawing gallery
         </a>
       </div>
       {error && <p role="alert">{error}</p>}

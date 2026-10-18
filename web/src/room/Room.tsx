@@ -19,9 +19,14 @@ import {
 import { useRoom } from '../game/useRoom.ts'
 import { Canvas } from './Canvas.tsx'
 
-type Props = { roomId: string; onLeave: () => void }
+type Props = {
+  roomId: string
+  onLeave: () => void
+  /** Opens the gallery with this match's drawings (shown when the match has ended). */
+  onMatchDrawings?: (matchId: string) => void
+}
 
-export function Room({ roomId, onLeave }: Props) {
+export function Room({ roomId, onLeave, onMatchDrawings }: Props) {
   const { state, status, rtt, welcomes, send } = useRoom(roomId)
 
   return (
@@ -35,6 +40,11 @@ export function Room({ roomId, onLeave }: Props) {
         <button type="button" onClick={onLeave}>
           Leave
         </button>
+        {state?.phase === 'match_end' && state.matchId && onMatchDrawings && (
+          <button type="button" className="primary" onClick={() => onMatchDrawings(state.matchId as string)}>
+            See this match's drawings
+          </button>
+        )}
       </div>
       {status.kind === 'closed' && (
         <p role="alert" className="notice bad">

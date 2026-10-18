@@ -1,6 +1,6 @@
 // Lobby REST client (design doc, section 6.3).
 
-import { authFetch } from './auth.ts'
+import { call } from './api.ts'
 
 export type RoomListing = {
   room_id: string
@@ -28,38 +28,8 @@ export type JoinTicket = {
   expires_at: string
 }
 
-/** A failed lobby call. code is the server's error.code, or SIGNED_OUT / HTTP_<status>. */
-export class LobbyError extends Error {
-  readonly code: string
-  readonly status: number
-
-  constructor(code: string, status: number, message: string) {
-    super(message)
-    this.code = code
-    this.status = status
-  }
-}
-
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method }
-  if (body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json' }
-    init.body = JSON.stringify(body)
-  }
-  const resp = await authFetch(path, init)
-  if (!resp) throw new LobbyError('SIGNED_OUT', 401, 'You are signed out.')
-  if (!resp.ok) {
-    const err = (await resp.json().catch(() => null)) as {
-      error?: { code?: string; message?: string }
-    } | null
-    throw new LobbyError(
-      err?.error?.code ?? `HTTP_${resp.status}`,
-      resp.status,
-      err?.error?.message ?? `${method} ${path} failed with ${resp.status}`,
-    )
-  }
-  return (await resp.json()) as T
-}
+// Lobby calls fail with the shared ApiError; the old name stays for the lobby's callers.
+export { ApiError as LobbyError } from './api.ts'
 
 export function listRooms(): Promise<{ rooms: RoomListing[]; next_cursor: string | null }> {
   return call('GET', '/api/lobby/rooms?limit=20')

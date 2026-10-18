@@ -52,8 +52,13 @@ function view(over: Partial<View> = {}): View {
   return { room_id: 'r1', phase: 'waiting', host_id: 'a', settings: {}, players: PLAYERS, ...over }
 }
 
-async function joined(me: string, v: View = view(), seq = 2): Promise<FakeSocket> {
-  render(<Room roomId="r1" onLeave={() => {}} />)
+async function joined(
+  me: string,
+  v: View = view(),
+  seq = 2,
+  onMatchDrawings?: (matchId: string) => void,
+): Promise<FakeSocket> {
+  render(<Room roomId="r1" onLeave={() => {}} onMatchDrawings={onMatchDrawings} />)
   await vi.waitFor(() => expect(FakeSocket.all).toHaveLength(1))
   const ws = FakeSocket.all[0]
   ws.open()
@@ -200,5 +205,21 @@ describe('Room', () => {
     act(() => ws.onclose?.({ code: 4003 }))
     expect(screen.getByRole('alert').textContent).toBe('This room is full.')
     expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Chat' }).disabled).toBe(true)
+  })
+  it("links to the match's drawings once the match has ended", async () => {
+    const open = vi.fn()
+    const ws = await joined('a', view({ phase: 'drawing', match_id: 'm1' }), 2, open)
+    expect(screen.queryByRole('button', { name: "See this match's drawings" })).toBeNull()
+
+    ws.event(3, 'match_ended', {
+      match_id: 'm1',
+      results: [
+        { user_id: 'a', name: 'Ada', score: 120, placement: 1 },
+        { user_id: 'b', name: 'Bob', score: 80, placement: 2 },
+      ],
+    })
+    fireEvent.click(screen.getByRole('button', { name: "See this match's drawings" }))
+
+    expect(open).toHaveBeenCalledWith('m1')
   })
 })
