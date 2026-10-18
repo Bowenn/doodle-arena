@@ -77,6 +77,8 @@ app:
   outbox:
     # How often the relay looks for unpublished events.
     interval: 500ms
+    # Published events are deleted after this long (they're on the Kafka topics by then).
+    retention: 7d
   reconciliation:
     interval: 60s
     # The gauges stop reporting when the last successful run is older than this.

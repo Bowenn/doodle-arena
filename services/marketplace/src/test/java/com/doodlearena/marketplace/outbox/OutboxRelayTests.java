@@ -108,6 +108,26 @@ class OutboxRelayTests {
 		assertThat(this.db.sql("SELECT COUNT(*) FROM outbox WHERE key = ?").param(drawing).query(Long.class).single()).isZero();
 	}
 
+	@Test
+	void publishedEventsAreDeletedAfterTheRetention() {
+		String drawing = UUID.randomUUID().toString();
+		EventMeta old = write(drawing, 1);
+		EventMeta recent = write(drawing, 2);
+		EventMeta waiting = write(drawing, 3);
+		ageRow(old, "published_at = now() - interval '8 days', created_at = now() - interval '8 days'");
+		ageRow(recent, "published_at = now() - interval '6 days'");
+		// Never published, however old: deleting it would lose the event.
+		ageRow(waiting, "created_at = now() - interval '30 days'");
+
+		assertThat(this.relay.deletePublished()).isGreaterThanOrEqualTo(1);
+		assertThat(this.db.sql("SELECT event_id FROM outbox WHERE key = ?").param(drawing).query(UUID.class).list())
+			.containsExactlyInAnyOrder(UUID.fromString(recent.getEventId()), UUID.fromString(waiting.getEventId()));
+	}
+
+	private void ageRow(EventMeta meta, String set) {
+		this.db.sql("UPDATE outbox SET " + set + " WHERE event_id = ?").param(UUID.fromString(meta.getEventId())).update();
+	}
+
 	private EventMeta write(String drawing, long price) {
 		EventMeta meta = OutboxWriter.meta("SaleCompleted", Instant.now());
 		byte[] payload = SaleEvent.newBuilder()
