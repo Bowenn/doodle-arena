@@ -65,6 +65,10 @@ app:
       - { id: small, coins: 100, price-cents: 99, currency: usd }
       - { id: medium, coins: 550, price-cents: 499, currency: usd }
       - { id: large, coins: 1200, price-cents: 999, currency: usd }
+  royalties:
+    # Share of every sale paid to the drawing's authors who are neither the seller nor the buyer
+    # (design doc, section 8).
+    percent: 10
   rewards:
     # Coins per placement (design doc, section 7.9): 1st, 2nd, 3rd; everyone else gets participation-coins.
     # Players with equal scores share a placement, so they get the same amount.
