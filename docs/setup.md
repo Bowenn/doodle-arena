@@ -70,7 +70,7 @@ Coin packs use Stripe Checkout in test mode. Without keys the stack still runs; 
 
 1. Create a Stripe account (or a sandbox) and stay in test mode. Copy the test secret key (`sk_test_…`) into `.env` as `STRIPE_SECRET_KEY`.
 2. Install the Stripe CLI (`brew install stripe/stripe-cli/stripe`) and run `stripe login`.
-3. Forward webhooks to the gateway: `stripe listen --forward-to localhost:8080/api/market/stripe/webhook`. It prints a signing secret (`whsec_…`) that stays the same for your account; put it into `.env` as `STRIPE_WEBHOOK_SECRET`.
+3. Forward webhooks to the gateway: `stripe listen --events checkout.session.completed,checkout.session.async_payment_succeeded --forward-to localhost:8080/api/market/stripe/webhook` (current CLI versions require `--events`). It prints a signing secret (`whsec_…`) that stays the same for your account; put it into `.env` as `STRIPE_WEBHOOK_SECRET`.
 4. Recreate the marketplace so it reads them: `docker compose -f infra/docker-compose.yml --env-file .env up -d marketplace`.
 5. Pay with Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC. `stripe events resend <evt_id>` redelivers an event (the marketplace answers `duplicate`).
 

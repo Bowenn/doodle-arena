@@ -424,7 +424,7 @@ Target: players resume within 10 seconds. Measure this and record it in the evid
 3. Stripe sends `checkout.session.completed` (and, for delayed payment methods, `checkout.session.async_payment_succeeded`) to the webhook endpoint. The marketplace verifies the signature (HMAC-SHA256 of the timestamp and raw body, at most 5 minutes old) and, in one transaction, records the Stripe event id (a redelivered event is a duplicate), looks up the session in `stripe_checkouts` (a session it didn't create, or whose metadata names another user, is logged and not credited), and credits the coins recorded there, never an amount from the event, with the ledger key `stripe:<session_id>`, so a second event about the same session pays nothing. That debits `stripe_clearing` and credits the user.
 4. It writes `CoinsCredited` (reason `STRIPE_PURCHASE`, reference the session id) to the outbox and returns `2xx` quickly. Every answer after a valid signature is `2xx`, so Stripe doesn't retry a case that retrying can't fix. Refunds and disputes aren't handled yet.
 
-Locally, use the Stripe CLI (`stripe listen --forward-to ...`) to forward webhooks.
+Locally, the Stripe CLI forwards the two checkout events to the gateway (`stripe listen --events checkout.session.completed,checkout.session.async_payment_succeeded --forward-to localhost:8080/api/market/stripe/webhook`; docs/setup.md).
 
 ### 7.8 Listing and buying a drawing
 
