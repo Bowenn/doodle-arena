@@ -107,3 +107,11 @@ def requeue_stale_drawings() -> int:
     if stale:
         requeued.add(len(stale))
     return len(stale)
+
+
+@app.task(name="assets.clear_expired_sessions")
+def clear_expired_sessions() -> None:
+    """Run hourly by Celery beat: deletes expired admin sessions, like `manage.py clearsessions`."""
+    from django.contrib.sessions.backends.db import SessionStore
+
+    SessionStore.clear_expired()
