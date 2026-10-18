@@ -146,7 +146,7 @@ Consumes `RoundFinished` and runs a Celery pipeline for each drawing:
 
 Processing is idempotent: a unique `(match_id, round_no)` constraint stops a replayed `RoundFinished` from creating a second drawing.
 
-Processes (one image): gunicorn serves the REST API and the admin; `assets-worker` runs Celery with Redis logical database 1 as its broker; `assets-migrate` applies the Django migrations before either starts. Celery tasks are acknowledged after they finish and redelivered when their worker dies (`acks_late`, `reject_on_worker_lost`, prefetch 1), so every task runs at least once and must be idempotent. There is no result backend: a drawing's state lives in Postgres.
+Processes (one image): gunicorn serves the REST API and the admin; `assets-consumer` reads `game.rounds.v1`; `assets-worker` runs Celery with Redis logical database 1 as its broker; `assets-beat` (exactly one) runs the recovery sweeper every minute; `assets-migrate` applies the Django migrations and `mongo-users` creates assets' MongoDB user before they start. Celery tasks are acknowledged after they finish and redelivered when their worker dies (`acks_late`, `reject_on_worker_lost`, prefetch 1), so every task runs at least once and must be idempotent. There is no result backend: a drawing's state lives in Postgres.
 
 A drawing's `id` is a UUIDv7: random, so it can't be guessed, and time-ordered, so new rows land at the end of the primary-key index and the gallery can page by id. Its `status` is the only state machine:
 
@@ -158,7 +158,12 @@ stateDiagram-v2
   processing --> review: AI fails after the last attempt
   review --> approved: moderator
   review --> rejected: moderator
+  processing --> failed: stroke log missing or corrupt
 ```
+
+The consumer (`drawings/consumer.py`, group `assets`, manual commits) turns each `RoundFinished` into a row with `get_or_create` on `(match_id, round_no)`, sends the pipeline task, and only then commits the offset. A drawing still `processing` gets its task again on every delivery, which covers a crash between the insert and the send. A round with `stroke_count` 0 creates nothing. Records it can't read, or that the database refuses (a value longer than its column), are logged, counted and committed so they never block the partition; only connection errors (Postgres, the broker) are retried, on the same record.
+
+The pipeline task (`prepare_drawing`) runs fetch, render and upload, each skipped when the row already has its result. The replay document in `assets.replays` (`_id` = drawing id, its own `schema_version`, points as `[x, y, t]` arrays) is the source of truth once stored, because the bucket copy expires after 7 days. Pillow renders a 1024 px image (long side, the drawers' aspect ratio) and a 256 px thumbnail, at 2x and downsampled, with no metadata, so the same strokes always give the same bytes. They go to `sha256/<hash>.png` and `sha256/<hash>.thumb.png` (HEAD first, PUT only if missing). The hash is of the rendered image, so a renderer change gives new keys; old objects stay valid. Store outages retry with exponential backoff and full jitter (5 attempts); a missing or corrupt log makes the drawing `failed` with the reason. The sweeper re-queues drawings still waiting for their images 10 minutes after their last change, locking them with `SKIP LOCKED`.
 
 Progress inside `processing` is the pipeline's own columns (`replay_id`, `sha256`, the image keys), each filled once, so a redelivered task skips the steps already done. Every status change is one conditional `UPDATE ... WHERE status IN (...)` (`drawings/moderation.py`): under READ COMMITTED, of two concurrent decisions exactly one changes the row. The AI decides only from `processing` and a moderator only from `review`, so a late AI answer can't overrule the queue. Check constraints make a decided drawing always name who decided and when.
 
@@ -224,7 +229,7 @@ The room client (task 2.3):
 | Redis | `room:*` | Room event streams, snapshots, leases, fencing counters | game-server |
 | Redis | `lobby:*` | Rooms, game-server registry, leaderboards | lobby |
 | Redis | Logical database 1 | Celery broker (no result backend) | assets |
-| MongoDB | `assets.replays` | Stroke logs for replays | assets |
+| MongoDB | `assets.replays` (user `assets`, `readWrite` on `assets` only) | Stroke logs for replays | assets |
 | Object storage | `round-logs` bucket | Raw round stroke logs; a lifecycle rule deletes them after 7 days | game-server |
 | Object storage | `drawings` bucket | PNGs and thumbnails, content-addressed | assets |
 | Elasticsearch | `drawings` index | Search over drawings and listings (Stage 6) | assets |

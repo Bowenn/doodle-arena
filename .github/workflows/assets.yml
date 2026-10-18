@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - services/assets/**
+      - proto/gen/python/**
       - fixtures/jwt/**
       - .github/workflows/assets.yml
       - .github/workflows/_python.yml
@@ -16,6 +17,7 @@ on:
     branches: [master]
     paths:
       - services/assets/**
+      - proto/gen/python/**
       - fixtures/jwt/**
       - .github/workflows/assets.yml
       - .github/workflows/_python.yml
@@ -44,4 +46,5 @@ jobs:
     uses: ./.github/workflows/_docker.yml
     with:
       service: assets
-      context: services/assets
+      context: .
+      file: services/assets/Dockerfile

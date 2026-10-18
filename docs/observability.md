@@ -92,6 +92,9 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `assets.pipeline.duration` | Histogram (ms) | `step` = fetch, render, upload, moderate | assets |
 | `assets.jobs.oldest_age` | Gauge (s) | `queue` | assets (pool process 0 of each worker; from a `sent_at` header on every task message, 0 when the queue is empty; a missing series means no worker is running) |
 | `assets.admin.sign_ins` | Counter | `result` = ok, forbidden, unauthenticated | assets |
+| `assets.rounds.received` | Counter | `result` = created, duplicate, empty, skipped | assets (consumer) |
+| `assets.pipeline.results` | Counter | `result` = prepared, skipped, failed | assets |
+| `assets.pipeline.requeued` | Counter | – | assets (sweeper) |
 | `assets.moderation` | Counter | `result` = approved, rejected, retry, manual | assets |
 | `market.purchases` | Counter | `result` = success, conflict, insufficient_funds | marketplace |
 | `market.idempotency.replays` | Counter | `operation` | marketplace |
@@ -146,6 +149,7 @@ Starting rules (tune the thresholds after the first load test):
 | SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
 | HighErrorRate | Server errors above 1% of requests for 5 minutes, per service | warning |
 | ConsumerLagGrowing | Kafka lag growing for 10 minutes for any consumer group | warning |
+| DrawingsFailing | `assets.pipeline.results{result=failed}` above 0 for 10 minutes (stroke logs missing or unreadable: an S3 outage longer than 7 days, or a game-server bug) | warning |
 | JobsBacklog | `assets.jobs.oldest_age` above 300 s for 5 minutes, or the series missing for 5 minutes (no worker) | warning |
 | DeadLetters | `notifier.dlq.size > 0` | warning |
 | StripeSignatureFailures | More than 5 invalid signatures in 10 minutes (a wrong secret or forged requests) | warning |

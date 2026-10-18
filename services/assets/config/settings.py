@@ -30,6 +30,18 @@ class Env(BaseSettings):
     jwt_issuer: str = "http://localhost:8080/api/auth"
     # The Celery broker: assets' own logical Redis database (design doc, section 5).
     celery_broker_url: str = "redis://redis:6379/1"
+    # Kafka: assets consumes game.rounds.v1 (design doc 6.2).
+    kafka_brokers: str = "kafka:9092"
+    # Object storage: SeaweedFS locally, S3 in AWS. The stroke logs are the game server's bucket
+    # (read only here); drawings is assets' own.
+    s3_endpoint: str = "http://seaweedfs:8333"
+    s3_region: str = "us-east-1"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    round_logs_bucket: str = "round-logs"
+    drawings_bucket: str = "drawings"
+    # MongoDB holds the replays (assets.replays); the user only has access to the assets database.
+    mongo_url: str = "mongodb://mongo:27017/assets"
     # The origin browsers see (the gateway). Nginx forwards Host without the port, so Django's
     # CSRF Origin check needs to be told which origin is ours.
     public_base_url: str = "http://localhost:8080"
@@ -138,6 +150,20 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # The worker keeps the JSON logging config below instead of installing its own handlers.
 CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 CELERY_WORKER_REDIRECT_STDOUTS = False
+# Celery beat (one process, assets-beat) runs the recovery sweeper (drawings/tasks.py).
+CELERY_BEAT_SCHEDULE = {
+    "requeue-stale-drawings": {"task": "assets.requeue_stale_drawings", "schedule": 60.0},
+}
+
+KAFKA_BROKERS = env.kafka_brokers
+SERVICE_INSTANCE_ID = env.service_instance_id
+S3_ENDPOINT = env.s3_endpoint
+S3_REGION = env.s3_region
+S3_ACCESS_KEY = env.s3_access_key
+S3_SECRET_KEY = env.s3_secret_key
+ROUND_LOGS_BUCKET = env.round_logs_bucket
+DRAWINGS_BUCKET = env.drawings_bucket
+MONGO_URL = env.mongo_url
 
 AUTH_JWKS_URL = env.auth_jwks_url
 JWT_ISSUER = env.jwt_issuer

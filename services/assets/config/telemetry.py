@@ -16,9 +16,11 @@ from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.celery import CeleryInstrumentor
 from opentelemetry.instrumentation.django import DjangoInstrumentor
 from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
+from opentelemetry.instrumentation.pymongo import PymongoInstrumentor
 from opentelemetry.instrumentation.system_metrics import SystemMetricsInstrumentor
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
@@ -73,13 +75,16 @@ def setup_telemetry() -> Callable[[], None]:
 
 
 def setup_worker_telemetry() -> Callable[[], None]:
-    """For Celery pool processes: installs the global providers and instruments Celery (a span
-    per task, continuing the trace of whoever sent it) and psycopg."""
+    """For Celery pool processes, beat and the round consumer: installs the global providers and
+    instruments Celery (a span per task, continuing the trace of whoever sent it), psycopg,
+    pymongo and botocore (S3)."""
     if not enabled():
         return lambda: None
     shutdown = _install_providers()
     PsycopgInstrumentor().instrument()
     CeleryInstrumentor().instrument()  # type: ignore[no-untyped-call]
+    PymongoInstrumentor().instrument()
+    BotocoreInstrumentor().instrument()  # type: ignore[no-untyped-call]
     return shutdown
 
 

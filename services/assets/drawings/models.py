@@ -1,7 +1,7 @@
 """A drawing is one finished round's canvas, from RoundFinished to an approved or rejected item
 (design doc 4.5 and 7.6).
 
-The status is the only state machine: processing -> approved | rejected | review, and
+The status is the only state machine: processing -> approved | rejected | review | failed, and
 review -> approved | rejected. Progress inside "processing" is the pipeline's own columns
 (replay_id, sha256, ...), each filled once, so a redelivered task skips the steps already done.
 Status changes go through drawings.moderation, never through save().
@@ -22,6 +22,9 @@ class Status(models.TextChoices):
     REVIEW = "review"
     APPROVED = "approved"
     REJECTED = "rejected"
+    # The pipeline can never build it (the stroke log expired or is corrupt). Never minted;
+    # decision_reason says why.
+    FAILED = "failed"
 
 
 class DecidedBy(models.TextChoices):
@@ -85,7 +88,7 @@ class Drawing(models.Model):
             models.CheckConstraint(
                 condition=(
                     Q(
-                        status__in=[Status.PROCESSING, Status.REVIEW],
+                        status__in=[Status.PROCESSING, Status.REVIEW, Status.FAILED],
                         decided_by="",
                         decided_at__isnull=True,
                         moderator__isnull=True,

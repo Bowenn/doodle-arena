@@ -1,0 +1,11 @@
+# The build context is the repository root; send only what the assets build needs.
+*
+!proto/gen/python
+!services/assets
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+services/assets/tests
+services/assets/static
