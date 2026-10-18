@@ -11,23 +11,24 @@ function replay(strokes: ReplayStroke[]): Replay {
 }
 
 describe('timeline', () => {
-  it('places points at the stroke start plus their offset', () => {
-    // The server got the last batch at 1000 ms; the stroke took 300 ms, so it began at 700.
+  it('places points at the stroke start plus their offset, from the first point', () => {
+    // The server got the last batch at 1000 ms; the stroke took 300 ms, so it began at 700,
+    // and the replay starts there.
     const tl = timeline(replay([stroke([[0, 0, 0], [10, 10, 100], [20, 20, 300]], 1000)]), 10_000)
 
-    expect(tl.events.map((e) => e.at)).toEqual([700, 800, 1000])
-    expect(tl.duration).toBe(1000)
+    expect(tl.events.map((e) => e.at)).toEqual([0, 100, 300])
+    expect(tl.duration).toBe(300)
   })
 
-  it('squeezes long pauses, including the wait before the first stroke', () => {
+  it('squeezes long pauses between strokes', () => {
     const tl = timeline(
       replay([stroke([[0, 0, 0], [1, 1, 200]], 5200), stroke([[2, 2, 0], [3, 3, 100]], 9100)]),
       1000,
     )
 
-    // Raw times 5000, 5200, 9000, 9100: the 5 s and 3.8 s gaps become 1 s each.
-    expect(tl.events.map((e) => e.at)).toEqual([1000, 1200, 2200, 2300])
-    expect(tl.duration).toBe(2300)
+    // Raw times 5000, 5200, 9000, 9100: the start is dropped and the 3.8 s gap becomes 1 s.
+    expect(tl.events.map((e) => e.at)).toEqual([0, 200, 1200, 1300])
+    expect(tl.duration).toBe(1300)
   })
 
   it('leaves out undone and empty strokes', () => {

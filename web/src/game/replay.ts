@@ -2,8 +2,8 @@
 // every stroke, when it received the stroke's last batch (server_received_ms, after the round
 // started) and each point's offset from the stroke's first point (t_ms, client clock). So a
 // stroke started at server_received_ms minus its last point's t_ms, and each point lands at
-// that start plus its t_ms. Long pauses (a drawer thinking) are squeezed so the replay keeps
-// moving. Undone strokes are left out: the log says that a stroke was undone, not when, and
+// that start plus its t_ms. The replay starts with the first point, and long pauses (a drawer
+// thinking) are squeezed so it keeps moving. Undone strokes are left out: the log says that a stroke was undone, not when, and
 // the replay then ends on the same picture as the PNG.
 
 import type { Replay, ReplayPoint } from '../gallery.ts'
@@ -29,9 +29,9 @@ export function timeline(replay: Replay, maxGapMs = MAX_GAP_MS): Timeline {
   // Stable sort keeps each stroke's own points in order, and strokes in server order on ties.
   raw.sort((a, b) => a.at - b.at)
 
-  // Squeeze every gap longer than maxGapMs, including the wait before the first stroke.
+  // Start at the first point, and squeeze every later gap longer than maxGapMs.
   const events: ReplayEvent[] = []
-  let prevRaw = 0
+  let prevRaw = raw.length > 0 ? raw[0].at : 0
   let clock = 0
   for (const e of raw) {
     clock += Math.min(e.at - prevRaw, maxGapMs)
