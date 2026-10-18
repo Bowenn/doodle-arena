@@ -27,6 +27,8 @@ public class OutboxWriter {
 
 	public static final String SALES_TOPIC = "market.sales.v1";
 
+	public static final String WALLET_TOPIC = "market.wallet.v1";
+
 	private final JdbcClient db;
 
 	public OutboxWriter(JdbcClient db) {

@@ -53,6 +53,11 @@ app:
     jwks-url: ${AUTH_JWKS_URL:http://localhost:8080/api/auth/.well-known/jwks.json}
     issuer: ${JWT_ISSUER:http://localhost:8080/api/auth}
     audience: doodle-api
+  rewards:
+    # Coins per placement (design doc, section 7.9): 1st, 2nd, 3rd; everyone else gets participation-coins.
+    # Players with equal scores share a placement, so they get the same amount.
+    placement-coins: 30, 20, 10
+    participation-coins: 5
   outbox:
     # How often the relay looks for unpublished events.
     interval: 500ms
