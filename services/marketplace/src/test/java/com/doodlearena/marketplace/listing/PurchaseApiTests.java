@@ -223,8 +223,65 @@ class PurchaseApiTests extends ApiTestSupport {
 		purchase(third, list(second, drawing, 40), key()).andExpect(status().isOk());
 
 		assertThat(owner(drawing)).isEqualTo(third.ownerId());
-		assertThat(this.fixtures.balance(second)).isEqualTo(100 - 10 + 40);
+		// The second sale pays the author, who is no longer a party, 10 % of 40.
+		assertThat(this.fixtures.balance(second)).isEqualTo(100 - 10 + 36);
+		assertThat(this.fixtures.balance(first)).isEqualTo(10 + 4);
 		assertThat(this.reconciliation.reconcile().ownershipViolationIds()).doesNotContain(drawing);
+	}
+
+	/** Royalties (task 4.6): the authors who are neither the seller nor the buyer share 10 %. */
+	@Test
+	void coDrawnDrawingPaysItsOtherAuthors() throws Exception {
+		AccountRef ada = this.fixtures.newUser();
+		AccountRef bob = this.fixtures.newUser();
+		AccountRef zed = this.fixtures.newUserWith(200);
+		AccountRef yan = this.fixtures.newUserWith(200);
+		UUID drawing = mintCoDrawn(ada, bob);
+
+		// Ada, the first author and owner, sells: Bob gets the royalty.
+		purchase(zed, list(ada, drawing, 55), key()).andExpect(status().isOk())
+			.andExpect(jsonPath("$.royalties.length()").value(1))
+			.andExpect(jsonPath("$.royalties[0].user_id").value(bob.ownerId()))
+			.andExpect(jsonPath("$.royalties[0].amount").value(5));
+		assertThat(this.fixtures.balance(ada)).isEqualTo(50);
+		assertThat(this.fixtures.balance(bob)).isEqualTo(5);
+		assertThat(this.fixtures.balance(zed)).isEqualTo(145);
+
+		// Zed, not an author, sells it on: both authors share floor(81 / 10) = 8.
+		purchase(yan, list(zed, drawing, 81), key()).andExpect(status().isOk());
+		assertThat(this.fixtures.balance(zed)).isEqualTo(145 + 73);
+		assertThat(this.fixtures.balance(ada)).isEqualTo(54);
+		assertThat(this.fixtures.balance(bob)).isEqualTo(9);
+		assertThat(this.fixtures.balance(yan)).isEqualTo(119);
+
+		SaleEvent last = SaleEvent.parseFrom(this.db
+			.sql("SELECT payload FROM outbox WHERE topic = 'market.sales.v1' AND key = ? ORDER BY created_at DESC LIMIT 1")
+			.param(drawing.toString())
+			.query(byte[].class)
+			.single());
+		assertThat(last.getSaleCompleted().getRoyaltiesList())
+			.extracting((r) -> r.getUserId() + "=" + r.getAmount())
+			.containsExactly(ada.ownerId() + "=4", bob.ownerId() + "=4");
+		assertThat(this.reconciliation.reconcile().clean()).isTrue();
+	}
+
+	@Test
+	void buyerWhoIsAnAuthorEarnsNothing() throws Exception {
+		AccountRef ada = this.fixtures.newUser();
+		AccountRef bob = this.fixtures.newUserWith(100);
+		UUID drawing = mintCoDrawn(ada, bob);
+
+		// Bob buys back the drawing he co-drew from Ada: no royalty to himself, nobody else to pay.
+		purchase(bob, list(ada, drawing, 60), key()).andExpect(status().isOk())
+			.andExpect(jsonPath("$.royalties").isEmpty());
+		assertThat(this.fixtures.balance(bob)).isEqualTo(40);
+		assertThat(this.fixtures.balance(ada)).isEqualTo(60);
+	}
+
+	private UUID mintCoDrawn(AccountRef first, AccountRef second) {
+		UUID drawing = UUID.randomUUID();
+		this.mints.mint(MintRequest.from(TestEvents.approved(drawing, first.ownerId(), second.ownerId())));
+		return drawing;
 	}
 
 	private ResultActions purchase(AccountRef buyer, String listing, String key) throws Exception {

@@ -2,6 +2,7 @@ package com.doodlearena.marketplace.listing;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -14,6 +15,7 @@ import io.opentelemetry.context.Scope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -27,9 +29,11 @@ import com.doodlearena.marketplace.ledger.LedgerService;
 import com.doodlearena.marketplace.ledger.PostResult;
 import com.doodlearena.marketplace.ledger.Posting;
 import com.doodlearena.marketplace.ledger.TransactionType;
+import com.doodlearena.marketplace.listing.Royalties.RoyaltyShare;
 import com.doodlearena.marketplace.outbox.OutboxWriter;
 import com.doodlearena.marketplace.telemetry.MarketMetrics;
 import com.doodlearena.proto.doodle.events.v1.EventMeta;
+import com.doodlearena.proto.doodle.events.v1.RoyaltyPayment;
 import com.doodlearena.proto.doodle.events.v1.SaleCompleted;
 import com.doodlearena.proto.doodle.events.v1.SaleEvent;
 
@@ -41,7 +45,7 @@ import com.doodlearena.proto.doodle.events.v1.SaleEvent;
  * listing's {@code FOR UPDATE} is where concurrent buyers queue: the first one sells it, and every
  * other one then finds it SOLD and gets 409 without moving a coin.
  *
- * <p>Royalties come with task 4.6: until then the seller is paid the whole price.
+ * <p>The price is split between the seller and the drawing's other authors ({@link Royalties}).
  */
 @Service
 public class PurchaseService {
@@ -58,11 +62,15 @@ public class PurchaseService {
 
 	private final Tracer tracer = GlobalOpenTelemetry.getTracer("marketplace");
 
-	public PurchaseService(JdbcClient db, LedgerService ledger, OutboxWriter outbox, MarketMetrics metrics) {
+	private final int royaltyPercent;
+
+	public PurchaseService(JdbcClient db, LedgerService ledger, OutboxWriter outbox, MarketMetrics metrics,
+			@Value("${app.royalties.percent}") int royaltyPercent) {
 		this.db = db;
 		this.ledger = ledger;
 		this.outbox = outbox;
 		this.metrics = metrics;
+		this.royaltyPercent = royaltyPercent;
 	}
 
 	/** Runs inside the idempotency work's transaction; any exception rolls the whole purchase back. */
@@ -121,13 +129,26 @@ public class PurchaseService {
 			throw new IllegalStateException("listing " + listingId + " is active but its seller no longer owns the drawing");
 		}
 
-		// 3. The coins: balances are locked in account order; a listing can be paid for only once.
+		// 3. The coins: the buyer pays the price, the seller gets it minus the royalties, and the other
+		// authors share those. Balances are locked in account order; a listing can be paid for only once.
+		List<String> authors = this.db.sql("SELECT user_id FROM drawing_authors WHERE drawing_id = ? ORDER BY author_order")
+			.param(listing.drawingId())
+			.query(String.class)
+			.list();
+		List<RoyaltyShare> royalties = Royalties.split(listing.price(), authors, listing.sellerId(), buyerId,
+				this.royaltyPercent);
+		long royaltyTotal = Royalties.total(royalties);
+		List<Posting> postings = new ArrayList<>();
+		postings.add(Posting.debit(AccountRef.user(buyerId), listing.price()));
+		postings.add(Posting.credit(AccountRef.user(listing.sellerId()), listing.price() - royaltyTotal));
+		for (RoyaltyShare royalty : royalties) {
+			postings.add(Posting.credit(AccountRef.user(royalty.userId()), royalty.amount()));
+		}
+		span.setAttribute("sale.royalty_total", royaltyTotal);
 		PostResult payment;
 		try {
 			payment = this.ledger.post(TransactionType.SALE, "sale:" + listingId,
-					Map.of("listing_id", listingId.toString(), "drawing_id", listing.drawingId().toString()),
-					List.of(Posting.debit(AccountRef.user(buyerId), listing.price()),
-							Posting.credit(AccountRef.user(listing.sellerId()), listing.price())));
+					Map.of("listing_id", listingId.toString(), "drawing_id", listing.drawingId().toString()), postings);
 		}
 		catch (InsufficientFundsException ex) {
 			this.metrics.purchase("insufficient_funds");
@@ -172,6 +193,9 @@ public class PurchaseService {
 				.setSellerId(listing.sellerId())
 				.setBuyerId(buyerId)
 				.setPrice(listing.price())
+				.addAllRoyalties(royalties.stream()
+					.map((r) -> RoyaltyPayment.newBuilder().setUserId(r.userId()).setAmount(r.amount()).build())
+					.toList())
 				.setCompletedAt(OutboxWriter.timestamp(completedAt)))
 			.build()
 			.toByteArray());
@@ -184,8 +208,11 @@ public class PurchaseService {
 			.addKeyValue("seller_id", listing.sellerId())
 			.addKeyValue("sale_id", saleId)
 			.addKeyValue("price", listing.price())
+			.addKeyValue("royalties", royalties.size())
+			.addKeyValue("royalty_total", royaltyTotal)
 			.log("purchase completed");
-		return new Sale(saleId, listingId, listing.drawingId(), listing.sellerId(), buyerId, listing.price(), completedAt);
+		return new Sale(saleId, listingId, listing.drawingId(), listing.sellerId(), buyerId, listing.price(), royalties,
+				completedAt);
 	}
 
 }
