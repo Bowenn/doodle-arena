@@ -26,6 +26,9 @@ dependencies {
 	implementation("org.flywaydb:flyway-database-postgresql")
 	// ADR 0001: every service verifies RS256 access tokens itself, against auth's JWKS.
 	implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
+	// Kafka events in and out (design doc, section 6.2), as protobuf from proto/gen/java.
+	implementation("org.springframework.boot:spring-boot-starter-kafka")
+	implementation("com.doodlearena:doodle-proto")
 	// Custom metrics and spans; the Java agent supplies the SDK at runtime (a no-op in tests).
 	implementation("io.opentelemetry:opentelemetry-api")
 	runtimeOnly("org.postgresql:postgresql")
@@ -33,7 +36,9 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server-test")
 	testImplementation("org.springframework.boot:spring-boot-testcontainers")
+	testImplementation("org.springframework.boot:spring-boot-starter-kafka-test")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
+	testImplementation("org.testcontainers:testcontainers-kafka")
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

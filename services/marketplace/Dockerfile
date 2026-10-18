@@ -1,10 +1,14 @@
 # syntax=docker/dockerfile:1
+# The build context is the repository root, so the build can include the generated contracts in
+# proto/gen/java (settings.gradle.kts includes ../../proto/gen/java). Dockerfile.dockerignore,
+# next to this file, sends only those two folders to the builder.
 FROM eclipse-temurin:25.0.4.1_1-jdk AS build
-WORKDIR /src
-COPY gradlew settings.gradle.kts build.gradle.kts ./
-COPY gradle ./gradle
+WORKDIR /src/services/marketplace
+COPY proto/gen/java /src/proto/gen/java
+COPY services/marketplace/gradlew services/marketplace/settings.gradle.kts services/marketplace/build.gradle.kts ./
+COPY services/marketplace/gradle ./gradle
 RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon --quiet dependencies > /dev/null
-COPY src ./src
+COPY services/marketplace/src ./src
 RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon --quiet bootJar \
     && cp build/libs/marketplace-*.jar /app.jar
 

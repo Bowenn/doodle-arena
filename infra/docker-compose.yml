@@ -411,7 +411,10 @@ services:
 
   marketplace:
     <<: *app
-    build: ../services/marketplace
+    # Built from the repository root, for the generated contracts in proto/gen/java.
+    build:
+      context: ..
+      dockerfile: services/marketplace/Dockerfile
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: marketplace-1
@@ -425,6 +428,8 @@ services:
       # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
       AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
       JWT_ISSUER: http://localhost:8080/api/auth
+      # DrawingApproved in (task 4.2); MatchFinished and the outbox later in Stage 4.
+      KAFKA_BROKERS: kafka:9092
     depends_on:
       otel-lgtm:
         condition: service_healthy
