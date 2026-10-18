@@ -124,6 +124,18 @@ def revoke(conn: Connection, user_id: str, key_id: uuid.UUID, now: datetime) -> 
     return conn.execute(stmt).rowcount == 1
 
 
+def revoke_all(conn: Connection, user_id: str, now: datetime) -> int:
+    """Revokes every active key of the user. Called when refresh-token reuse shows that someone
+    else had the user's session: an access token stolen with it could have minted a key that
+    would otherwise outlive the stolen session."""
+    stmt = (
+        update(api_keys)
+        .where(api_keys.c.user_id == user_id, api_keys.c.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    return conn.execute(stmt).rowcount
+
+
 def verify(conn: Connection, key: str, now: datetime) -> tuple[VerifyResult, Verified | None]:
     parsed = parse(key)
     if parsed is None:

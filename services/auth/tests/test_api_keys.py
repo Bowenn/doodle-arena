@@ -9,7 +9,9 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from sqlalchemy import Engine, text
 
 from app import api_keys
+from tests.fake_google import FakeGoogle
 from tests.test_metrics import counts
+from tests.test_refresh import login, use
 
 INTERNAL = "http://localhost:9091"
 
@@ -165,3 +167,20 @@ def test_verifications_are_counted(client: TestClient, metric_reader: InMemoryMe
     verify(client, "not-a-key")
 
     assert counts(metric_reader, "auth.api_keys.verifications") == {"valid": 1, "invalid": 1}
+
+
+def test_refresh_token_reuse_revokes_the_users_api_keys(
+    client: TestClient, google: FakeGoogle, db: Engine
+) -> None:
+    # A thief with the session could have used its access token to create a key.
+    stolen = login(client, google)
+    with db.connect() as conn:
+        user_id = str(conn.execute(text("SELECT id FROM users")).scalar_one())
+    mine = create(client, user_id, "mine")
+    other = create(client, "u-someone-else")
+    assert use(client, stolen) == 200
+
+    assert use(client, stolen) == 401  # reuse detected
+
+    assert verify(client, mine["key"]).status_code == 401
+    assert verify(client, other["key"]).status_code == 200

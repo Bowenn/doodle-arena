@@ -2,7 +2,8 @@
 
 Every login starts a family. Using a token marks it used and issues its successor in the same
 family. If a used (or revoked) token ever comes back, someone has a copy, so the whole family
-is revoked and both the thief and the user have to sign in again (design doc 4.2).
+is revoked and both the thief and the user have to sign in again (design doc 4.2). The user's API
+keys are revoked too, since a stolen session could have created some.
 """
 
 import hashlib
@@ -13,6 +14,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import Connection, insert, select, update
 
+from app import api_keys
 from app.db import refresh_tokens
 
 
@@ -71,6 +73,8 @@ def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> Rotat
         return RotateResult("invalid")
     if row.used_at is not None or row.revoked_at is not None:
         revoke_family(conn, row.family_id, now, "reuse_detected")
+        # The thief may have used an access token from that session to create API keys.
+        api_keys.revoke_all(conn, str(row.user_id), now)
         return RotateResult("reuse_detected", user_id=row.user_id, family_id=row.family_id)
     if row.expires_at <= now:
         return RotateResult("expired", user_id=row.user_id, family_id=row.family_id)
