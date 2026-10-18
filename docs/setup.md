@@ -74,6 +74,11 @@ Coin packs use Stripe Checkout in test mode. Without keys the stack still runs; 
 4. Recreate the marketplace so it reads them: `docker compose -f infra/docker-compose.yml --env-file .env up -d marketplace`.
 5. Pay with Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC. `stripe events resend <evt_id>` redelivers an event (the marketplace answers `duplicate`).
 
+Two things that silently lose the webhook:
+
+- **The CLI and the key must be the same Stripe account.** `stripe login` may pick your main test account while `STRIPE_SECRET_KEY` belongs to a sandbox: the payment then happens in the sandbox and its event has no listener (`pending_webhooks: 0`). Run the listener as the key's account: `stripe listen --api-key "$(grep '^STRIPE_SECRET_KEY=' .env | cut -d= -f2-)" --events … --forward-to …`, and use the `whsec_` that this listener prints.
+- **The marketplace reads `.env` only when it is created.** After changing either value, recreate it (step 4); a marketplace started with an old `whsec_` answers every webhook 400.
+
 Only test keys belong in `.env`; never commit it.
 
 ## 4. Working as two people
