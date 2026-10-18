@@ -183,6 +183,7 @@ Owns the Postgres database `marketplace`.
 - Consumes `DrawingApproved` (creates the first ownership record) and `MatchFinished` (pays rewards).
 - Publishes through a transactional outbox: `SaleCompleted`, `ListingCreated`, `ListingCancelled` and `CoinsCredited`.
 - Runs a reconciliation job every minute that checks the ledger and ownership invariants and exports them as metrics.
+- Verifies access tokens itself (ADR 0001) with Spring Security's resource server; SQL is written by hand through `JdbcClient` and migrated by Flyway at startup.
 
 ### 4.7 Notifier (Go)
 
@@ -313,7 +314,9 @@ Assets:
 
 Marketplace:
 
-- `GET /api/market/wallet`, `GET /api/market/wallet/transactions`
+- `GET /api/market/wallet` returns `{user_id, balance, updated_at}` for the caller (the token's subject). A user who never had coins gets `balance` 0 and `updated_at` null; a read never creates an account.
+- `GET /api/market/wallet/transactions?limit=<1..50>&cursor=` returns `{transactions: [{tx_id, type, amount, created_at}], next_cursor}`: the caller's ledger entries, newest first (keyset on the entry id; limit 20 by default). `amount` is signed: positive for coins in, negative for coins out. A bad `limit` or `cursor` is `400 INVALID_REQUEST`.
+- Every marketplace endpoint answers `401 UNAUTHENTICATED` without a valid token, `404 NOT_FOUND` for an unknown path and `405 METHOD_NOT_ALLOWED` for another method, in the shared error format.
 - `GET /api/market/listings`, `POST /api/market/listings` (requires `Idempotency-Key`), `DELETE /api/market/listings/{id}`
 - `POST /api/market/listings/{id}/purchase` (requires `Idempotency-Key`): `200`, `409 LISTING_NOT_AVAILABLE` or `422 INSUFFICIENT_FUNDS`
 - Every endpoint that takes an `Idempotency-Key` can also return `409 IDEMPOTENCY_KEY_IN_PROGRESS` (the same key is still being processed) or `422 IDEMPOTENCY_KEY_REUSED` (the same key with a different request body). Clients tell these apart by `error.code`, not by the status code.
@@ -440,10 +443,10 @@ Locally, use the Stripe CLI (`stripe listen --forward-to ...`) to forward webhoo
 
 Tables (the Flyway migrations are the source of truth):
 
-- `accounts(account_id, owner_type user|system, owner_id, created_at)`
-- `balances(account_id PK, balance BIGINT, updated_at)`, with a check that user balances are never negative
-- `ledger_transactions(tx_id, type, idempotency_key UNIQUE, metadata JSONB, created_at)`
-- `ledger_entries(entry_id, tx_id, account_id, amount BIGINT, created_at)`: signed amounts, partitioned by month in Stage 6
+- `accounts(account_id, owner_type user|system, owner_id, created_at)`, `UNIQUE(owner_type, owner_id)`. `owner_id` is text: auth's user ids, or a system account's name. The system accounts `stripe_clearing` and `rewards_issuance` are created by the first migration; a user's account and balance row are created by their first posting.
+- `balances(account_id PK, owner_type, balance BIGINT, updated_at)`. `owner_type` is a copy tied to `accounts` by a composite foreign key `(account_id, owner_type)`, so the check `owner_type = 'system' OR balance >= 0` can be a plain `CHECK`: user balances are never negative, system accounts may be
+- `ledger_transactions(tx_id UUIDv7, type reward|stripe_purchase|sale, idempotency_key UNIQUE, metadata JSONB, created_at)`
+- `ledger_entries(entry_id, tx_id, account_id, amount BIGINT <> 0, created_at)`: signed amounts, partitioned by month in Stage 6
 - `drawing_authors(drawing_id, user_id, author_order)`
 - `ownership(drawing_id PK, owner_id, version, updated_at)`
 - `ownership_events(event_id, drawing_id, from_owner, to_owner, sale_id, kind MINT|SALE, created_at)`: append-only provenance
@@ -451,6 +454,15 @@ Tables (the Flyway migrations are the source of truth):
 - `idempotency_keys(user_id, key, request_hash, status IN_PROGRESS|DONE, response_code, response_body, created_at)`, primary key `(user_id, key)`, kept for 24 hours
 - `stripe_events(stripe_event_id PK, type, processed_at)`
 - `outbox(id, topic, key, payload, headers, created_at, published_at)`
+
+Every money movement goes through one ledger posting (`LedgerService.post`, task 4.1), inside the caller's transaction when there is one:
+
+1. Postings to the same account are merged (a buyer who is also an author pays the price and gets a royalty share: one entry, one lock). The rest must be at least two accounts, no zero amount, summing to zero.
+2. `INSERT INTO ledger_transactions ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING tx_id`. No row means a replay: the existing `tx_id` is returned and nothing else is written. A concurrent call with the same key waits on the unique index until the first commits (then sees its row) or rolls back (then goes ahead).
+3. Lock every balance row in one `SELECT ... WHERE account_id IN (...) ORDER BY account_id FOR UPDATE`. Postgres sorts before it locks, so every transaction takes its locks in the same order.
+4. Refuse to take a user below zero (nothing is written, so a later call with the same key can still succeed), then insert the entries and update the balances.
+
+Postgres enforces the same rules on its own, so a bug or a hand-written statement can't break them: a deferred constraint trigger checks at COMMIT that each transaction has at least two entries summing to zero, a trigger refuses `UPDATE`, `DELETE` and `TRUNCATE` on both ledger tables (mistakes are fixed with a reversing transaction), and the `CHECK` on `balances` refuses a negative user balance.
 
 The purchase transaction runs under READ COMMITTED with explicit row locks:
 
@@ -466,10 +478,12 @@ The outbox publisher reads unpublished rows in batches (`FOR UPDATE SKIP LOCKED`
 
 The reconciliation job checks four invariants every minute:
 
-- The sum of all `ledger_entries.amount` is 0.
-- Each account's balance equals the sum of its entries.
-- No user balance is negative.
-- Every approved drawing has exactly one ownership row.
+- The sum of all `ledger_entries.amount` is 0 (`market.ledger.imbalance`).
+- Each account's balance equals the sum of its entries, and every account has a balance row (`market.ledger.mismatched_accounts`).
+- No user balance is negative (also counted in `market.ledger.mismatched_accounts`).
+- Every approved drawing has exactly one ownership row (`market.ownership.violations`, from task 4.2).
+
+It reads one REPEATABLE READ, read-only snapshot, so a posting that commits while it runs can't make the numbers disagree, and it takes no locks, so postings never wait for it. It scans the whole ledger, which is fine at this size; incremental checkpoints come with the monthly partitions (Stage 6).
 
 ## 9. Game server internals
 
@@ -612,6 +626,7 @@ Releases:
 | D30 | Browsers load images from presigned GET URLs straight to object storage; approved drawings are visible to every player, the rest only to their authors (404 for others) | Image bytes never pass through the app; ids leak nothing |
 | D31 | The AI stub gets the thumbnail's PNG bytes; its mode comes from the environment and `PUT /internal/moderation-mode` on the internal port 9091 | No storage access for the AI service; drills without restarts, on a port nobody routes |
 | D32 | The web replay reconstructs timing from `server_received_ms` and `t_ms`, squeezes pauses to 1 s and leaves undone strokes out; the gallery has everyone's and my drawings, and a match's from its end | Server time orders strokes; the replay ends on the minted picture |
+| D33 | The ledger's invariants are enforced in Postgres as well as in the service: a deferred constraint trigger (entries sum to zero at COMMIT), append-only triggers, and a `CHECK` on `balances.owner_type`; the reconciliation job stays as the detector, and its gauges go missing rather than read 0 when it stops | A bug or a hand-written statement can't break the ledger; the job catches what gets past anyway, such as a disabled trigger or an edited balance |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
@@ -620,7 +635,7 @@ New decisions become ADRs (`/adr`) and get a line here when accepted.
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and the reward amounts (defaults are in section 7).
 - Before task 4.3: what happens to an `IN_PROGRESS` idempotency key when the process crashes mid-request. One option is to insert the key in the same transaction as the purchase, so a crash rolls it back; another is to let `IN_PROGRESS` rows expire after a short timeout.
-- Before task 4.6: royalties for co-drawn drawings. Today, when one of two co-authors sells for the first time, the other gets nothing, and only `drawer_ids[0]` ever becomes the owner. Also, when the buyer is an author, their account appears twice in the lock set, so the set must be deduplicated.
+- Before task 4.6: royalties for co-drawn drawings. Today, when one of two co-authors sells for the first time, the other gets nothing, and only `drawer_ids[0]` ever becomes the owner. (The buyer who is also an author no longer needs care: the ledger merges postings to one account before locking, since task 4.1.)
 - `docs/keyword-coverage.md` mentions two things this doc doesn't design yet: Redis cache-aside for listings and wallet reads (which Redis key prefix does the marketplace own, and should balances be cached at all, given they need strong consistency?), and a MongoDB replica set.
 
 ## 16. Deferred and optional features

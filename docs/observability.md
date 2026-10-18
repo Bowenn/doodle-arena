@@ -107,6 +107,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `market.db.lock_wait.duration` | Histogram (ms) | `operation` | marketplace |
 | `market.outbox.lag` | Gauge (s) | – | marketplace |
 | `market.ledger.imbalance` | Gauge (coins) | – | marketplace |
+| `market.ledger.mismatched_accounts` | Gauge | – | marketplace |
 | `market.ownership.violations` | Gauge | – | marketplace |
 | `notifier.deliveries` | Counter | `result` = success, retry, dead | notifier |
 | `notifier.delivery.duration` | Histogram (ms) | – | notifier |
@@ -148,7 +149,8 @@ Starting rules (tune the thresholds after the first load test):
 
 | Alert | Condition | Severity |
 |---|---|---|
-| LedgerImbalance | `market.ledger.imbalance != 0` | critical |
+| LedgerImbalance | `market.ledger.imbalance != 0` or `market.ledger.mismatched_accounts > 0` | critical |
+| ReconciliationStale | `market.ledger.imbalance` missing for 5 minutes (the job stopped or can't read the database; the two invariant alerts above are blind) | warning |
 | OutboxStuck | `game.outbox.pending > 0` for 10 minutes (Kafka or S3 down, or an entry that can't be published; rewards and drawings are waiting) | warning |
 | OwnershipViolation | `market.ownership.violations > 0` | critical |
 | SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
@@ -163,7 +165,9 @@ Starting rules (tune the thresholds after the first load test):
 | GameServerDown | `lobby.servers.healthy` below the expected count for 1 minute | critical |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`) | critical |
 
-The two invariant alerts come from the marketplace's reconciliation job, which checks the ledger and ownership every minute and exports the results as gauges.
+The two invariant alerts come from the marketplace's reconciliation job, which checks the ledger and ownership every minute and exports the results as gauges. `market.ledger.imbalance` is the sum of every ledger entry, in coins; `market.ledger.mismatched_accounts` counts accounts whose balance isn't the sum of their entries, user balances below zero, and accounts without a balance row. When no run has succeeded for 3 minutes, both gauges stop reporting, so a dead job shows as a missing series (ReconciliationStale) instead of a reassuring 0. `market.ownership.violations` arrives with task 4.2, together with the ownership tables. After a redeploy, the old container's last value stays visible for Prometheus's 5-minute lookback as a second series with its own `host_name`; an alert in the first minutes after a deploy should be checked against the new container's series.
+
+Each run is a `market.reconcile` span (attributes `ledger.imbalance` and `ledger.mismatched_accounts`) under the Java agent's span for the scheduled method, with one log line: `ledger reconciled` at info, or `ledger invariants broken` at error with up to 20 `mismatched_account_ids`.
 
 ## 6. Release monitoring
 
