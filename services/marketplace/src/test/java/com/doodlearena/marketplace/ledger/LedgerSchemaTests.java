@@ -35,29 +35,28 @@ class LedgerSchemaTests {
 
 	@Test
 	void balancedTransactionCommits() {
-		long a = userAccount();
+		long a = issuance();
 		long b = userAccount();
-		this.tx.executeWithoutResult((status) -> {
-			UUID id = newTransaction();
-			entry(id, a, -5);
-			entry(id, b, 5);
+		UUID id = this.tx.execute((status) -> {
+			UUID created = newTransaction();
+			entry(created, a, -5);
+			entry(created, b, 5);
+			return created;
 		});
-		assertThat(this.db.sql("SELECT COUNT(*) FROM ledger_entries WHERE account_id IN (?, ?)")
-			.params(a, b)
-			.query(Long.class)
-			.single()).isEqualTo(2);
+		assertThat(this.db.sql("SELECT COUNT(*) FROM ledger_entries WHERE tx_id = ?").param(id).query(Long.class).single())
+			.isEqualTo(2);
 	}
 
 	@Test
 	void unbalancedTransactionFailsAtCommit() {
-		long a = userAccount();
+		long a = issuance();
 		long b = userAccount();
 		assertThatThrownBy(() -> this.tx.executeWithoutResult((status) -> {
 			UUID id = newTransaction();
 			entry(id, a, -5);
 			entry(id, b, 4);
 		})).isInstanceOf(DataAccessException.class).hasMessageContaining("unbalanced");
-		assertThat(entriesOf(a) + entriesOf(b)).isZero();
+		assertThat(entriesOf(b)).isZero();
 	}
 
 	@Test
@@ -86,7 +85,7 @@ class LedgerSchemaTests {
 
 	@Test
 	void ledgerRowsCannotBeChangedOrRemoved() {
-		long a = userAccount();
+		long a = issuance();
 		long b = userAccount();
 		UUID id = this.tx.execute((status) -> {
 			UUID created = newTransaction();
@@ -104,7 +103,7 @@ class LedgerSchemaTests {
 			.update()).hasMessageContaining("append-only");
 		assertThatThrownBy(() -> this.db.sql("DELETE FROM ledger_transactions WHERE tx_id = ?").param(id).update())
 			.hasMessageContaining("append-only");
-		assertThatThrownBy(() -> this.db.sql("TRUNCATE ledger_entries, ledger_transactions").update())
+		assertThatThrownBy(() -> this.db.sql("TRUNCATE ledger_entries, ledger_transactions CASCADE").update())
 			.hasMessageContaining("append-only");
 	}
 
@@ -130,14 +129,23 @@ class LedgerSchemaTests {
 
 	@Test
 	void balanceOwnerTypeMustMatchItsAccount() {
-		long a = this.db.sql("INSERT INTO accounts (owner_type, owner_id) VALUES ('user', ?) RETURNING account_id")
-			.param("u_" + UUID.randomUUID())
+		// A user account can't get a balance row that claims to be a system account (and may go
+		// negative). Rolled back, so no account without a balance row is left behind.
+		assertThatThrownBy(() -> this.tx.executeWithoutResult((status) -> {
+			long a = this.db.sql("INSERT INTO accounts (owner_type, owner_id) VALUES ('user', ?) RETURNING account_id")
+				.param("u_" + UUID.randomUUID())
+				.query(Long.class)
+				.single();
+			this.db.sql("INSERT INTO balances (account_id, owner_type) VALUES (?, 'system')").param(a).update();
+		})).isInstanceOf(DataAccessException.class);
+	}
+
+	/** The rewards account: a system account, so it may be debited below zero. */
+	private long issuance() {
+		return this.db
+			.sql("SELECT account_id FROM accounts WHERE owner_type = 'system' AND owner_id = 'rewards_issuance'")
 			.query(Long.class)
 			.single();
-		// A user account can't get a balance row that claims to be a system account (and may go negative).
-		assertThatThrownBy(() -> this.db.sql("INSERT INTO balances (account_id, owner_type) VALUES (?, 'system')")
-			.param(a)
-			.update()).isInstanceOf(DataAccessException.class);
 	}
 
 	private long userAccount() {
@@ -156,10 +164,15 @@ class LedgerSchemaTests {
 			.single();
 	}
 
+	/**
+	 * An entry plus the balance change that goes with it: other test classes share this database,
+	 * and the reconciliation tests expect every balance to equal its entries.
+	 */
 	private void entry(UUID txId, long accountId, long amount) {
 		this.db.sql("INSERT INTO ledger_entries (tx_id, account_id, amount) VALUES (?, ?, ?)")
 			.params(txId, accountId, amount)
 			.update();
+		this.db.sql("UPDATE balances SET balance = balance + ? WHERE account_id = ?").params(amount, accountId).update();
 	}
 
 	private long entriesOf(long accountId) {

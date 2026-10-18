@@ -101,11 +101,11 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `assets.events.published` | Counter | `result` = success, failed (left in the outbox and retried) | assets (relay) |
 | `assets.moderation` | Counter | `result` = approved, rejected, retry, manual | assets (`manual`: sent to the review queue, after the last failed call, a refusal, or an unsure AI) |
 | `ai.moderation.requests` | Counter | `decision` = approve, reject, review, unavailable, invalid, abandoned (the caller left before the answer) | ai |
-| `market.purchases` | Counter | `result` = success, conflict, insufficient_funds | marketplace |
-| `market.idempotency.replays` | Counter | `operation` | marketplace |
+| `market.purchases` | Counter | `result` = success, conflict (the listing was sold or cancelled: a lost race), insufficient_funds | marketplace |
+| `market.idempotency.replays` | Counter | `operation` = create_listing, purchase (requests answered from a stored response) | marketplace |
 | `market.stripe.webhooks` | Counter | `result` = processed, duplicate, invalid_signature | marketplace |
-| `market.db.lock_wait.duration` | Histogram (ms) | `operation` | marketplace |
-| `market.outbox.lag` | Gauge (s) | – | marketplace |
+| `market.db.lock_wait.duration` | Histogram (ms) | `operation` = ledger_post (the balance rows), purchase (the listing row, where concurrent buyers queue) | marketplace |
+| `market.outbox.lag` | Gauge (s) | – (age of the oldest outbox event Kafka hasn't acknowledged; 0 when drained) | marketplace |
 | `market.ledger.imbalance` | Gauge (coins) | – | marketplace |
 | `market.ledger.mismatched_accounts` | Gauge | – | marketplace |
 | `market.ownership.violations` | Gauge | – | marketplace |
@@ -157,6 +157,7 @@ Starting rules (tune the thresholds after the first load test):
 | SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
 | HighErrorRate | Server errors above 1% of requests for 5 minutes, per service | warning |
 | ConsumerLagGrowing | Kafka lag growing for 10 minutes for any consumer group | warning |
+| MarketOutboxStuck | `market.outbox.lag` above 60 s for 5 minutes (Kafka down, or the relay failing; sales and listings aren't reaching the notifier) | warning |
 | DrawingEventsStuck | `assets.outbox.lag` above 60 s for 5 minutes (Kafka down, or the relay stopped; the marketplace isn't minting approved drawings) | warning |
 | DrawingsFailing | `assets.pipeline.results{result=failed}` above 0 for 10 minutes (stroke logs missing or unreadable: an S3 outage longer than 7 days, or a game-server bug) | warning |
 | JobsBacklog | `assets.jobs.oldest_age` above 300 s for 5 minutes, or the series missing for 5 minutes (no worker) | warning |
@@ -169,6 +170,8 @@ Starting rules (tune the thresholds after the first load test):
 The two invariant alerts come from the marketplace's reconciliation job, which checks the ledger and ownership every minute and exports the results as gauges. `market.ledger.imbalance` is the sum of every ledger entry, in coins; `market.ledger.mismatched_accounts` counts accounts whose balance isn't the sum of their entries, user balances below zero, and accounts without a balance row. When no run has succeeded for 3 minutes, both gauges stop reporting, so a dead job shows as a missing series (ReconciliationStale) instead of a reassuring 0. `market.ownership.violations` counts drawings whose ownership row and provenance disagree (design doc, section 8). After a redeploy, the old container's last value stays visible for Prometheus's 5-minute lookback as a second series with its own `host_name`; an alert in the first minutes after a deploy should be checked against the new container's series.
 
 Each run is a `market.reconcile` span (attributes `ledger.imbalance`, `ledger.mismatched_accounts` and `ownership.violations`) under the Java agent's span for the scheduled method, with one log line: `ledger reconciled` at info, or `invariants broken` at error with up to 20 `mismatched_account_ids` and `violating_drawing_ids`.
+
+A purchase is a `market.purchase` span (`listing.id`, `drawing.id`, `sale.id`, `user.id`; `purchase.result` for a refused one) inside the HTTP server span, with the SQL in lock order below it. The relay sends each outbox row under a `market.outbox.publish` span whose parent is the trace context stored with the row, so the agent's `market.sales.v1 publish` span and every consumer of the event join the purchase's trace.
 
 Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.duplicate`) under the agent's Kafka consumer span, which continues the assets relay's `traceparent`: one trace runs from the game server's `game.round.end` to the mint.
 

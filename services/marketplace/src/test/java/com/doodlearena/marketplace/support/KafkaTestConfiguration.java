@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 
+import com.doodlearena.marketplace.outbox.OutboxWriter;
 import com.doodlearena.marketplace.ownership.DrawingEventsListener;
 
 /** A real Kafka broker for listener tests, the same image as docker-compose. */
@@ -24,6 +25,16 @@ public class KafkaTestConfiguration {
 	@Bean
 	NewTopic drawingsTopic() {
 		return new NewTopic(DrawingEventsListener.TOPIC, 1, (short) 1);
+	}
+
+	@Bean
+	NewTopic salesTopic() {
+		return new NewTopic(OutboxWriter.SALES_TOPIC, 1, (short) 1);
+	}
+
+	@Bean
+	NewTopic listingsTopic() {
+		return new NewTopic(OutboxWriter.LISTINGS_TOPIC, 1, (short) 1);
 	}
 
 }

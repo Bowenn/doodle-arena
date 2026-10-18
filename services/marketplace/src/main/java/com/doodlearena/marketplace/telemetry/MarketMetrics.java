@@ -32,6 +32,14 @@ public class MarketMetrics {
 		.setDescription("Records read from assets.drawings.v1, by outcome")
 		.build();
 
+	private final LongCounter idempotencyReplays = this.meter.counterBuilder("market.idempotency.replays")
+		.setDescription("Requests answered from a stored response, per operation")
+		.build();
+
+	private final LongCounter purchases = this.meter.counterBuilder("market.purchases")
+		.setDescription("Purchase attempts, by outcome")
+		.build();
+
 	public Meter meter() {
 		return this.meter;
 	}
@@ -39,6 +47,15 @@ public class MarketMetrics {
 	/** One record from assets.drawings.v1: minted, duplicate, rejected, skipped or failed. */
 	public void drawingReceived(String result) {
 		this.drawingsReceived.add(1, Attributes.of(RESULT, result));
+	}
+
+	/** success, conflict (the listing was sold or cancelled) or insufficient_funds. */
+	public void purchase(String result) {
+		this.purchases.add(1, Attributes.of(RESULT, result));
+	}
+
+	public void idempotencyReplay(String operation) {
+		this.idempotencyReplays.add(1, Attributes.of(OPERATION, operation));
 	}
 
 	public void recordLockWait(String operation, long nanos) {

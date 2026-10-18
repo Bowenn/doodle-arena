@@ -20,7 +20,7 @@ It's a portfolio project for backend internship interviews, so depth, correctnes
 - **Drawings:** every finished round becomes a drawing, rendered, stored by content hash, moderated by the AI stub (or a moderator in the Django admin at `/admin/`), announced on Kafka, and shown in the web app's gallery with a replay.
 - **Telemetry:** traces, metrics and logs from every service in Grafana, with logs linked to their traces.
 
-The marketplace is being built in Stage 4 of the [roadmap](docs/roadmap.md): so far the double-entry coin ledger (Postgres-enforced invariants, a reconciliation job with its gauges), the read-only wallet API, and minting: every approved drawing gets an owner and an ownership history.
+The marketplace is being built in Stage 4 of the [roadmap](docs/roadmap.md): so far the double-entry coin ledger (Postgres-enforced invariants, a reconciliation job with its gauges), the read-only wallet API, minting (every approved drawing gets an owner and an ownership history), and listings with idempotent purchases that move coins and ownership in one transaction.
 
 ## Architecture
 
