@@ -30,6 +30,7 @@ from django.db import (
     InterfaceError,
     OperationalError,
     close_old_connections,
+    connection,
 )
 from doodle.events.v1 import rounds_pb2
 from google.protobuf.message import DecodeError
@@ -225,5 +226,6 @@ def run(
             if handle_with_retry(msg, stop):
                 consumer.commit(message=msg, asynchronous=False)
     finally:
-        consumer.close()
+        consumer.close()  # leaves the group, so the partitions move without a session timeout
+        connection.close()  # this thread's Django connection
         log.info("round consumer stopped")
