@@ -82,18 +82,26 @@ func (p *Policy) CheckURL(raw string) (*url.URL, error) {
 var blockedPrefixes = func() []netip.Prefix {
 	var out []netip.Prefix
 	for _, s := range []string{
-		"0.0.0.0/8",         // "this network", including 0.0.0.0
-		"10.0.0.0/8",        // private
-		"100.64.0.0/10",     // carrier-grade NAT, used inside some clouds
-		"127.0.0.0/8",       // loopback
-		"169.254.0.0/16",    // link-local, including the metadata service 169.254.169.254
-		"172.16.0.0/12",     // private (Docker's default networks)
-		"192.0.0.0/24",      // IETF protocol assignments
-		"192.168.0.0/16",    // private
-		"198.18.0.0/15",     // benchmarking
-		"224.0.0.0/4",       // multicast
-		"240.0.0.0/4",       // reserved, and the broadcast address
-		"::/128", "::1/128", // unspecified, loopback
+		"0.0.0.0/8",                      // "this network", including 0.0.0.0
+		"10.0.0.0/8",                     // private
+		"100.64.0.0/10",                  // carrier-grade NAT, used inside some clouds
+		"127.0.0.0/8",                    // loopback
+		"169.254.0.0/16",                 // link-local, including the metadata service 169.254.169.254
+		"172.16.0.0/12",                  // private (Docker's default networks)
+		"192.0.0.0/24",                   // IETF protocol assignments
+		"192.0.2.0/24",                   // documentation (TEST-NET-1)
+		"192.168.0.0/16",                 // private
+		"198.18.0.0/15",                  // benchmarking
+		"198.51.100.0/24",                // documentation (TEST-NET-2)
+		"203.0.113.0/24",                 // documentation (TEST-NET-3)
+		"224.0.0.0/4",                    // multicast
+		"240.0.0.0/4",                    // reserved, and the broadcast address
+		"::/96",                          // IPv4-compatible (deprecated), including :: and ::1
+		"::1/128",                        // loopback
+		"100::/64",                       // discard-only
+		"2001::/32",                      // Teredo, which tunnels to an embedded IPv4 address
+		"2001:db8::/32",                  // documentation
+		"2002::/16",                      // 6to4, which embeds an IPv4 address
 		"fc00::/7",                       // unique local
 		"fe80::/10",                      // link-local
 		"ff00::/8",                       // multicast
