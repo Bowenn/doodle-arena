@@ -10,7 +10,9 @@ and this consumer commits an offset only after the round is stored and its task 
 - A record this build can't read (unknown or empty event, malformed bytes) is logged, counted
   and committed, so it never blocks the partition (design doc 6.2).
 - Postgres or the Celery broker being down is retried with backoff, on the same record, and
-  nothing is committed until it succeeds.
+  nothing is committed until it succeeds. Only connection-level errors are retried: a record
+  the database refuses (a value too long, out of range) would fail forever and block its
+  partition, so it is validated first, and skipped and committed if it still fails.
 """
 
 import logging
@@ -22,8 +24,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from confluent_kafka import Consumer, KafkaError, Message
-from django.db import Error as DatabaseError
-from django.db import close_old_connections
+from django.db import (
+    DataError,
+    IntegrityError,
+    InterfaceError,
+    OperationalError,
+    close_old_connections,
+)
 from doodle.events.v1 import rounds_pb2
 from google.protobuf.message import DecodeError
 from kombu.exceptions import OperationalError as BrokerError
@@ -51,7 +58,7 @@ def ingest(rf: rounds_pb2.RoundFinished) -> tuple[str, Drawing | None]:
     """Stores the drawing for a finished round. Returns the result and the drawing."""
     if rf.stroke_count == 0:
         return "empty", None  # nothing was drawn, so there's nothing to mint
-    if not (rf.match_id and rf.round_no and rf.drawer_ids and rf.stroke_log_key):
+    if not _valid(rf):
         return "skipped", None
     drawing, created = Drawing.objects.get_or_create(
         match_id=rf.match_id,
@@ -70,6 +77,27 @@ def ingest(rf: rounds_pb2.RoundFinished) -> tuple[str, Drawing | None]:
         },
     )
     return ("created" if created else "duplicate"), drawing
+
+
+# Column sizes in drawings.models.Drawing.
+_ID, _KEY, _MAX_INT = 64, 256, 2**31 - 1
+
+
+def _valid(rf: rounds_pb2.RoundFinished) -> bool:
+    """Whether the row can be stored. A record that can't is skipped, never retried."""
+    ids = [rf.match_id, rf.room_id, *rf.drawer_ids]
+    return bool(
+        rf.match_id
+        and rf.drawer_ids
+        and rf.stroke_log_key
+        and 0 < rf.round_no <= _MAX_INT
+        and all(len(i) <= _ID for i in ids)
+        and len(rf.word) <= _ID
+        and len(rf.stroke_log_key) <= _KEY
+        and len(rf.meta.event_id) <= _ID
+        and max(rf.stroke_count, rf.canvas_width, rf.canvas_height) <= _MAX_INT
+        and 0 <= rf.ended_at.seconds <= 253402300799  # a datetime Python can represent
+    )
 
 
 def handle(msg: Message) -> str:
@@ -108,7 +136,14 @@ def handle(msg: Message) -> str:
             "event_id": rf.meta.event_id,
         }
         close_old_connections()
-        result, drawing = ingest(rf)
+        try:
+            result, drawing = ingest(rf)
+        except (DataError, IntegrityError, ValueError) as e:
+            # The database refuses this record itself; retrying can't change that.
+            log.error(
+                "round record refused by the database; skipped", extra={**fields, "error": str(e)}
+            )
+            return _count(span, "skipped")
         if drawing is not None:
             fields["drawing_id"] = str(drawing.id)
             span.set_attribute("drawing.id", str(drawing.id))
@@ -130,7 +165,8 @@ def _count(span: trace.Span, result: str) -> str:
     return result
 
 
-RETRYABLE = (DatabaseError, BrokerError)
+# Postgres unreachable or restarting, or the Celery broker down: worth waiting for.
+RETRYABLE = (OperationalError, InterfaceError, BrokerError)
 
 
 def handle_with_retry(

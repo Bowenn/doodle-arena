@@ -42,6 +42,23 @@ class FakeRecord:
         return 42
 
 
+class FakeMessage(FakeRecord):
+    def __init__(self, value: bytes) -> None:
+        self._value = value
+
+    def value(self) -> bytes:
+        return self._value
+
+    def headers(self) -> None:
+        return None
+
+    def topic(self) -> str:
+        return "game.rounds.v1"
+
+    def partition(self) -> int:
+        return 0
+
+
 class Harness:
     def __init__(self, brokers: str) -> None:
         self.brokers = brokers
@@ -132,6 +149,29 @@ def test_unreadable_records_are_skipped_and_committed(harness: Harness) -> None:
     harness.publish(round_event("m_marker"))
     harness.consume_until(lambda: len(harness.sent) >= 1)
     assert harness.sent == [str(Drawing.objects.get(match_id="m_marker").id)]
+
+
+def test_records_the_database_would_refuse_are_skipped_not_retried(harness: Harness) -> None:
+    """A poison pill must never block the partition."""
+    harness.publish(round_event("m_" + "x" * 200))  # longer than the match_id column
+
+    harness.publish(round_event("m_fine"))
+    harness.consume_until(lambda: len(harness.sent) == 1)
+
+    assert Drawing.objects.filter(match_id="m_fine").exists()
+    assert Drawing.objects.count() == 1
+
+
+def test_a_refused_insert_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    from django.db import DataError
+
+    def refuse(rf: Any) -> Any:
+        raise DataError("value out of range")
+
+    monkeypatch.setattr(consumer, "ingest", refuse)
+    record = FakeMessage(round_event("m_refused"))
+
+    assert consumer.handle(record) == "skipped"  # type: ignore[arg-type]
 
 
 def test_the_producers_trace_is_continued(
