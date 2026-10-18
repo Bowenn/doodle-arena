@@ -165,6 +165,8 @@ The consumer (`drawings/consumer.py`, group `assets`, manual commits) turns each
 
 The pipeline task (`prepare_drawing`) runs fetch, render and upload, each skipped when the row already has its result. The replay document in `assets.replays` (`_id` = drawing id, its own `schema_version`, points as `[x, y, t]` arrays) is the source of truth once stored, because the bucket copy expires after 7 days. Pillow renders a 1024 px image (long side, the drawers' aspect ratio) and a 256 px thumbnail, at 2x and downsampled, with no metadata, so the same strokes always give the same bytes. They go to `sha256/<hash>.png` and `sha256/<hash>.thumb.png` (HEAD first, PUT only if missing). The hash is of the rendered image, so a renderer change gives new keys; old objects stay valid. Store outages retry with exponential backoff and full jitter (5 attempts); a missing or corrupt log makes the drawing `failed` with the reason. A prepared drawing then gets `moderate_drawing`: the thumbnail goes to the AI service (`POST /v1/moderate`, section 4.8) with a 3-second timeout. Approve and reject are applied through the guarded `decide`; `review` (the AI is unsure) sends the drawing to the queue. Timeouts, connection errors, `429` and `5xx` are retried with exponential backoff and full jitter; the budget is 4 calls, counted on the row (`moderation_attempts`) so it holds across redeliveries, after which the drawing waits in the review queue with the reason. Any other `4xx`, or an answer the client can't read, goes to the queue at once. The sweeper re-queues every drawing still `processing` 10 minutes after its last change, locking them with `SKIP LOCKED`; `prepare_drawing` skips what's done and sends the moderation task again. The admin shows each drawing through a staff-only view that streams it from the bucket.
 
+A decision leaves the service only through the transactional outbox: `decide()` writes `DrawingApproved` or `DrawingRejected` (keyed by `drawing_id`, `reason` `moderation:rejected` or `manual:rejected`) into `drawings_outboxevent` in the same transaction as the status change, so neither can happen without the other. An approval needs the drawing's image. `assets-relay` locks unpublished rows in id order (`FOR UPDATE SKIP LOCKED`), produces them with an idempotent producer (acks=all), and stamps `published_at` only for what Kafka confirmed; a crash after the ack republishes with the same `event_id`, so consumers dedupe on it or on `drawing_id`. Published rows are purged after 7 days.
+
 Progress inside `processing` is the pipeline's own columns (`replay_id`, `sha256`, the image keys), each filled once, so a redelivered task skips the steps already done. Every status change is one conditional `UPDATE ... WHERE status IN (...)` (`drawings/moderation.py`): under READ COMMITTED, of two concurrent decisions exactly one changes the row. The AI decides only from `processing` and a moderator only from `review`, so a late AI answer can't overrule the queue. Check constraints make a decided drawing always name who decided and when.
 
 Moderators sign in to the admin with Google (ADR 0001): `/admin/login/` sends the browser to the web app's `/moderate`, which calls `POST /admin/sso/` once with its access token. Role `moderator` makes a staff user in the `moderators` group (view drawings, approve or reject in the queue); `admin` makes a superuser. Drawings are read-only in the admin.
@@ -223,7 +225,7 @@ The room client (task 2.3):
 | Store | Database, prefix or bucket | What it holds | Owner |
 |---|---|---|---|
 | PostgreSQL | `auth` | Users, refresh tokens, API keys | auth |
-| PostgreSQL | `assets` | Drawing metadata and moderation status | assets |
+| PostgreSQL | `assets` | Drawing metadata and moderation status, the outbox of drawing events, admin sessions | assets |
 | PostgreSQL | `marketplace` | Accounts, ledger, balances, ownership, listings, idempotency keys, outbox, Stripe events | marketplace |
 | PostgreSQL | `notifier` | Endpoints and deliveries | notifier |
 | Redis | `room:*` | Room event streams, snapshots, leases, fencing counters | game-server |
@@ -297,8 +299,10 @@ Lobby:
 
 Assets:
 
-- `GET /api/assets/drawings/{id}`, `GET /api/assets/drawings?author_id=...`
-- `GET /api/assets/drawings/{id}/replay`
+- `GET /api/assets/drawings?author_id=&limit=<1..50>&cursor=` returns `{drawings, next_cursor}`, newest first (keyset on the UUIDv7 id). Without `author_id` it lists approved drawings (the gallery); with it, that author's approved drawings, plus every one of their own when the caller is the author.
+- `GET /api/assets/drawings/{id}` returns `{id, match_id, round_no, word, author_ids, initial_owner_id, status, ended_at, created_at, has_replay, image_url, thumb_url}`. `image_url` and `thumb_url` are presigned GET URLs straight to object storage, valid 15 minutes, `null` before the images exist. Approved drawings are visible to every signed-in player; other drawings only to their authors, and `404 DRAWING_NOT_FOUND` to everyone else.
+- `GET /api/assets/drawings/{id}/replay` returns the replay document: `{drawing_id, schema_version, canvas_width, canvas_height, round_started_at, strokes: [{user_id, color, width, undone, server_received_ms, points: [[x, y, t_ms], ...]}]}`, or `404 REPLAY_NOT_FOUND`.
+- A bad `limit`, `cursor` or `author_id` is `400 INVALID_REQUEST`; a missing or invalid token `401 UNAUTHENTICATED`.
 - `GET /api/assets/search?q=...` (Stage 6)
 - `/admin/`: Django admin for moderators. `/admin/login/` redirects to the web app's `/moderate`, which signs in through `GET /admin/sso/` (returns `{csrf_token}`) and `POST /admin/sso/?next=<admin page>` with the access token in `Authorization` and the CSRF token in `X-CSRFToken` (returns `{next}`; `401 UNAUTHENTICATED` for a missing or invalid token, `403 FORBIDDEN` without the `moderator` or `admin` role)
 
