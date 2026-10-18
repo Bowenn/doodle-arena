@@ -153,6 +153,8 @@ describe('App', () => {
 
   it.each([
     ['Wallet', 'Wallet', '/wallet'],
+    ['Market', 'Market', '/market'],
+    ['My drawings', 'My drawings', '/my-drawings'],
   ])('opens %s from the top bar', async (link, heading, path) => {
     signedIn()
     render(<App />)

@@ -1,14 +1,15 @@
-// One drawing: the image, who drew it, and its replay.
+// One drawing: the image, who drew it, its replay, and who owns it.
 
 import { useEffect, useState } from 'react'
 import { ApiError } from '../api.ts'
 import { getDrawing, getReplay, type Drawing, type Replay } from '../gallery.ts'
+import { Ownership } from '../market/Ownership.tsx'
 import { playerLabel, STATUS_LABEL } from './names.ts'
 import { ReplayPlayer } from './ReplayPlayer.tsx'
 
-type Props = { drawingId: string; meId: string; onBack: () => void }
+type Props = { drawingId: string; meId: string; onBack: () => void; onWallet?: () => void }
 
-export function DrawingPage({ drawingId, meId, onBack }: Props) {
+export function DrawingPage({ drawingId, meId, onBack, onWallet = () => {} }: Props) {
   const [drawing, setDrawing] = useState<Drawing | null>(null)
   const [replay, setReplay] = useState<Replay | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -56,6 +57,7 @@ export function DrawingPage({ drawingId, meId, onBack }: Props) {
           ) : (
             drawing.image_url && <img className="drawing-full" src={drawing.image_url} alt={`A drawing of "${drawing.word}"`} />
           )}
+          {drawing.status === 'approved' && <Ownership drawingId={drawingId} meId={meId} onWallet={onWallet} />}
         </>
       )}
     </main>

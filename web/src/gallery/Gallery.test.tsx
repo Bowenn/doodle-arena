@@ -79,7 +79,7 @@ describe('Gallery', () => {
     render(<Gallery meId="u_me" onOpen={() => {}} onBack={() => {}} />)
     expect(await screen.findByText('No drawings yet.')).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: 'My drawings' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Drawn by me' }))
 
     expect(await screen.findByText('Waiting for a moderator')).toBeTruthy()
     expect(screen.getByText('No image yet')).toBeTruthy()
@@ -94,7 +94,7 @@ describe('Gallery', () => {
     await screen.findByText('word1')
     expect(screen.getAllByText(/^word\d$/).map((e) => e.textContent)).toEqual(['word1', 'word2', 'word3'])
     expect(screen.getByRole('heading').textContent).toBe("This match's drawings")
-    expect(screen.queryByRole('button', { name: 'My drawings' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Drawn by me' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeTruthy()
   })
 

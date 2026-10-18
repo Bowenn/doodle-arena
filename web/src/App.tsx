@@ -4,6 +4,8 @@ import { DrawingPage } from './gallery/DrawingPage.tsx'
 import { Gallery } from './gallery/Gallery.tsx'
 import { Leaderboard } from './Leaderboard.tsx'
 import { Lobby } from './Lobby.tsx'
+import { Market } from './market/Market.tsx'
+import { MyDrawings } from './market/MyDrawings.tsx'
 import { Wallet } from './market/Wallet.tsx'
 import { Moderate } from './Moderate.tsx'
 import { Room } from './room/Room.tsx'
@@ -23,6 +25,8 @@ function roomFromPath(path: string): string | null {
 const NAV: [path: string, label: string][] = [
   ['/', 'Lobby'],
   ['/gallery', 'Gallery'],
+  ['/market', 'Market'],
+  ['/my-drawings', 'My drawings'],
   ['/wallet', 'Wallet'],
 ]
 
@@ -123,7 +127,13 @@ export default function App() {
             onMatchDrawings={(matchId) => go(`/gallery?match_id=${encodeURIComponent(matchId)}`)}
           />
         ) : drawingId ? (
-          <DrawingPage key={drawingId} drawingId={drawingId} meId={me.id} onBack={() => go('/gallery')} />
+          <DrawingPage
+            key={drawingId}
+            drawingId={drawingId}
+            meId={me.id}
+            onBack={() => go('/gallery')}
+            onWallet={() => go('/wallet')}
+          />
         ) : path === '/gallery' ? (
           <Gallery
             key={search}
@@ -132,6 +142,10 @@ export default function App() {
             onOpen={(id) => go(`/drawings/${id}`)}
             onBack={() => go('/')}
           />
+        ) : path === '/market' ? (
+          <Market meId={me.id} onOpen={(id) => go(`/drawings/${id}`)} onWallet={() => go('/wallet')} />
+        ) : path === '/my-drawings' ? (
+          <MyDrawings onOpen={(id) => go(`/drawings/${id}`)} />
         ) : path === '/wallet' ? (
           <Wallet
             key={search}
