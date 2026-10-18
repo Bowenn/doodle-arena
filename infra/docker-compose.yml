@@ -507,7 +507,10 @@ services:
     ports:
       - "127.0.0.1:27017:27017"
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      # Through the container's network address, not localhost: on a new volume the image first
+      # runs a temporary server on 127.0.0.1 to create the root user, and a localhost ping would
+      # pass about two seconds before the real server accepts other containers.
+      test: ["CMD-SHELL", "mongosh --quiet --host \"$$(hostname -i)\" --eval 'db.adminCommand(\"ping\").ok'"]
       interval: 3s
       timeout: 5s
       retries: 30
