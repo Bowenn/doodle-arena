@@ -109,6 +109,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `market.ledger.imbalance` | Gauge (coins) | – | marketplace |
 | `market.ledger.mismatched_accounts` | Gauge | – | marketplace |
 | `market.ownership.violations` | Gauge | – | marketplace |
+| `market.drawings.received` | Counter | `result` = minted, duplicate (the drawing was minted before: a redelivery), rejected (a `DrawingRejected`, nothing to do), skipped (undecodable, or an unset or unknown event), failed (an event that breaks its contract, or a record Postgres refuses as data) | marketplace |
 | `notifier.deliveries` | Counter | `result` = success, retry, dead | notifier |
 | `notifier.delivery.duration` | Histogram (ms) | – | notifier |
 | `notifier.dlq.size` | Gauge | – | notifier |
@@ -165,9 +166,11 @@ Starting rules (tune the thresholds after the first load test):
 | GameServerDown | `lobby.servers.healthy` below the expected count for 1 minute | critical |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`) | critical |
 
-The two invariant alerts come from the marketplace's reconciliation job, which checks the ledger and ownership every minute and exports the results as gauges. `market.ledger.imbalance` is the sum of every ledger entry, in coins; `market.ledger.mismatched_accounts` counts accounts whose balance isn't the sum of their entries, user balances below zero, and accounts without a balance row. When no run has succeeded for 3 minutes, both gauges stop reporting, so a dead job shows as a missing series (ReconciliationStale) instead of a reassuring 0. `market.ownership.violations` arrives with task 4.2, together with the ownership tables. After a redeploy, the old container's last value stays visible for Prometheus's 5-minute lookback as a second series with its own `host_name`; an alert in the first minutes after a deploy should be checked against the new container's series.
+The two invariant alerts come from the marketplace's reconciliation job, which checks the ledger and ownership every minute and exports the results as gauges. `market.ledger.imbalance` is the sum of every ledger entry, in coins; `market.ledger.mismatched_accounts` counts accounts whose balance isn't the sum of their entries, user balances below zero, and accounts without a balance row. When no run has succeeded for 3 minutes, both gauges stop reporting, so a dead job shows as a missing series (ReconciliationStale) instead of a reassuring 0. `market.ownership.violations` counts drawings whose ownership row and provenance disagree (design doc, section 8). After a redeploy, the old container's last value stays visible for Prometheus's 5-minute lookback as a second series with its own `host_name`; an alert in the first minutes after a deploy should be checked against the new container's series.
 
-Each run is a `market.reconcile` span (attributes `ledger.imbalance` and `ledger.mismatched_accounts`) under the Java agent's span for the scheduled method, with one log line: `ledger reconciled` at info, or `ledger invariants broken` at error with up to 20 `mismatched_account_ids`.
+Each run is a `market.reconcile` span (attributes `ledger.imbalance`, `ledger.mismatched_accounts` and `ownership.violations`) under the Java agent's span for the scheduled method, with one log line: `ledger reconciled` at info, or `invariants broken` at error with up to 20 `mismatched_account_ids` and `violating_drawing_ids`.
+
+Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.duplicate`) under the agent's Kafka consumer span, which continues the assets relay's `traceparent`: one trace runs from the game server's `game.round.end` to the mint.
 
 ## 6. Release monitoring
 

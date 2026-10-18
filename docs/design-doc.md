@@ -184,6 +184,7 @@ Owns the Postgres database `marketplace`.
 - Publishes through a transactional outbox: `SaleCompleted`, `ListingCreated`, `ListingCancelled` and `CoinsCredited`.
 - Runs a reconciliation job every minute that checks the ledger and ownership invariants and exports them as metrics.
 - Verifies access tokens itself (ADR 0001) with Spring Security's resource server; SQL is written by hand through `JdbcClient` and migrated by Flyway at startup.
+- Consumes `assets.drawings.v1` with Spring for Apache Kafka in the consumer group `marketplace` (task 4.2). An offset is committed only after its record's transaction committed. A record it can't read (undecodable, an unset or unknown event) or an event that breaks its contract is logged, counted and committed; anything else, such as Postgres being down, is retried on the same record (1 s doubling to 30 s, no limit), so the partition waits instead of skipping a mint. A new group starts at the earliest offset, so every drawing already approved is minted.
 
 ### 4.7 Notifier (Go)
 
@@ -320,7 +321,7 @@ Marketplace:
 - `GET /api/market/listings`, `POST /api/market/listings` (requires `Idempotency-Key`), `DELETE /api/market/listings/{id}`
 - `POST /api/market/listings/{id}/purchase` (requires `Idempotency-Key`): `200`, `409 LISTING_NOT_AVAILABLE` or `422 INSUFFICIENT_FUNDS`
 - Every endpoint that takes an `Idempotency-Key` can also return `409 IDEMPOTENCY_KEY_IN_PROGRESS` (the same key is still being processed) or `422 IDEMPOTENCY_KEY_REUSED` (the same key with a different request body). Clients tell these apart by `error.code`, not by the status code.
-- `GET /api/market/drawings/{id}/ownership-history`
+- `GET /api/market/drawings/{id}/ownership-history` returns `{drawing_id, owner_id, version, author_ids, events: [{kind, from_owner, to_owner, sale_id, created_at}]}`: the current owner, authors in drawing order, and every change of hands oldest first (`kind` is `MINT`, with no `from_owner` or `sale_id`, or `SALE`). Any signed-in player may read it; a drawing that was never minted, or a malformed id, is `404 DRAWING_NOT_FOUND`.
 - `GET /api/market/coin-packs`, `POST /api/market/coin-packs/{id}/checkout` (returns a Stripe Checkout URL)
 - `POST /api/market/stripe/webhook` (verified by Stripe signature, no JWT)
 
@@ -447,9 +448,9 @@ Tables (the Flyway migrations are the source of truth):
 - `balances(account_id PK, owner_type, balance BIGINT, updated_at)`. `owner_type` is a copy tied to `accounts` by a composite foreign key `(account_id, owner_type)`, so the check `owner_type = 'system' OR balance >= 0` can be a plain `CHECK`: user balances are never negative, system accounts may be
 - `ledger_transactions(tx_id UUIDv7, type reward|stripe_purchase|sale, idempotency_key UNIQUE, metadata JSONB, created_at)`
 - `ledger_entries(entry_id, tx_id, account_id, amount BIGINT <> 0, created_at)`: signed amounts, partitioned by month in Stage 6
-- `drawing_authors(drawing_id, user_id, author_order)`
-- `ownership(drawing_id PK, owner_id, version, updated_at)`
-- `ownership_events(event_id, drawing_id, from_owner, to_owner, sale_id, kind MINT|SALE, created_at)`: append-only provenance
+- `drawing_authors(drawing_id, user_id, author_order)`, primary key `(drawing_id, author_order)`, `UNIQUE(drawing_id, user_id)`
+- `ownership(drawing_id UUID PK, owner_id, version, minted_at, updated_at)`: `version` is 1 at mint and grows by one per sale, so it always equals the number of ownership events
+- `ownership_events(event_id BIGINT identity, drawing_id, from_owner, to_owner, sale_id, kind MINT|SALE, source_event_id, created_at)`: append-only provenance (a trigger refuses `UPDATE`, `DELETE` and `TRUNCATE`). A `MINT` has no `from_owner` or `sale_id`, a `SALE` has both (a `CHECK`), and a partial unique index allows one `MINT` per drawing. `source_event_id` is the `DrawingApproved`'s `event_id`. The identity gives a drawing's history a strict order
 - `listings(listing_id, drawing_id, seller_id, price, status ACTIVE|SOLD|CANCELLED, created_at, closed_at)`, with a partial unique index on `drawing_id WHERE status = 'ACTIVE'`
 - `idempotency_keys(user_id, key, request_hash, status IN_PROGRESS|DONE, response_code, response_body, created_at)`, primary key `(user_id, key)`, kept for 24 hours
 - `stripe_events(stripe_event_id PK, type, processed_at)`
@@ -481,7 +482,7 @@ The reconciliation job checks four invariants every minute:
 - The sum of all `ledger_entries.amount` is 0 (`market.ledger.imbalance`).
 - Each account's balance equals the sum of its entries, and every account has a balance row (`market.ledger.mismatched_accounts`).
 - No user balance is negative (also counted in `market.ledger.mismatched_accounts`).
-- Every approved drawing has exactly one ownership row (`market.ownership.violations`, from task 4.2).
+- Every approved drawing has exactly one ownership row, and it agrees with its provenance (`market.ownership.violations`, task 4.2). The primary key already rules out a second row, so the job counts drawings with not exactly one `MINT` event, a `version` that isn't the number of ownership events, an owner who isn't the latest event's `to_owner`, or no authors, plus history or authors without an ownership row. That is what a sale that updated one table and not the other would leave.
 
 It reads one REPEATABLE READ, read-only snapshot, so a posting that commits while it runs can't make the numbers disagree, and it takes no locks, so postings never wait for it. It scans the whole ledger, which is fine at this size; incremental checkpoints come with the monthly partitions (Stage 6).
 
@@ -627,6 +628,7 @@ Releases:
 | D31 | The AI stub gets the thumbnail's PNG bytes; its mode comes from the environment and `PUT /internal/moderation-mode` on the internal port 9091 | No storage access for the AI service; drills without restarts, on a port nobody routes |
 | D32 | The web replay reconstructs timing from `server_received_ms` and `t_ms`, squeezes pauses to 1 s and leaves undone strokes out; the gallery has everyone's and my drawings, and a match's from its end | Server time orders strokes; the replay ends on the minted picture |
 | D33 | The ledger's invariants are enforced in Postgres as well as in the service: a deferred constraint trigger (entries sum to zero at COMMIT), append-only triggers, and a `CHECK` on `balances.owner_type`; the reconciliation job stays as the detector, and its gauges go missing rather than read 0 when it stops | A bug or a hand-written statement can't break the ledger; the job catches what gets past anyway, such as a disabled trigger or an edited balance |
+| D34 | The marketplace consumes with Spring for Apache Kafka; records that can never succeed (unreadable, unknown, against the contract, refused by Postgres as data) are logged, counted and skipped, and everything else is retried on the same offset with no limit | An approved drawing is never skipped because of an outage; a bad record never blocks a partition |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
