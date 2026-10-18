@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
@@ -26,14 +27,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.doodlearena.marketplace.telemetry.MarketMetrics;
 
 /**
- * Checks the ledger's invariants every minute (design doc, section 8) and exports them as the
- * gauges {@code market.ledger.imbalance} and {@code market.ledger.mismatched_accounts}, which
- * alert when they aren't 0. Postgres already refuses unbalanced transactions and negative user
+ * Checks the ledger's and ownership's invariants every minute (design doc, section 8) and exports
+ * them as the gauges {@code market.ledger.imbalance}, {@code market.ledger.mismatched_accounts}
+ * and {@code market.ownership.violations}, which alert when they aren't 0. Postgres already refuses unbalanced transactions and negative user
  * balances; this job catches whatever gets past that anyway: a disabled trigger, a balance edited
  * by hand, a bug in a later migration.
  *
- * <p>Both queries run in one REPEATABLE READ, read-only transaction, so they see the same snapshot:
- * a posting that commits between them can't make the two numbers disagree. Read-only work under
+ * <p>All queries run in one REPEATABLE READ, read-only transaction, so they see the same snapshot:
+ * a posting or a sale that commits between them can't make the numbers disagree. Read-only work under
  * snapshot isolation takes no locks, so postings never wait for it.
  *
  * <p>When no run has succeeded for {@code app.reconciliation.stale-after}, the gauges report
@@ -44,7 +45,7 @@ public final class ReconciliationJob {
 
 	private static final Logger log = LoggerFactory.getLogger(ReconciliationJob.class);
 
-	private static final int LOGGED_ACCOUNTS = 20;
+	private static final int LOGGED_IDS = 20;
 
 	private final JdbcClient db;
 
@@ -78,6 +79,12 @@ public final class ReconciliationJob {
 			.setUnit("{account}")
 			.setDescription("Accounts whose balance isn't the sum of their entries, or users below zero; must be 0")
 			.buildWithCallback((gauge) -> current().ifPresent((result) -> gauge.record(result.mismatchedAccounts())));
+		metrics.meter()
+			.gaugeBuilder("market.ownership.violations")
+			.ofLongs()
+			.setUnit("{drawing}")
+			.setDescription("Drawings whose ownership and provenance disagree; must be 0")
+			.buildWithCallback((gauge) -> current().ifPresent((result) -> gauge.record(result.ownershipViolations())));
 	}
 
 	@Scheduled(fixedDelayString = "${app.reconciliation.interval}")
@@ -90,15 +97,21 @@ public final class ReconciliationJob {
 			long durationMs = (System.nanoTime() - started) / 1_000_000;
 			span.setAttribute("ledger.imbalance", result.imbalance());
 			span.setAttribute("ledger.mismatched_accounts", result.mismatchedAccounts());
+			span.setAttribute("ownership.violations", result.ownershipViolations());
 			var line = result.clean() ? log.atInfo() : log.atError();
 			line.addKeyValue("imbalance", result.imbalance())
 				.addKeyValue("mismatched_accounts", result.mismatchedAccounts())
+				.addKeyValue("ownership_violations", result.ownershipViolations())
 				.addKeyValue("duration_ms", durationMs);
-			if (!result.clean()) {
+			if (!result.mismatchedAccountIds().isEmpty()) {
 				line = line.addKeyValue("mismatched_account_ids",
-						result.mismatchedAccountIds().stream().limit(LOGGED_ACCOUNTS).toList());
+						result.mismatchedAccountIds().stream().limit(LOGGED_IDS).toList());
 			}
-			line.log(result.clean() ? "ledger reconciled" : "ledger invariants broken");
+			if (!result.ownershipViolationIds().isEmpty()) {
+				line = line.addKeyValue("violating_drawing_ids",
+						result.ownershipViolationIds().stream().limit(LOGGED_IDS).map(UUID::toString).toList());
+			}
+			line.log(result.clean() ? "ledger reconciled" : "invariants broken");
 		}
 		catch (RuntimeException ex) {
 			// The gauges keep the last result until it goes stale; the next run tries again.
@@ -130,10 +143,45 @@ public final class ReconciliationJob {
 					ORDER BY a.account_id""")
 				.query(Long.class)
 				.list();
-			return new ReconciliationResult(imbalance, mismatched, checkedAt);
+			return new ReconciliationResult(imbalance, mismatched, ownershipViolations(), checkedAt);
 		});
 		this.last.set(result);
 		return result;
+	}
+
+	/**
+	 * Drawings whose current owner and provenance disagree: not exactly one MINT event, a version
+	 * that isn't the number of ownership events, an owner who isn't the latest event's new owner,
+	 * no authors; plus events or authors of a drawing without an ownership row (the foreign keys
+	 * forbid that, unless they were bypassed).
+	 */
+	private List<UUID> ownershipViolations() {
+		return this.db.sql("""
+				WITH ev AS (
+					SELECT drawing_id,
+						COUNT(*) AS events,
+						COUNT(*) FILTER (WHERE kind = 'MINT') AS mints,
+						(ARRAY_AGG(to_owner ORDER BY event_id DESC))[1] AS last_owner
+					FROM ownership_events
+					GROUP BY drawing_id
+				)
+				SELECT o.drawing_id
+				FROM ownership o
+				LEFT JOIN ev USING (drawing_id)
+				WHERE ev.drawing_id IS NULL
+					OR ev.mints <> 1
+					OR ev.events <> o.version
+					OR ev.last_owner <> o.owner_id
+					OR NOT EXISTS (SELECT 1 FROM drawing_authors a WHERE a.drawing_id = o.drawing_id)
+				UNION
+				SELECT ev.drawing_id FROM ev
+				WHERE NOT EXISTS (SELECT 1 FROM ownership o WHERE o.drawing_id = ev.drawing_id)
+				UNION
+				SELECT a.drawing_id FROM drawing_authors a
+				WHERE NOT EXISTS (SELECT 1 FROM ownership o WHERE o.drawing_id = a.drawing_id)
+				ORDER BY 1""")
+			.query(UUID.class)
+			.list();
 	}
 
 	/** The last result, unless it is too old to trust. */

@@ -20,9 +20,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.doodlearena.marketplace.ownership.MintService.MintResult;
 import com.doodlearena.marketplace.support.IntegrationTest;
-import com.doodlearena.proto.doodle.events.v1.DrawingApproved;
-import com.doodlearena.proto.doodle.events.v1.EventMeta;
 
+import static com.doodlearena.marketplace.support.TestEvents.approved;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -137,17 +136,6 @@ class MintServiceTests {
 
 	private long eventsOf(UUID drawing) {
 		return this.db.sql("SELECT COUNT(*) FROM ownership_events WHERE drawing_id = ?").param(drawing).query(Long.class).single();
-	}
-
-	static DrawingApproved approved(UUID drawing, String... authors) {
-		return DrawingApproved.newBuilder()
-			.setMeta(EventMeta.newBuilder().setEventId("evt-" + drawing).setEventType("DrawingApproved").setSchemaVersion(1))
-			.setDrawingId(drawing.toString())
-			.setMatchId("m_test")
-			.setRoundNo(1)
-			.addAllAuthorIds(List.of(authors))
-			.setInitialOwnerId(authors.length > 0 ? authors[0] : "")
-			.build();
 	}
 
 }

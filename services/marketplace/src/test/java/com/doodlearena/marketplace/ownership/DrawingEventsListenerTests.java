@@ -15,6 +15,7 @@ import org.springframework.test.annotation.DirtiesContext;
 
 import com.doodlearena.marketplace.support.KafkaTestConfiguration;
 import com.doodlearena.marketplace.support.PostgresTestConfiguration;
+import com.doodlearena.marketplace.support.TestEvents;
 import com.doodlearena.proto.doodle.events.v1.DrawingApproved;
 import com.doodlearena.proto.doodle.events.v1.DrawingEvent;
 import com.doodlearena.proto.doodle.events.v1.DrawingRejected;
@@ -145,7 +146,7 @@ class DrawingEventsListenerTests {
 
 	private static byte[] approvedEvent(UUID drawing, String... authors) {
 		return DrawingEvent.newBuilder()
-			.setDrawingApproved(MintServiceTests.approved(drawing, authors))
+			.setDrawingApproved(TestEvents.approved(drawing, authors))
 			.build()
 			.toByteArray();
 	}
