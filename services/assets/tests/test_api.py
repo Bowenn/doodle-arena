@@ -124,9 +124,33 @@ def test_a_matchs_drawings(client: Client, as_user: Any, make_drawing: Any) -> N
     assert str(mine.id) not in str(as_other)
 
 
+def test_a_lookup_by_ids_answers_in_the_order_asked(
+    client: Client, as_user: Any, make_drawing: Any
+) -> None:
+    first = approved(make_drawing, round_no=1)
+    second = approved(make_drawing, round_no=2)
+    hidden = make_drawing(round_no=3, author_ids=["u_cyd"], initial_owner_id="u_cyd")
+    unknown = "0193a4f0-0000-7000-8000-00000000abcd"
+
+    ids = f"{second.id},{unknown},{first.id},{hidden.id},{second.id}"
+    as_other = client.get(f"{API}?ids={ids}", headers=as_user("u_ada")).json()
+    as_cyd = client.get(f"{API}?ids={ids}", headers=as_user("u_cyd")).json()
+
+    assert [d["id"] for d in as_other["drawings"]] == [str(second.id), str(first.id)]
+    assert as_other["next_cursor"] is None
+    assert [d["id"] for d in as_cyd["drawings"]] == [str(second.id), str(first.id), str(hidden.id)]
+    assert (
+        as_other["drawings"][0]["thumb_url"] is None
+        or "http" in as_other["drawings"][0]["thumb_url"]
+    )
+
+
 @pytest.mark.parametrize(
     "query",
     [
+        "ids=",
+        "ids=nope",
+        "ids=" + ",".join(["0193a4f0-0000-7000-8000-000000000001"] * 51),
         "limit=0",
         "limit=51",
         "limit=x",
