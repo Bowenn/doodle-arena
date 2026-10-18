@@ -259,6 +259,13 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **A security review made the contract stricter.** Kafka doesn't authenticate producers yet, so anything on the internal network could publish a `MatchFinished` and mint coins. Broker ACLs are infrastructure work for later; a cheap bound now: a room holds at most 8 players, so more results than that is refused as a contract violation.
 - **How it fails, and a rule to revisit.** A forged but well-formed match still pays up to 8 × 30 coins until Kafka has ACLs. And the data showed a farming gap: when nobody scores, everyone ties for first and gets 30. A rule such as "a score of 0 earns only the participation reward" would close it; it's Bowen's call.
 
+### ADR 0013: Kafka client authentication and topic ACLs
+
+- **Why Kafka got authentication when gRPC didn't.** ADR 0006 left the internal gRPC open because a forger there costs availability. Kafka is different: since task 4.4 a `MatchFinished` pays coins and a `DrawingApproved` mints a drawing, so the topic is the proof that the game server or assets decided it. Same trust boundary, different blast radius, different answer.
+- **The ACLs are the control; the mechanism only names the caller.** The event catalog's producer and consumer columns became the ACL table: one writer per topic, readers only on their own topics and groups, nobody but `admin` can create, delete or reconfigure. SCRAM per service was chosen because it is configuration in franz-go, confluent-kafka and Spring Kafka, and the same generated-password pattern as Postgres. Because principals are plain service names, swapping SCRAM for mTLS or MSK IAM later doesn't change a single ACL.
+- **Consumer groups are an attack surface too.** Without group ACLs, anything that can reach the broker can join group `marketplace`, take partitions and commit past `MatchFinished` records, so rewards silently disappear. Forged events are the obvious threat; skipped events are the subtle one.
+- **No signatures on events.** Once only the game server can write `game.matches.v1`, a signature adds nothing: anyone who could forge a signed event already holds the producer's own credentials and key. `EventMeta.producer` stays a self-asserted field for debugging. What ACLs can't check is content, so the marketplace keeps its plausibility checks against a buggy or compromised producer.
+
 ## Stage 5: Production readiness
 
 ## Stage 6: Scale and depth
