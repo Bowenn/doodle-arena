@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from drawings import moderation
 from drawings.models import DecidedBy, Drawing, Status
+from tests.conftest import IMAGE
 
 pytestmark = pytest.mark.django_db
 
@@ -51,7 +52,7 @@ def test_the_database_refuses_a_moderator_decision_without_the_moderator(
 
 
 def test_ai_decides_a_processing_drawing_once(make_drawing: Any) -> None:
-    drawing = make_drawing()
+    drawing = make_drawing(**IMAGE)
 
     assert moderation.decide(drawing.id, approve=True, by=DecidedBy.AI)
     # A redelivered task (Celery delivers at least once) changes nothing.
@@ -65,7 +66,7 @@ def test_ai_decides_a_processing_drawing_once(make_drawing: Any) -> None:
 
 
 def test_ai_cannot_overrule_the_review_queue(make_drawing: Any) -> None:
-    drawing = make_drawing()
+    drawing = make_drawing(**IMAGE)
     assert moderation.send_to_review(drawing.id, reason="moderation timed out")
 
     assert not moderation.decide(drawing.id, approve=True, by=DecidedBy.AI)
@@ -91,7 +92,7 @@ def test_a_moderator_decides_only_from_review(make_drawing: Any) -> None:
 
 
 def test_send_to_review_only_from_processing(make_drawing: Any) -> None:
-    drawing = make_drawing()
+    drawing = make_drawing(**IMAGE)
     moderation.decide(drawing.id, approve=True, by=DecidedBy.AI)
 
     assert not moderation.send_to_review(drawing.id)
@@ -106,6 +107,13 @@ def test_a_moderator_decision_must_name_the_moderator(make_drawing: Any) -> None
         moderation.decide(drawing.id, approve=True, by=DecidedBy.MODERATOR)
 
 
+def test_a_drawing_without_its_image_is_never_approved(make_drawing: Any) -> None:
+    drawing = make_drawing()  # not prepared: nothing to mint
+
+    assert not moderation.decide(drawing.id, approve=True, by=DecidedBy.AI)
+    assert moderation.decide(drawing.id, approve=False, by=DecidedBy.AI)
+
+
 def test_unknown_drawing_is_not_decided() -> None:
     assert not moderation.decide(uuid.uuid7(), approve=True, by=DecidedBy.AI)
 
@@ -115,7 +123,7 @@ def test_concurrent_moderators_exactly_one_decides(make_drawing: Any) -> None:
     """Many moderators approve and reject the same drawing at once, each on its own connection.
     Exactly one decision is applied, and the row shows that one."""
     mods = [User.objects.create(username=f"u_mod{i}", is_staff=True) for i in range(8)]
-    drawing = make_drawing()
+    drawing = make_drawing(**IMAGE)
     moderation.send_to_review(drawing.id)
 
     barrier = threading.Barrier(len(mods))
@@ -154,7 +162,7 @@ def test_migrations_match_the_models() -> None:
 
 
 def test_fail_only_from_processing(make_drawing: Any) -> None:
-    drawing = make_drawing()
+    drawing = make_drawing(**IMAGE)
 
     assert moderation.fail(drawing.id, "stroke log not found: m_1/1.binpb.gz")
     assert not moderation.fail(drawing.id, "again")

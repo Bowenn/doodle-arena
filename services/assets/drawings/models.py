@@ -11,6 +11,7 @@ import uuid
 
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 from django.db.models import Q
 
@@ -107,6 +108,10 @@ class Drawing(models.Model):
             ),
         ]
         indexes = [
+            # GET /api/assets/drawings?author_id=: author_ids @> ARRAY[...].
+            GinIndex(fields=["author_ids"], name="drawing_author_ids"),
+            # The gallery: approved drawings, newest first (keyset on the UUIDv7 id).
+            models.Index(fields=["-id"], condition=Q(status="approved"), name="drawing_gallery"),
             # The moderation queue: drawings in review, oldest first. Partial, so it stays as
             # small as the queue.
             models.Index(
@@ -128,3 +133,30 @@ class ReviewQueue(Drawing):
         proxy = True
         verbose_name = "drawing in review"
         verbose_name_plural = "moderation queue"
+
+
+class OutboxEvent(models.Model):
+    """A Kafka event waiting to be published (the transactional outbox). It is written in the
+    same transaction as the change it announces (drawings.moderation.decide), and the relay
+    (drawings/relay.py) publishes it and stamps published_at after Kafka confirms. A crash in
+    between publishes it again with the same id, so consumers dedupe on event_id."""
+
+    # Also the event's EventMeta.event_id. UUIDv7, so id order is (roughly) write order.
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    topic = models.CharField(max_length=64)
+    key = models.CharField(max_length=64)
+    event_type = models.CharField(max_length=32)
+    # The serialized wrapper message (doodle.events.v1.DrawingEvent).
+    payload = models.BinaryField()
+    # The trace of the change that wrote it, continued by the relay's publish span.
+    traceparent = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            # What the relay reads: unpublished rows in id order. Partial, so it stays small.
+            models.Index(
+                fields=["id"], condition=Q(published_at__isnull=True), name="outbox_unpublished"
+            ),
+        ]
