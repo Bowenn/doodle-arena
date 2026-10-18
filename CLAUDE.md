@@ -59,6 +59,7 @@ Keep this list accurate:
 - `make proto`: lint `proto/`, regenerate Go, Java and Python code into `proto/gen/`, and build it. `make test s=proto` checks without regenerating.
 - `scripts/fake-events.sh [-match-id <id>] [-dry-run]`: publish a fake `RoundFinished` and `MatchFinished` (and upload the stroke log). Read events back with `(cd tools/eventctl && go run . decode -topic <topic> -n <k>)`.
 - `scripts/grant-role.sh <user_id> moderator`: give a local user a role (the user id is `id` in `/api/auth/me`); it reaches their next access token. Moderators open the Django admin at `http://localhost:8080/admin/` (Google sign-in through the web app's `/moderate`).
+- `scripts/ai-mode.sh [approve|reject|review|fail] [delay_ms] [failure_rate]`: show or change the AI moderation stub's behaviour until the ai container restarts (for example `scripts/ai-mode.sh fail` to test the review-queue fallback).
 - Drills against `make up` (they need `~/.docker/bin` on PATH; in a worktree, set `DRILL_JWT_KEY` to the main checkout's `secrets/jwt-private.pem` instead of copying it):
   - `uv run --project services/auth --with websockets python scripts/drills/failover.py kill|pause [n]`: kill or freeze the room's game server mid-round and measure the resume.
   - `uv run --project services/auth python scripts/drills/mint_tokens.py [--roles player,moderator] <name>...`: dev access tokens for drills (keep them in shell variables; never write them to a file).
