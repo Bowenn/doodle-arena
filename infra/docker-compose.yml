@@ -49,6 +49,13 @@ x-assets-env: &assets-env
   JWT_ISSUER: http://localhost:8080/api/auth
   # The browser-facing origin, for Django's CSRF Origin check behind the gateway.
   PUBLIC_BASE_URL: http://localhost:8080
+  # The pipeline (design doc 4.5): RoundFinished from Kafka, stroke logs from round-logs, images
+  # to drawings, replays to MongoDB with assets' own user.
+  KAFKA_BROKERS: kafka:9092
+  S3_ENDPOINT: http://seaweedfs:8333
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+  MONGO_URL: mongodb://assets:${MONGO_ASSETS_PASSWORD:?}@mongo:27017/assets
 
 # Go services check their own /healthz (their runtime image has no shell).
 x-go-healthcheck: &go-healthcheck
@@ -292,6 +299,10 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      mongo-users:
+        condition: service_completed_successfully
+      seaweedfs-buckets:
+        condition: service_completed_successfully
     # SIGTERM is a warm shutdown: the worker finishes its current tasks first.
     stop_grace_period: 30s
     healthcheck:
@@ -301,6 +312,54 @@ services:
       timeout: 15s
       start_period: 20s
       retries: 5
+
+  # Reads RoundFinished from game.rounds.v1 and starts a drawing for each round.
+  assets-consumer:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: services/assets/Dockerfile
+    command: ["python", "manage.py", "consume_rounds"]
+    environment:
+      <<: [*app-env, *assets-env]
+      SERVICE_INSTANCE_ID: assets-consumer-1
+      OTEL_SERVICE_NAME: assets
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-consumer-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
+      assets-migrate:
+        condition: service_completed_successfully
+      kafka-topics:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # The poll loop touches this file every second, even while Kafka is down.
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/consumer-alive') > 30)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # Celery beat: runs the recovery sweeper every minute. Exactly one may run, or the sweep runs
+  # twice (harmless, since the sweeper locks with SKIP LOCKED, but wasteful).
+  assets-beat:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: services/assets/Dockerfile
+    command: ["celery", "-A", "config", "beat", "--schedule", "/tmp/celerybeat-schedule", "--pidfile="]
+    environment:
+      <<: [*app-env, *assets-env]
+      SERVICE_INSTANCE_ID: assets-beat-1
+      OTEL_SERVICE_NAME: assets
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-beat-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+    depends_on:
+      assets-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   # ----------------------------------------------------------- Java services
 
@@ -414,6 +473,20 @@ services:
       interval: 3s
       timeout: 5s
       retries: 30
+
+  # One-shot job: creates (or updates) the assets MongoDB user, on new and existing volumes.
+  mongo-users:
+    image: mongo:8.0.34
+    command: ["mongosh", "--quiet", "--nodb", "/create-users.js"]
+    environment:
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?}
+      MONGO_ASSETS_PASSWORD: ${MONGO_ASSETS_PASSWORD:?}
+    volumes:
+      - ./mongo/create-users.js:/create-users.js:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: "no"
 
   kafka:
     image: apache/kafka:4.2.2
