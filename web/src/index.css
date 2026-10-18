@@ -380,3 +380,51 @@ h2 button {
   border: 1px solid #ddd;
   border-radius: 6px;
 }
+
+/* Wallet, market and developer settings (task 4.8). */
+.balance {
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 0.5rem 0;
+}
+.pack-list,
+.plain-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pack-list li,
+.plain-list li {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+table.ledger td {
+  padding: 0.25rem 0.75rem 0.25rem 0;
+}
+table.ledger td.credit {
+  color: #2f9e44;
+  text-align: right;
+}
+table.ledger td.debit {
+  color: #e03131;
+  text-align: right;
+}
+.nav {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.price {
+  font-weight: 600;
+}
+.secret {
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+  background: #fff3bf;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}

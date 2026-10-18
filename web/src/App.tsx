@@ -4,6 +4,7 @@ import { DrawingPage } from './gallery/DrawingPage.tsx'
 import { Gallery } from './gallery/Gallery.tsx'
 import { Leaderboard } from './Leaderboard.tsx'
 import { Lobby } from './Lobby.tsx'
+import { Wallet } from './market/Wallet.tsx'
 import { Moderate } from './Moderate.tsx'
 import { Room } from './room/Room.tsx'
 
@@ -17,6 +18,13 @@ type View =
 function roomFromPath(path: string): string | null {
   return /^\/rooms\/([a-z0-9]{1,64})$/.exec(path)?.[1] ?? null
 }
+
+/** The top bar's links, in order. */
+const NAV: [path: string, label: string][] = [
+  ['/', 'Lobby'],
+  ['/gallery', 'Gallery'],
+  ['/wallet', 'Wallet'],
+]
 
 /** The drawing id in a /drawings/<uuid> path. */
 function drawingFromPath(path: string): string | null {
@@ -81,6 +89,21 @@ export default function App() {
           >
             Doodle Arena
           </a>
+          <nav className="nav">
+            {NAV.map(([to, label]) => (
+              <a
+                key={to}
+                href={to}
+                aria-current={path === to ? 'page' : undefined}
+                onClick={(e) => {
+                  e.preventDefault()
+                  go(to)
+                }}
+              >
+                {label}
+              </a>
+            ))}
+          </nav>
           <span className="user">
             {me.avatar_url && (
               <img src={me.avatar_url} alt="" width={28} height={28} referrerPolicy="no-referrer" />
@@ -108,6 +131,12 @@ export default function App() {
             matchId={new URLSearchParams(search).get('match_id')}
             onOpen={(id) => go(`/drawings/${id}`)}
             onBack={() => go('/')}
+          />
+        ) : path === '/wallet' ? (
+          <Wallet
+            key={search}
+            checkout={new URLSearchParams(search).get('checkout')}
+            onClearCheckout={() => go('/wallet')}
           />
         ) : path === '/moderate' ? (
           <Moderate onBack={() => go('/')} />
