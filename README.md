@@ -20,7 +20,7 @@ It's a portfolio project for backend internship interviews, so depth, correctnes
 - **Drawings:** every finished round becomes a drawing, rendered, stored by content hash, moderated by the AI stub (or a moderator in the Django admin at `/admin/`), announced on Kafka, and shown in the web app's gallery with a replay.
 - **Telemetry:** traces, metrics and logs from every service in Grafana, with logs linked to their traces.
 
-The marketplace is still a skeleton; it's built in Stage 4 of the [roadmap](docs/roadmap.md).
+The marketplace is being built in Stage 4 of the [roadmap](docs/roadmap.md): so far the double-entry coin ledger (Postgres-enforced invariants, a reconciliation job with its gauges) and the read-only wallet API.
 
 ## Architecture
 

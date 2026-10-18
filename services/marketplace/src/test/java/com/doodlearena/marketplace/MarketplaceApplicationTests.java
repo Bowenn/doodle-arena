@@ -1,9 +1,10 @@
 package com.doodlearena.marketplace;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
+import com.doodlearena.marketplace.support.IntegrationTest;
+
+@IntegrationTest
 class MarketplaceApplicationTests {
 
 	@Test
