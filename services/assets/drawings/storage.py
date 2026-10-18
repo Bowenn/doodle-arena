@@ -29,29 +29,55 @@ class StrokeLogMissing(Exception):
 # store, not the drawing, so it must never mark a drawing failed.
 TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (BotoCoreError, ClientError, PyMongoError)
 
+# How long a presigned image URL works. Short, so a leaked URL soon stops working; the API hands
+# out fresh ones on every read.
+PRESIGN_SECONDS = 900
+
 _lock = threading.Lock()
 _s3: Any = None
+_signer: Any = None
 _replays: Collection[dict[str, Any]] | None = None
+
+
+def _client(endpoint: str) -> Any:
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        region_name=settings.S3_REGION,
+        aws_access_key_id=settings.S3_ACCESS_KEY or None,
+        aws_secret_access_key=settings.S3_SECRET_KEY or None,
+        config=Config(
+            connect_timeout=3,
+            read_timeout=10,
+            retries={"max_attempts": 2, "mode": "standard"},
+            s3={"addressing_style": "path"},  # SeaweedFS has no virtual-host buckets
+            signature_version="s3v4",
+        ),
+    )
 
 
 def s3() -> Any:
     global _s3
     with _lock:
         if _s3 is None:
-            _s3 = boto3.client(
-                "s3",
-                endpoint_url=settings.S3_ENDPOINT,
-                region_name=settings.S3_REGION,
-                aws_access_key_id=settings.S3_ACCESS_KEY or None,
-                aws_secret_access_key=settings.S3_SECRET_KEY or None,
-                config=Config(
-                    connect_timeout=3,
-                    read_timeout=10,
-                    retries={"max_attempts": 2, "mode": "standard"},
-                    s3={"addressing_style": "path"},  # SeaweedFS has no virtual-host buckets
-                ),
-            )
+            _s3 = _client(settings.S3_ENDPOINT)
         return _s3
+
+
+def presigned_url(key: str) -> str:
+    """A short-lived GET URL for a drawings object, signed for the address browsers use.
+    Signing is local: no request to the store."""
+    global _signer
+    with _lock:
+        if _signer is None:
+            _signer = _client(settings.S3_PUBLIC_ENDPOINT)
+        signer = _signer
+    url: str = signer.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": settings.DRAWINGS_BUCKET, "Key": key},
+        ExpiresIn=PRESIGN_SECONDS,
+    )
+    return url
 
 
 def replays() -> Collection[dict[str, Any]]:
@@ -70,9 +96,10 @@ def replays() -> Collection[dict[str, Any]]:
 
 
 def reset_clients_for_tests() -> None:
-    global _s3, _replays
+    global _s3, _signer, _replays
     with _lock:
         _s3 = None
+        _signer = None
         _replays = None
 
 
