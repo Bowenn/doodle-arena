@@ -24,7 +24,7 @@ fi
 
 # psql variables (:'name') quote the values, so neither argument can change the statement.
 docker exec -i doodle-arena-postgres-1 \
-  psql -v ON_ERROR_STOP=1 --quiet --tuples-only -U postgres -d auth \
+  psql -v ON_ERROR_STOP=1 --quiet --tuples-only --no-align -U postgres -d auth \
   -v user_id="$user_id" -v role="$role" <<'SQL'
 \set QUIET on
 WITH changed AS (
