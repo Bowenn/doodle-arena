@@ -46,7 +46,8 @@ type config struct {
 	// Auth's public keys and issuer, for the web app's access tokens (ADR 0001).
 	jwksURL   string
 	jwtIssuer string
-	// Encrypts the endpoints' signing secrets (ADR 0014): base64 of 32 bytes.
+	// Encrypts the endpoints' signing secrets (ADR 0014): random text of 32+ characters, hashed
+	// with SHA-256 into the AES-256 key.
 	secretKey string
 	// Hostnames that may resolve to private addresses: only the local test receiver.
 	allowedPrivateHosts string

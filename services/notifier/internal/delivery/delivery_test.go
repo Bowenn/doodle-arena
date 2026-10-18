@@ -261,7 +261,8 @@ func TestDeadDeliveryReachesTheDeadLetterQueue(t *testing.T) {
 	}
 	dd := ev.GetDeliveryDead()
 	if string(r.Key) != e.ID.String() || dd.GetDeliveryId() != d.ID.String() || dd.GetAttempts() != 8 ||
-		dd.GetLastStatusCode() != 500 || dd.GetSourceEventId() != d.SourceEventID || dd.GetMeta().GetEventType() != "DeliveryDead" {
+		dd.GetLastStatusCode() != 500 || dd.GetSourceEventId() != d.SourceEventID || dd.GetSourceEventType() != "SaleCompleted" ||
+		dd.GetMeta().GetEventType() != "DeliveryDead" {
 		t.Fatalf("DeliveryDead = %v (key %s)", dd, r.Key)
 	}
 }

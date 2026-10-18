@@ -182,6 +182,26 @@ func TestStore(t *testing.T) {
 		}
 	})
 
+	t.Run("a dead test ping stays out of the dead-letter queue and its gauge", func(t *testing.T) {
+		before, _ := s.DeadSince(ctx, time.Now().Add(-time.Hour))
+		e, _ := s.CreateEndpoint(ctx, endpoint("u_ping", "sale.completed"))
+		d := delivery(e, "ping_1")
+		d.EventType = "ping"
+		_, _ = s.InsertDeliveries(ctx, []store.Delivery{d})
+		if err := s.RecordAttempt(ctx, d.ID, 1, store.AttemptResult{StatusCode: 500, Error: "HTTP 500", Outcome: store.Dead}); err != nil {
+			t.Fatal(err)
+		}
+		dead, _ := s.UnpublishedDead(ctx, 100)
+		for _, x := range dead {
+			if x.ID == d.ID {
+				t.Fatal("a dead ping is waiting for the dead-letter queue")
+			}
+		}
+		if n, _ := s.DeadSince(ctx, time.Now().Add(-time.Hour)); n != before {
+			t.Fatalf("DeadSince = %d, want %d (pings not counted)", n, before)
+		}
+	})
+
 	t.Run("deleting an endpoint cancels what is pending", func(t *testing.T) {
 		e, _ := s.CreateEndpoint(ctx, endpoint("u_del", "sale.completed"))
 		_, _ = s.InsertDeliveries(ctx, []store.Delivery{delivery(e, "evt-d")})

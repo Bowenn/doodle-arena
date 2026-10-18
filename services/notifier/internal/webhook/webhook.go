@@ -23,6 +23,18 @@ const (
 	TypePing          = "ping"
 )
 
+// SourceEventType is the Kafka event type behind a webhook type (SaleCompleted for
+// sale.completed), as DeliveryDead.source_event_type carries it; "" for ping, which has none.
+func SourceEventType(webhookType string) string {
+	switch webhookType {
+	case TypeSaleCompleted:
+		return "SaleCompleted"
+	case TypeCoinsCredited:
+		return "CoinsCredited"
+	}
+	return ""
+}
+
 // Subscribable lists the event types endpoints may choose.
 var Subscribable = []string{TypeSaleCompleted, TypeCoinsCredited}
 
