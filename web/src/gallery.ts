@@ -56,6 +56,13 @@ export function listDrawings(q: DrawingQuery = {}): Promise<DrawingPage> {
   return call('GET', `/api/assets/drawings?${params.toString()}`)
 }
 
+/** Several drawings by id (at most 50), in the order asked; ones the caller can't see are left out. */
+export async function getDrawingsByIds(ids: string[]): Promise<Drawing[]> {
+  if (ids.length === 0) return []
+  const page = await call<DrawingPage>('GET', `/api/assets/drawings?ids=${ids.map(encodeURIComponent).join(',')}`)
+  return page.drawings
+}
+
 export function getDrawing(id: string): Promise<Drawing> {
   return call('GET', `/api/assets/drawings/${encodeURIComponent(id)}`)
 }

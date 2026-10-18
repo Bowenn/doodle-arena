@@ -15,10 +15,16 @@ export class ApiError extends Error {
   }
 }
 
-export async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method }
+export async function call<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {},
+): Promise<T> {
+  const headers: Record<string, string> = { ...extraHeaders }
+  const init: RequestInit = { method, headers }
   if (body !== undefined) {
-    init.headers = { 'Content-Type': 'application/json' }
+    headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(body)
   }
   const resp = await authFetch(path, init)
@@ -33,5 +39,6 @@ export async function call<T>(method: string, path: string, body?: unknown): Pro
       err?.error?.message ?? `${method} ${path} failed with ${resp.status}`,
     )
   }
+  if (resp.status === 204) return undefined as T
   return (await resp.json()) as T
 }
