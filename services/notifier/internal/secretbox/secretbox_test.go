@@ -3,18 +3,19 @@ package secretbox
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 )
 
 func newKey(t *testing.T) string {
 	t.Helper()
-	k := make([]byte, 32)
+	k := make([]byte, 16)
 	if _, err := rand.Read(k); err != nil {
 		t.Fatal(err)
 	}
-	return base64.StdEncoding.EncodeToString(k)
+	return hex.EncodeToString(k) // what make up puts in .env
 }
 
 func TestRoundTrip(t *testing.T) {
@@ -65,7 +66,7 @@ func TestNoncesAreFresh(t *testing.T) {
 }
 
 func TestBadKeysAreRefused(t *testing.T) {
-	for _, key := range []string{"", "not base64!", base64.StdEncoding.EncodeToString(make([]byte, 16))} {
+	for _, key := range []string{"", "short", strings.Repeat("a", MinKeyLength-1)} {
 		if _, err := New(key); err == nil {
 			t.Errorf("New(%q) accepted", key)
 		}

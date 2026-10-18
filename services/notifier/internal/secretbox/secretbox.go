@@ -7,7 +7,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"encoding/base64"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 )
@@ -17,16 +17,19 @@ type Box struct {
 	aead cipher.AEAD
 }
 
-// New takes the key as standard base64 of exactly 32 bytes (NOTIFIER_SECRET_KEY).
-func New(keyBase64 string) (*Box, error) {
-	key, err := base64.StdEncoding.DecodeString(keyBase64)
-	if err != nil {
-		return nil, fmt.Errorf("NOTIFIER_SECRET_KEY is not base64: %w", err)
+// MinKeyLength is the shortest NOTIFIER_SECRET_KEY accepted.
+const MinKeyLength = 32
+
+// New derives the AES-256 key as the SHA-256 of NOTIFIER_SECRET_KEY, which must be random text
+// of at least MinKeyLength characters (make up generates 32 hex characters, 128 bits; in AWS it
+// comes from Secrets Manager). Hashing only fits a key that is already random: it doesn't
+// stretch a weak passphrase.
+func New(secretKey string) (*Box, error) {
+	if len(secretKey) < MinKeyLength {
+		return nil, fmt.Errorf("NOTIFIER_SECRET_KEY must have at least %d characters", MinKeyLength)
 	}
-	if len(key) != 32 {
-		return nil, fmt.Errorf("NOTIFIER_SECRET_KEY must be 32 bytes, got %d", len(key))
-	}
-	block, err := aes.NewCipher(key)
+	key := sha256.Sum256([]byte(secretKey))
+	block, err := aes.NewCipher(key[:])
 	if err != nil {
 		return nil, fmt.Errorf("aes: %w", err)
 	}

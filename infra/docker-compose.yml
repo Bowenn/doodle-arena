@@ -188,8 +188,19 @@ services:
       SERVICE_INSTANCE_ID: notifier-1
       OTEL_SERVICE_NAME: notifier
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=notifier-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      # Endpoints and deliveries (design doc 4.7). Migrated at startup.
+      DB_HOST: postgres
+      DB_NAME: notifier
+      DB_USER: notifier
+      DB_PASSWORD: ${NOTIFIER_DB_PASSWORD:?}
+      # API keys are checked on auth's internal port, which compose never publishes (ADR 0001).
+      AUTH_INTERNAL_URL: http://auth:9091
+      # Encrypts the endpoints' signing secrets at rest (ADR 0014).
+      NOTIFIER_SECRET_KEY: ${NOTIFIER_SECRET_KEY:?}
     depends_on:
       otel-lgtm:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully

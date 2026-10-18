@@ -1,5 +1,5 @@
-// Command notifier delivers signed outgoing webhooks with retries and a dead-letter queue.
-// In task 1.1 it only serves /healthz.
+// Command notifier delivers signed outgoing webhooks with retries and a dead-letter queue
+// (design doc 4.7, ADR 0014).
 package main
 
 import (
@@ -8,13 +8,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/api"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/logging"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/server"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/telemetry"
 )
 
@@ -25,6 +31,14 @@ type config struct {
 	version  string
 	instance string
 	logLevel slog.Level
+
+	databaseURL string
+	// Auth's internal port, where API keys are checked (ADR 0001).
+	authInternalURL string
+	// Encrypts the endpoints' signing secrets (ADR 0014): base64 of 32 bytes.
+	secretKey string
+	// Hostnames that may resolve to private addresses: only the local test receiver.
+	allowedPrivateHosts string
 }
 
 func loadConfig() config {
@@ -34,6 +48,16 @@ func loadConfig() config {
 		version:  envOr("SERVICE_VERSION", "dev"),
 		instance: envOr("SERVICE_INSTANCE_ID", host),
 		logLevel: logging.ParseLevel(os.Getenv("LOG_LEVEL")),
+		databaseURL: (&url.URL{
+			Scheme:   "postgres",
+			User:     url.UserPassword(envOr("DB_USER", "notifier"), os.Getenv("DB_PASSWORD")),
+			Host:     envOr("DB_HOST", "postgres") + ":" + envOr("DB_PORT", "5432"),
+			Path:     envOr("DB_NAME", "notifier"),
+			RawQuery: "sslmode=disable",
+		}).String(),
+		authInternalURL:     envOr("AUTH_INTERNAL_URL", "http://auth:9091"),
+		secretKey:           os.Getenv("NOTIFIER_SECRET_KEY"),
+		allowedPrivateHosts: os.Getenv("NOTIFIER_ALLOWED_PRIVATE_HOSTS"),
 	}
 }
 
@@ -78,9 +102,24 @@ func run(cfg config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	box, err := secretbox.New(cfg.secretKey)
+	if err != nil {
+		return err
+	}
+	st, err := store.Open(ctx, cfg.databaseURL)
+	if err != nil {
+		return fmt.Errorf("database: %w", err)
+	}
+	defer st.Close()
+	policy := ssrf.NewPolicy(cfg.allowedPrivateHosts)
+	routes := (&api.API{
+		Store: st, Keys: apikeys.NewVerifier(cfg.authInternalURL), Box: box, Policy: policy,
+		Log: logger, Now: time.Now,
+	}).Register
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.port,
-		Handler:           server.NewHandler(server.Info{Service: serviceName, Version: cfg.version, Instance: cfg.instance}),
+		Handler:           server.NewHandler(server.Info{Service: serviceName, Version: cfg.version, Instance: cfg.instance}, routes),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
