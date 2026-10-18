@@ -116,7 +116,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `notifier.dlq.size` | Gauge | – (deliveries that went DEAD in the last 24 hours, so the alert clears on its own) | notifier |
 | `notifier.events` | Counter | `result` = queued, no_subscribers, duplicate (queued before: a redelivery), skipped (unreadable) | notifier |
 | `auth.api_keys.verifications` | Counter | `result` = valid, invalid, revoked | auth |
-| `authn.jwks.fetches` | Counter | `reason` = max_age (the cached set was 10 minutes old, or older), unknown_kid; `result` = success, failed (the last good set stays in use for up to an hour) | lobby, notifier |
+| `authn.jwks.fetches` | Counter | `reason` = max_age (the cached set was 10 minutes old, or older), unknown_kid; `result` = success, failed (the last good set stays in use for up to an hour) | lobby, notifier, assets (web) |
 | `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram | `page` | web |
 | `web.ws.rtt` | Histogram (ms) | – | web |
 

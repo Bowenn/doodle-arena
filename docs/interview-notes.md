@@ -300,11 +300,12 @@ Read this before interviews, and practice with the interview drill prompt in `do
 
 ### Fix: a maximum age for the cached JWKS
 
-- **A cache without a maximum age makes a revocation impossible.** The Go verifiers refetched auth's JWKS only on an unknown `kid`, so a key that auth withdrew, even after a leak, stayed trusted until every lobby and notifier restarted. Now the set is refreshed after 10 minutes, which bounds how long a withdrawn key works; refetching on an unknown `kid` stays, so a rotation still works at once.
+- **A cache without a maximum age makes a revocation impossible.** The lobby, notifier and assets verifiers refetched auth's JWKS only on an unknown `kid`, so a key that auth withdrew, even after a leak, stayed trusted until every one of them restarted. Now the set is refreshed after 10 minutes, which bounds how long a withdrawn key works; refetching on an unknown `kid` stays, so a rotation still works at once.
 - **Fail open for a while, then fail closed.** If auth can't be reached, the last good set keeps working, because a JWKS outage shouldn't log everyone out. But only for an hour: past that every token is refused, otherwise an attacker who can block the fetch keeps a stolen key alive forever. An hour costs almost nothing, since access tokens last 15 minutes and only auth issues new ones.
 - **Stale-while-revalidate without a goroutine.** When the set goes stale, the request that gets the fetch lock (`TryLock`) refreshes it, and every other request keeps using the cached keys instead of queueing behind a fetch that can take until its 3-second timeout. A test holds the fetch open and checks 20 concurrent requests still finish, and mutation checks showed each new test fails when its rule is removed.
 - **Fake clocks make time rules testable.** The cache reads time through an injected `now`, so tests step through "9 minutes: still trusted, 10: refreshed, 59: still served while auth is down, 60: refused" in milliseconds and without sleeps.
-- **The bug was copied once already.** The notifier copied the lobby's verifier, bug included. Fixing two identical copies was the small change; extracting a shared Go module is the real fix for drift, and it is its own decision.
+- **The bug was copied once already.** The notifier copied the lobby's verifier, bug included, and assets wrote the same design in Python. Fixing the copies was the small change; extracting a shared Go module is the real fix for drift between the Go services, and it is its own decision. Across languages, the shared test fixtures are what keeps them honest.
+- **The same rule in two languages has different traps.** Python has `Lock.acquire(blocking=False)` where Go has `TryLock`, and a lock-free reader checks the age outside the lock, so keys and fetch time are one tuple replaced in one assignment: as two attributes, a reader could pair a new fetch time with the old keys and accept a just-removed key.
 
 ## Stage 5: Production readiness
 
