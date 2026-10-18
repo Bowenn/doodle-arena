@@ -8,6 +8,10 @@ cd "$(dirname "$0")/.."
 if [[ -d "$HOME/.docker/bin" ]]; then
   export PATH="$HOME/.docker/bin:$PATH"
 fi
-env_file=.env
-[[ -f "$env_file" ]] || env_file=/dev/null
+# A worktree has no .env of its own: point ENV_FILE at the main checkout's.
+env_file="${ENV_FILE:-.env}"
+if [[ ! -f "$env_file" ]]; then
+  echo "no $env_file: run make up first, or set ENV_FILE" >&2
+  exit 2
+fi
 docker compose -f infra/docker-compose.yml --env-file "$env_file" exec -T assets python - < scripts/drills/pipeline_check.py
