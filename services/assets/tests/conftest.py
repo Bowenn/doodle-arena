@@ -4,6 +4,7 @@ tests use a real Redis broker."""
 
 import json
 import os
+import threading
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -316,3 +317,65 @@ def kafka_brokers() -> Iterator[str]:
                     raise
                 time.sleep(0.5)
         yield brokers
+
+
+class FakeAI:
+    """A stand-in for the AI service's POST /v1/moderate, served on a free local port."""
+
+    def __init__(self) -> None:
+        import json as _json
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        self.status = 200
+        self.decision = "approve"
+        self.delay = 0.0
+        self.calls: list[dict[str, Any]] = []
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                outer.calls.append(
+                    {
+                        "path": self.path,
+                        "content_type": self.headers.get("Content-Type"),
+                        "drawing_id": self.headers.get("X-Drawing-Id"),
+                        "traceparent": self.headers.get("traceparent"),
+                        "body": body,
+                    }
+                )
+                time.sleep(outer.delay)
+                payload = (
+                    {"decision": outer.decision, "reason": "fake", "model": "fake-1"}
+                    if outer.status == 200
+                    else {"error": {"code": "X", "message": "x", "request_id": ""}}
+                )
+                data = _json.dumps(payload).encode()
+                try:
+                    self.send_response(outer.status)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                except BrokenPipeError, ConnectionResetError:
+                    pass  # the client gave up waiting (a timeout test)
+
+            def log_message(self, *args: Any) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_port}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+@pytest.fixture
+def fake_ai(settings: Any) -> Iterator[FakeAI]:
+    from drawings import ai_client
+
+    ai = FakeAI()
+    settings.AI_URL = ai.url
+    settings.AI_TIMEOUT_SECONDS = 0.3
+    ai_client.reset_client_for_tests()
+    yield ai
+    ai.server.shutdown()
+    ai_client.reset_client_for_tests()

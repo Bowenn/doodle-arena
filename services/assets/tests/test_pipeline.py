@@ -165,7 +165,7 @@ def test_decided_drawings_are_skipped(make_drawing: Any) -> None:
     assert pipeline.prepare(drawing.id) == "skipped"
 
 
-def test_the_sweeper_requeues_only_stale_unprepared_drawings(
+def test_the_sweeper_requeues_only_stale_undecided_drawings(
     make_drawing: Any, monkeypatch: Any
 ) -> None:
     from datetime import timedelta
@@ -177,6 +177,7 @@ def test_the_sweeper_requeues_only_stale_unprepared_drawings(
     old = timezone.now() - timedelta(minutes=11)
     stale = make_drawing(match_id="m_stale")
     fresh = make_drawing(match_id="m_fresh")
+    # Prepared but never moderated (its moderation task was lost): swept too.
     prepared = make_drawing(match_id="m_prepared", sha256="ab" * 32)
     failed = make_drawing(match_id="m_failed")
     Drawing.objects.filter(pk__in=[stale.pk, prepared.pk, failed.pk]).update(updated_at=old)
@@ -185,8 +186,8 @@ def test_the_sweeper_requeues_only_stale_unprepared_drawings(
     sent: list[str] = []
     monkeypatch.setattr(tasks.prepare_drawing, "delay", lambda drawing_id: sent.append(drawing_id))
 
-    assert requeue_stale_drawings() == 1
-    assert sent == [str(stale.id)]
-    # Touched: the next sweep leaves it alone for another 10 minutes.
+    assert requeue_stale_drawings() == 2
+    assert sorted(sent) == sorted([str(stale.id), str(prepared.id)])
+    # Touched: the next sweep leaves them alone for another 10 minutes.
     assert requeue_stale_drawings() == 0
-    assert fresh.id not in sent
+    assert str(fresh.id) not in sent
