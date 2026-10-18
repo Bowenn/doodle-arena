@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.sql.DataSource;
@@ -43,6 +44,9 @@ class LedgerConcurrencyTests {
 
 	@Autowired
 	private DataSource dataSource;
+
+	@Autowired
+	private ReconciliationJob reconciliation;
 
 	/** M4 exit criterion: concurrent transfers in opposite directions finish without a deadlock. */
 	@Test
@@ -108,6 +112,43 @@ class LedgerConcurrencyTests {
 		}
 		// Coins only moved between these ten accounts.
 		assertThat(total).isEqualTo(5_000);
+	}
+
+	/** The job reads one snapshot, so postings committing while it runs never look like a mismatch. */
+	@Test
+	void reconciliationDuringPostingsStaysClean() throws Exception {
+		List<AccountRef> accounts = new ArrayList<>();
+		for (int i = 0; i < 4; i++) {
+			accounts.add(this.fixtures.newUserWith(1_000));
+		}
+		AtomicBoolean posting = new AtomicBoolean(true);
+		Queue<ReconciliationResult> results = new ConcurrentLinkedQueue<>();
+
+		Queue<Throwable> failures = runConcurrently(THREADS, (thread) -> {
+			if (thread == 0) {
+				while (posting.get()) {
+					results.add(this.reconciliation.reconcile());
+				}
+				return;
+			}
+			ThreadLocalRandom random = ThreadLocalRandom.current();
+			try {
+				for (int i = 0; i < 100; i++) {
+					int from = random.nextInt(accounts.size());
+					int to = (from + 1 + random.nextInt(accounts.size() - 1)) % accounts.size();
+					this.ledger.post(TransactionType.SALE, "c:" + UUID.randomUUID(), Map.of(),
+							List.of(debit(accounts.get(from), 1), credit(accounts.get(to), 1)));
+				}
+			}
+			finally {
+				if (thread == 1) {
+					posting.set(false);
+				}
+			}
+		});
+
+		assertThat(failures).isEmpty();
+		assertThat(results).isNotEmpty().allMatch(ReconciliationResult::clean);
 	}
 
 	@Test
