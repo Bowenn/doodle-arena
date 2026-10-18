@@ -26,6 +26,8 @@ CREATE TABLE deliveries (
     event_type        TEXT NOT NULL,
     -- The JSON body sent, exactly; every attempt sends the same bytes.
     payload           TEXT NOT NULL,
+    -- The trace context the delivery was queued under, so every attempt joins the event's trace.
+    traceparent       TEXT,
     -- CANCELLED: its endpoint was deleted before it was delivered.
     status            TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'SUCCEEDED', 'DEAD', 'CANCELLED')),
     attempts          INT NOT NULL DEFAULT 0,

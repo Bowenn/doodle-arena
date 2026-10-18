@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
@@ -169,9 +170,13 @@ func (c *Consumer) queueEvent(ctx context.Context, ev Event) (string, int, error
 	if err != nil {
 		return "", 0, err
 	}
+	// Every attempt, however much later, continues this trace (and so the sale's).
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
 	ds := make([]store.Delivery, len(endpoints))
 	for i, e := range endpoints {
-		ds[i] = store.Delivery{ID: uuid.New(), EndpointID: e.ID, SourceEventID: ev.ID, EventType: ev.Type, Payload: body}
+		ds[i] = store.Delivery{ID: uuid.New(), EndpointID: e.ID, SourceEventID: ev.ID, EventType: ev.Type, Payload: body,
+			Traceparent: carrier.Get("traceparent")}
 	}
 	n, err := c.queue.InsertDeliveries(ctx, ds)
 	if err != nil {

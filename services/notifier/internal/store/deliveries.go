@@ -17,6 +17,7 @@ type Delivery struct {
 	SourceEventID  string
 	EventType      string
 	Payload        string
+	Traceparent    string // W3C trace context of the queueing span; empty without one
 	Status         string
 	Attempts       int
 	NextAttemptAt  time.Time
@@ -53,9 +54,9 @@ func (s *Store) InsertDeliveries(ctx context.Context, ds []Delivery) (int, error
 	}
 	batch := &pgx.Batch{}
 	for _, d := range ds {
-		batch.Queue(`INSERT INTO deliveries (id, endpoint_id, source_event_id, event_type, payload)
-			VALUES ($1, $2, $3, $4, $5) ON CONFLICT (endpoint_id, source_event_id) DO NOTHING`,
-			d.ID, d.EndpointID, d.SourceEventID, d.EventType, d.Payload)
+		batch.Queue(`INSERT INTO deliveries (id, endpoint_id, source_event_id, event_type, payload, traceparent)
+			VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')) ON CONFLICT (endpoint_id, source_event_id) DO NOTHING`,
+			d.ID, d.EndpointID, d.SourceEventID, d.EventType, d.Payload, d.Traceparent)
 	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -94,16 +95,16 @@ func (s *Store) Claim(ctx context.Context, limit int, lease time.Duration) ([]Cl
 		UPDATE deliveries d SET next_attempt_at = now() + make_interval(secs => $2)
 		FROM due, endpoints e
 		WHERE d.id = due.id AND e.id = d.endpoint_id
-		RETURNING d.id, d.endpoint_id, d.source_event_id, d.event_type, d.payload, d.attempts,
-			d.first_attempt_at, d.created_at, e.url, e.secret_ciphertext, e.secret_nonce`,
+		RETURNING d.id, d.endpoint_id, d.source_event_id, d.event_type, d.payload, COALESCE(d.traceparent, ''),
+			d.attempts, d.first_attempt_at, d.created_at, e.url, e.secret_ciphertext, e.secret_nonce`,
 		limit, lease.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("claim: %w", err)
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Claimed, error) {
 		var c Claimed
-		err := r.Scan(&c.ID, &c.EndpointID, &c.SourceEventID, &c.EventType, &c.Payload, &c.Attempts,
-			&c.FirstAttemptAt, &c.CreatedAt, &c.URL, &c.SecretCiphertext, &c.SecretNonce)
+		err := r.Scan(&c.ID, &c.EndpointID, &c.SourceEventID, &c.EventType, &c.Payload, &c.Traceparent,
+			&c.Attempts, &c.FirstAttemptAt, &c.CreatedAt, &c.URL, &c.SecretCiphertext, &c.SecretNonce)
 		c.Status = "PENDING"
 		return c, err
 	})

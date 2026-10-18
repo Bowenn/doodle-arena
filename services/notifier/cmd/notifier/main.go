@@ -16,8 +16,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/plugin/kotel"
+
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/api"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/delivery"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/events"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
@@ -126,8 +130,26 @@ func run(cfg config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	dispatcher, err := delivery.NewDispatcher(st, box, policy, delivery.Defaults(), logger)
+	if err != nil {
+		return err
+	}
+	// A record that can't reach Kafka fails after 10 s, so a dead-letter pass never hangs
+	// (with idempotence on, franz-go would otherwise retry it without regard for the context).
+	producer, err := kgo.NewClient(kgo.SeedBrokers(cfg.kafkaBrokers...), kgo.RecordDeliveryTimeout(10*time.Second),
+		kgo.WithHooks(kotel.NewKotel(kotel.WithTracer(kotel.NewTracer())).Hooks()...))
+	if err != nil {
+		return fmt.Errorf("kafka producer: %w", err)
+	}
+	defer producer.Close()
+	deadLetters, err := delivery.NewDeadLetters(st, producer, logger, 2*time.Second)
+	if err != nil {
+		return err
+	}
 	var workers sync.WaitGroup
 	workers.Go(func() { consumer.Run(ctx) })
+	workers.Go(func() { dispatcher.Run(ctx) })
+	workers.Go(func() { deadLetters.Run(ctx) })
 	// The consumer leaves its group before the pool closes.
 	defer workers.Wait()
 
