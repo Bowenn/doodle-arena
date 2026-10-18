@@ -202,6 +202,9 @@ services:
       NOTIFIER_SECRET_KEY: ${NOTIFIER_SECRET_KEY:?}
       # SaleCompleted and CoinsCredited in, DeliveryDead out.
       KAFKA_BROKERS: kafka:9092
+      # The only host allowed to resolve to a private address (and to use http): the local test
+      # receiver below. Empty in AWS (ADR 0014).
+      NOTIFIER_ALLOWED_PRIVATE_HOSTS: webhook-receiver
     depends_on:
       otel-lgtm:
         condition: service_healthy
@@ -422,6 +425,19 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
+
+  # A test endpoint for webhook drills (scripts/drills/webhooks.py): verifies signatures and
+  # answers 200 or 500 as told. Its admin API is published on localhost only.
+  webhook-receiver:
+    restart: unless-stopped
+    build:
+      context: ..
+      dockerfile: services/notifier/Dockerfile
+      args:
+        CMD: webhook-receiver
+    ports:
+      - "127.0.0.1:9000:9000"
+    healthcheck: *go-healthcheck
 
   # ----------------------------------------------------------- Java services
 

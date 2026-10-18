@@ -3,6 +3,8 @@
 # proto/gen/go (go.mod replaces that module with ../../proto/gen/go). Dockerfile.dockerignore,
 # next to this file, sends only those two folders to the builder.
 FROM golang:1.27.2-trixie AS build
+# Which command to build: notifier, or webhook-receiver (the local test endpoint for drills).
+ARG CMD=notifier
 WORKDIR /src/services/notifier
 COPY proto/gen/go/go.mod proto/gen/go/go.sum /src/proto/gen/go/
 COPY services/notifier/go.mod services/notifier/go.sum ./
@@ -10,7 +12,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY proto/gen/go /src/proto/gen/go
 COPY services/notifier ./
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/notifier
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/${CMD}
 
 # Distroless publishes no version tags, so the runtime is pinned by digest (the nonroot
 # multi-arch index as of 2026-10-17); bump it deliberately, in its own commit.
