@@ -19,6 +19,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.celery import CeleryInstrumentor
 from opentelemetry.instrumentation.django import DjangoInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
 from opentelemetry.instrumentation.pymongo import PymongoInstrumentor
 from opentelemetry.instrumentation.system_metrics import SystemMetricsInstrumentor
@@ -77,7 +78,7 @@ def setup_telemetry() -> Callable[[], None]:
 def setup_worker_telemetry() -> Callable[[], None]:
     """For Celery pool processes, beat and the round consumer: installs the global providers and
     instruments Celery (a span per task, continuing the trace of whoever sent it), psycopg,
-    pymongo and botocore (S3)."""
+    pymongo, botocore (S3) and httpx (the AI service)."""
     if not enabled():
         return lambda: None
     shutdown = _install_providers()
@@ -85,6 +86,7 @@ def setup_worker_telemetry() -> Callable[[], None]:
     CeleryInstrumentor().instrument()  # type: ignore[no-untyped-call]
     PymongoInstrumentor().instrument()
     BotocoreInstrumentor().instrument()  # type: ignore[no-untyped-call]
+    HTTPXClientInstrumentor().instrument()  # the AI service calls, with trace context
     return shutdown
 
 

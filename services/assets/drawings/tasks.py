@@ -2,15 +2,17 @@
 idempotent: the pipeline skips the steps a drawing already has."""
 
 import logging
+import random
 import uuid
 from datetime import timedelta
 
+from celery import Task
 from django.db import transaction
 from django.utils import timezone
 from opentelemetry import metrics
 
 from config.celery import app
-from drawings import pipeline, storage
+from drawings import ai_client, pipeline, storage
 from drawings.models import Drawing, Status
 
 log = logging.getLogger(__name__)
@@ -44,7 +46,37 @@ def ping() -> str:
     max_retries=5,
 )
 def prepare_drawing(drawing_id: str) -> str:
-    return pipeline.prepare(uuid.UUID(drawing_id))
+    result = pipeline.prepare(uuid.UUID(drawing_id))
+    if result == "prepared":
+        # Also when every step was already done: a redelivered or re-queued drawing still
+        # needs its decision, and moderate_drawing skips one that has it.
+        moderate_drawing.delay(drawing_id)
+    return result
+
+
+def _full_jitter(retries: int, base: float = 1.0, cap: float = 30.0) -> float:
+    """Exponential backoff with full jitter: a random wait below base * 2^retries (about 1, 2,
+    4 s), so drawings that failed together don't all retry together."""
+    return random.uniform(0, min(cap, base * 2**retries))
+
+
+@app.task(
+    name="assets.moderate_drawing",
+    bind=True,
+    # The thumbnail comes from our own bucket; an outage there retries like prepare_drawing.
+    autoretry_for=storage.TRANSIENT_ERRORS,
+    retry_backoff=2,
+    retry_backoff_max=60,
+    retry_jitter=True,
+    # A ceiling for both kinds of retry. The AI's own budget is pipeline.MAX_MODERATION_ATTEMPTS,
+    # counted on the row, after which the drawing goes to the review queue.
+    max_retries=10,
+)
+def moderate_drawing(self: Task, drawing_id: str) -> str:  # type: ignore[type-arg]
+    try:
+        return pipeline.moderate(uuid.UUID(drawing_id))
+    except ai_client.ModerationUnavailable as e:
+        raise self.retry(exc=e, countdown=_full_jitter(self.request.retries)) from e
 
 
 @app.task(name="assets.requeue_stale_drawings")
@@ -58,8 +90,9 @@ def requeue_stale_drawings() -> int:
     with transaction.atomic():
         stale = list(
             Drawing.objects.select_for_update(skip_locked=True)
-            # Not prepared yet. Task 3.3 adds moderation, which also counts as unfinished work.
-            .filter(status=Status.PROCESSING, sha256="", updated_at__lt=now - STALE_AFTER)
+            # Still processing: not prepared, or prepared and not moderated. prepare_drawing
+            # skips what's done and sends the moderation task.
+            .filter(status=Status.PROCESSING, updated_at__lt=now - STALE_AFTER)
             .order_by("updated_at")
             .values_list("id", "match_id")[:SWEEP_LIMIT]
         )

@@ -95,7 +95,8 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `assets.rounds.received` | Counter | `result` = created, duplicate, empty, skipped | assets (consumer) |
 | `assets.pipeline.results` | Counter | `result` = prepared, skipped, failed | assets |
 | `assets.pipeline.requeued` | Counter | – | assets (sweeper) |
-| `assets.moderation` | Counter | `result` = approved, rejected, retry, manual | assets |
+| `assets.moderation` | Counter | `result` = approved, rejected, retry, manual | assets (`manual`: sent to the review queue, after the last failed call, a refusal, or an unsure AI) |
+| `ai.moderation.requests` | Counter | `decision` = approve, reject, review, unavailable, invalid | ai |
 | `market.purchases` | Counter | `result` = success, conflict, insufficient_funds | marketplace |
 | `market.idempotency.replays` | Counter | `operation` | marketplace |
 | `market.stripe.webhooks` | Counter | `result` = processed, duplicate, invalid_signature | marketplace |

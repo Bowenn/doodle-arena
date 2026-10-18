@@ -42,6 +42,9 @@ class Env(BaseSettings):
     drawings_bucket: str = "drawings"
     # MongoDB holds the replays (assets.replays); the user only has access to the assets database.
     mongo_url: str = "mongodb://mongo:27017/assets"
+    # The AI service's moderation endpoint (design doc 4.8), and how long one call may take.
+    ai_url: str = "http://ai:8080"
+    ai_timeout_seconds: float = 3.0
     # The origin browsers see (the gateway). Nginx forwards Host without the port, so Django's
     # CSRF Origin check needs to be told which origin is ours.
     public_base_url: str = "http://localhost:8080"
@@ -164,6 +167,8 @@ S3_SECRET_KEY = env.s3_secret_key
 ROUND_LOGS_BUCKET = env.round_logs_bucket
 DRAWINGS_BUCKET = env.drawings_bucket
 MONGO_URL = env.mongo_url
+AI_URL = env.ai_url
+AI_TIMEOUT_SECONDS = env.ai_timeout_seconds
 
 AUTH_JWKS_URL = env.auth_jwks_url
 JWT_ISSUER = env.jwt_issuer

@@ -91,6 +91,12 @@ def get_stroke_log(key: str) -> bytes:
         raise
 
 
+def get_image(key: str) -> bytes:
+    resp = s3().get_object(Bucket=settings.DRAWINGS_BUCKET, Key=key)
+    data: bytes = resp["Body"].read()
+    return data
+
+
 def put_if_absent(key: str, data: bytes, content_type: str = PNG) -> bool:
     """Uploads a content-addressed object unless it's already there. Returns True if it uploaded.
     Two workers racing on the same key both upload the same bytes, which is harmless."""

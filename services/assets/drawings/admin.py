@@ -2,13 +2,16 @@
 the pipeline creates them, and a moderator only approves or rejects the ones in the review
 queue, through the same guarded status change the pipeline uses (drawings.moderation)."""
 
+import uuid
 from typing import Any
 
 from django.contrib import admin, messages
 from django.db.models import QuerySet
-from django.http import HttpRequest
+from django.http import Http404, HttpRequest, HttpResponse
+from django.urls import URLPattern, path, reverse
+from django.utils.html import format_html
 
-from drawings import moderation
+from drawings import moderation, storage
 from drawings.models import DecidedBy, Drawing, ReviewQueue, Status
 
 admin.site.site_header = "Doodle Arena moderation"
@@ -19,9 +22,23 @@ _FIELDS = [f.name for f in Drawing._meta.fields]
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
-    """Shows rows and never changes them through a form."""
+    """Shows rows and never changes them through a form, with the drawing's picture."""
 
-    readonly_fields = _FIELDS
+    readonly_fields = ["preview", *_FIELDS]
+
+    @admin.display(description="drawing")
+    def thumbnail(self, obj: Drawing) -> str:
+        if not obj.thumb_key:
+            return "not rendered yet"
+        url = reverse("admin:drawings_image", args=[obj.pk, "thumb"])
+        return format_html('<img src="{}" alt="" height="96" loading="lazy">', url)
+
+    @admin.display(description="image")
+    def preview(self, obj: Drawing) -> str:
+        if not obj.image_key:
+            return "not rendered yet"
+        url = reverse("admin:drawings_image", args=[obj.pk, "full"])
+        return format_html('<img src="{}" alt="" style="max-width: 512px">', url)
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
@@ -35,15 +52,54 @@ class ReadOnlyAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
 
 @admin.register(Drawing)
 class DrawingAdmin(ReadOnlyAdmin):
-    list_display = ("id", "match_id", "round_no", "word", "status", "decided_by", "created_at")
+    list_display = (
+        "thumbnail",
+        "id",
+        "match_id",
+        "round_no",
+        "word",
+        "status",
+        "decided_by",
+        "created_at",
+    )
     list_filter = ("status", "decided_by")
     search_fields = ("=id", "=match_id", "word")
     ordering = ("-id",)
 
+    def get_urls(self) -> list[URLPattern]:
+        image = path(
+            "<uuid:drawing_id>/<str:size>.png",
+            self.admin_site.admin_view(self.image_view),
+            name="drawings_image",
+        )
+        return [image, *super().get_urls()]
+
+    def image_view(self, request: HttpRequest, drawing_id: uuid.UUID, size: str) -> HttpResponse:
+        """Streams a drawing's image from the bucket to a signed-in moderator. The browser can't
+        reach the object store's internal address, and this keeps the admin's access check."""
+        if size not in ("thumb", "full") or not self.has_view_permission(request):
+            raise Http404
+        drawing = Drawing.objects.filter(pk=drawing_id).first()
+        key = drawing and (drawing.thumb_key if size == "thumb" else drawing.image_key)
+        if not key:
+            raise Http404
+        response = HttpResponse(storage.get_image(key), content_type=storage.PNG)
+        # Content-addressed, so it never changes; private, because only moderators may see it.
+        response["Cache-Control"] = "private, max-age=86400, immutable"
+        return response
+
 
 @admin.register(ReviewQueue)
 class ReviewQueueAdmin(ReadOnlyAdmin):
-    list_display = ("id", "match_id", "round_no", "word", "decision_reason", "created_at")
+    list_display = (
+        "thumbnail",
+        "id",
+        "match_id",
+        "round_no",
+        "word",
+        "decision_reason",
+        "created_at",
+    )
     ordering = ("created_at",)  # oldest first, matching the partial index
     actions = ("approve", "reject")
 

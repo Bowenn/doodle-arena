@@ -10,8 +10,13 @@ Celery delivers twice, or the sweeper re-queues, does each step at most once:
 3. upload: both images under content-addressed keys, so identical drawings share one object
    (sha256, image_key, thumb_key).
 
-Moderation follows in task 3.3. A permanent problem (the stroke log is gone or unreadable)
-marks the drawing failed; anything else is raised for Celery to retry.
+4. moderate (its own task, moderate_drawing): the AI service decides approve or reject, or
+   "review" (unsure). It gets MAX_MODERATION_ATTEMPTS calls, counted on the row so the budget
+   holds across redeliveries and the sweeper; after the last failed one the drawing waits in
+   the review queue for a human.
+
+A permanent problem (the stroke log is gone or unreadable) marks the drawing failed; anything
+else is raised for Celery to retry.
 """
 
 import hashlib
@@ -21,11 +26,12 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from django.db.models import F
 from django.utils import timezone
 from opentelemetry import metrics, trace
 
-from drawings import moderation, storage
-from drawings.models import Drawing, Status
+from drawings import ai_client, moderation, storage
+from drawings.models import DecidedBy, Drawing, Status
 from drawings.render import render
 from drawings.strokes import (
     CorruptStrokeLog,
@@ -46,6 +52,13 @@ results = _meter.create_counter(
     "assets.pipeline.results",
     description="Pipeline runs by result: prepared, skipped (not processing), failed",
 )
+moderation_results = _meter.create_counter(
+    "assets.moderation",
+    description="Moderation calls by result: approved, rejected, retry (will be tried again), "
+    "manual (sent to the review queue)",
+)
+
+MAX_MODERATION_ATTEMPTS = 4
 
 
 @contextmanager
@@ -147,3 +160,48 @@ def _record(drawing: Drawing, **values: str) -> None:
     )
     for name, value in values.items():
         setattr(drawing, name, value)
+
+
+def moderate(drawing_id: uuid.UUID) -> str:
+    """Asks the AI service about a prepared drawing and applies its answer. Returns the result it
+    counted; raises ModerationUnavailable when the call failed and attempts remain."""
+    drawing = Drawing.objects.filter(pk=drawing_id).first()
+    if drawing is None or drawing.status != Status.PROCESSING or not drawing.sha256:
+        return "skipped"  # decided already, failed, in the queue, or not prepared yet
+    # Count the attempt before making it, on the row, so a crash mid-call still spends it.
+    Drawing.objects.filter(pk=drawing.pk, status=Status.PROCESSING).update(
+        moderation_attempts=F("moderation_attempts") + 1, updated_at=timezone.now()
+    )
+    drawing.refresh_from_db(fields=["moderation_attempts"])
+    attempt = drawing.moderation_attempts
+    fields = {"drawing_id": str(drawing.id), "match_id": drawing.match_id, "attempt": attempt}
+
+    with step("moderate", drawing):
+        try:
+            verdict = ai_client.moderate(str(drawing.id), storage.get_image(drawing.thumb_key))
+        except ai_client.ModerationRefused as e:
+            return _to_review(drawing, f"moderation refused: {e}", fields)
+        except ai_client.ModerationUnavailable as e:
+            if attempt >= MAX_MODERATION_ATTEMPTS:
+                return _to_review(
+                    drawing, f"moderation failed after {attempt} attempts: {e}", fields
+                )
+            log.warning("moderation unavailable; will retry", extra={**fields, "error": str(e)})
+            moderation_results.add(1, {"result": "retry"})
+            raise
+
+    reason = f"{verdict.model}: {verdict.reason}"
+    if verdict.decision == "review":
+        return _to_review(drawing, f"AI unsure: {reason}", fields)
+    approve = verdict.decision == "approve"
+    moderation.decide(drawing.id, approve=approve, by=DecidedBy.AI, reason=reason)
+    result = "approved" if approve else "rejected"
+    moderation_results.add(1, {"result": result})
+    return result
+
+
+def _to_review(drawing: Drawing, reason: str, fields: dict[str, object]) -> str:
+    moderation.send_to_review(drawing.id, reason=reason[:500])
+    log.warning("drawing sent to the review queue", extra={**fields, "reason": reason})
+    moderation_results.add(1, {"result": "manual"})
+    return "manual"

@@ -1,5 +1,6 @@
 """The moderation queue in the Django admin."""
 
+import uuid
 from typing import Any
 
 import pytest
@@ -113,3 +114,32 @@ def test_admin_static_files_are_served(client: Client) -> None:
     resp = client.get("/admin/static/admin/css/base.css")
 
     assert resp.status_code == 200
+
+
+@pytest.mark.usefixtures("stores")
+def test_moderators_see_the_drawing(client: Client, moderator: User, make_drawing: Any) -> None:
+    from drawings import pipeline, storage
+    from tests.conftest import stroke_log_bytes
+
+    storage.s3().put_object(
+        Bucket="round-logs", Key="m_pic/1.binpb.gz", Body=stroke_log_bytes("m_pic")
+    )
+    d = make_drawing(match_id="m_pic", stroke_log_key="m_pic/1.binpb.gz", stroke_count=1)
+    pipeline.prepare(d.id)
+    moderation.send_to_review(d.id)
+
+    page = client.get(QUEUE).content.decode()
+    thumb = f"/admin/drawings/drawing/{d.id}/thumb.png"
+    assert f'src="{thumb}"' in page
+
+    resp = client.get(thumb)
+    assert resp.status_code == 200
+    assert resp["Content-Type"] == "image/png"
+    assert resp.content.startswith(b"\x89PNG")
+    assert "private" in resp["Cache-Control"]
+    assert client.get(f"/admin/drawings/drawing/{d.id}/full.png").status_code == 200
+    assert client.get(f"/admin/drawings/drawing/{d.id}/huge.png").status_code == 404
+    assert client.get(f"/admin/drawings/drawing/{uuid.uuid7()}/thumb.png").status_code == 404
+
+    client.logout()
+    assert client.get(thumb).status_code == 302  # to the sign-in

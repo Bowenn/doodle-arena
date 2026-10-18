@@ -194,6 +194,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Content addressing needs deterministic bytes.** "Identical images are stored once" only works if the same strokes always render to the same PNG: no timestamps or metadata, fixed compression, a pinned Pillow. In the live data, 67 drawings share 15 images. The hash is of the rendered output, so changing the renderer gives new keys; old objects stay valid, and nothing has to migrate.
 - **Recovery is a sweep, not a hope.** Celery's retries cover a short outage (5 attempts, exponential backoff with full jitter). A message Redis lost, or retries that ran out, are covered by a beat task that re-queues drawings untouched for 10 minutes. It uses `SELECT ... FOR UPDATE SKIP LOCKED`, so even two sweepers never take the same row, the same pattern as the game server's stale outbox re-queue.
 
+### 3.3 Moderation
+
+- **Sort failures by whether time can fix them.** A timeout, a connection error, 429 or 5xx means "ask again later", so it retries with exponential backoff and full jitter: drawings that failed together during an outage don't retry together. A 4xx or an unreadable answer means "this request is wrong", so retrying only burns budget; it goes straight to a human. The same rule fixed 3.2's poison-pill bug.
+- **The retry budget lives on the row, not in Celery.** `moderation_attempts` is incremented before each call, so the 4-call budget holds across task redeliveries, worker crashes and sweeper re-queues. Celery's own retry counter resets whenever the task is sent again. After the last failure the drawing goes to the review queue with the reason, which is the graceful degradation: an AI outage slows moderation down, it never loses or auto-approves a drawing.
+- **Three answers, not two.** Real moderation routes low-confidence cases to people. The stub's `review` decision exercises that path now, so a Stage 7 model can plug in without a contract change. The guarded `decide` from 3.1 means a late AI answer can't overrule a drawing that's already in the queue.
+- **A timeout doesn't cancel the work.** In the slow drill, each client gave up after 3 s while the stub kept working for 5 s, so a slow dependency keeps burning its own capacity on answers nobody reads. A real service would pass a deadline along (like gRPC deadlines) or cancel on disconnect; the rejected alternative was a circuit breaker, which adds state to save load during long outages.
+- **Operator switches belong on a port nobody routes.** The stub's mode changes at runtime through `/internal/moderation-mode`, which answers only on port 9091. The same uvicorn server listens on two sockets, and the route checks which one a request came in on. The gateway proxies the service port only, and a live `PUT` through it got 404. Inside the network anyone can still reach it, which is the same trust boundary ADR 0006 accepts for gRPC.
+
 ## Stage 4: Economy
 
 ## Stage 5: Production readiness
