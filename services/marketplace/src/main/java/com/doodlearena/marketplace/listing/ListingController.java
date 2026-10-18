@@ -39,12 +39,16 @@ public class ListingController {
 
 	private final ListingService listings;
 
+	private final PurchaseService purchases;
+
 	private final IdempotencyService idempotency;
 
 	private final JsonMapper json;
 
-	public ListingController(ListingService listings, IdempotencyService idempotency, JsonMapper json) {
+	public ListingController(ListingService listings, PurchaseService purchases, IdempotencyService idempotency,
+			JsonMapper json) {
 		this.listings = listings;
+		this.purchases = purchases;
 		this.idempotency = idempotency;
 		this.json = json;
 	}
@@ -59,6 +63,18 @@ public class ListingController {
 			.execute(seller, key, "create_listing", IdempotencyService.hash("POST", request.getRequestURI(), body),
 					ErrorBody.requestId(request), HttpStatus.CREATED,
 					(claim) -> this.listings.create(seller, input.drawingId(), input.price()))
+			.toResponseEntity();
+	}
+
+	@PostMapping("/{id}/purchase")
+	public ResponseEntity<String> purchase(@AuthenticationPrincipal Jwt token, @PathVariable String id,
+			@RequestHeader(name = "Idempotency-Key", required = false) String key,
+			@RequestBody(required = false) String body, HttpServletRequest request) {
+		UUID listingId = parseId(id);
+		String buyer = token.getSubject();
+		return this.idempotency
+			.execute(buyer, key, "purchase", IdempotencyService.hash("POST", request.getRequestURI(), body),
+					ErrorBody.requestId(request), HttpStatus.OK, (claim) -> this.purchases.purchase(buyer, listingId))
 			.toResponseEntity();
 	}
 

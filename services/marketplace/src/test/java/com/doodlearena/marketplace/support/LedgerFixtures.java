@@ -34,9 +34,13 @@ public class LedgerFixtures {
 	/** A user funded from the rewards account, as a match reward would. */
 	public AccountRef newUserWith(long coins) {
 		AccountRef user = newUser();
+		fund(user, coins);
+		return user;
+	}
+
+	public void fund(AccountRef user, long coins) {
 		this.ledger.post(TransactionType.REWARD, "fixture:" + UUID.randomUUID(), Map.of(),
 				List.of(debit(AccountRef.REWARDS_ISSUANCE, coins), credit(user, coins)));
-		return user;
 	}
 
 	public long balance(AccountRef account) {
