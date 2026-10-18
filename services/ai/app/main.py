@@ -6,13 +6,14 @@ from fastapi.responses import JSONResponse
 from opentelemetry import metrics
 
 from app import SERVICE_NAME
-from app.moderation import StubConfig, StubModerator, Unavailable, Verdict
+from app.moderation import Abandoned, StubConfig, StubModerator, Unavailable, Verdict
 from app.settings import Settings
 
 log = logging.getLogger(__name__)
 requests_counter = metrics.get_meter(__name__).create_counter(
     "ai.moderation.requests",
-    description="Moderation calls by decision: approve, reject, review, unavailable, invalid",
+    description="Moderation calls by decision: approve, reject, review, unavailable, invalid, "
+    "abandoned (the caller left first)",
 )
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -65,7 +66,11 @@ def create_app(settings: Settings | None = None, moderator: StubModerator | None
             requests_counter.add(1, {"decision": "invalid"})
             return _error(request, 400, "INVALID_IMAGE", "the body is not a PNG under 2 MB")
         try:
-            verdict = await moderator.decide(image)
+            verdict = await moderator.decide(image, request.is_disconnected)
+        except Abandoned as e:
+            log.info("moderation abandoned: the caller left", extra={**extra, "reason": str(e)})
+            requests_counter.add(1, {"decision": "abandoned"})
+            return _error(request, 499, "CLIENT_CLOSED_REQUEST", "the caller left")
         except Unavailable as e:
             log.warning("moderation unavailable", extra={**extra, "reason": str(e)})
             requests_counter.add(1, {"decision": "unavailable"})

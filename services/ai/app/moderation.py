@@ -8,6 +8,8 @@ A real model replaces decide() in Stage 7; the HTTP contract stays.
 import asyncio
 import random
 import threading
+import time
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -36,6 +38,18 @@ class Unavailable(Exception):
     """The stub was told to fail this call."""
 
 
+class Abandoned(Exception):
+    """The caller hung up (its timeout ran out) before the answer was ready."""
+
+
+async def _never_disconnected() -> bool:
+    return False
+
+
+# How often a slow answer checks whether the caller is still there.
+DISCONNECT_POLL_S = 0.05
+
+
 class StubModerator:
     def __init__(self, settings: Settings, rng: random.Random | None = None) -> None:
         self._config = StubConfig(
@@ -55,10 +69,17 @@ class StubModerator:
         with self._lock:
             self._config = config
 
-    async def decide(self, image: bytes) -> Verdict:
+    async def decide(
+        self, image: bytes, disconnected: Callable[[], Awaitable[bool]] = _never_disconnected
+    ) -> Verdict:
+        """While it waits out the delay it checks whether the caller is still connected, and stops
+        when it isn't: a real model would otherwise keep a GPU busy on an answer nobody reads."""
         config = self.config
-        if config.delay_ms:
-            await asyncio.sleep(config.delay_ms / 1000)
+        deadline = time.monotonic() + config.delay_ms / 1000
+        while (left := deadline - time.monotonic()) > 0:
+            if await disconnected():
+                raise Abandoned(f"caller left after {config.delay_ms / 1000 - left:.1f} s")
+            await asyncio.sleep(min(left, DISCONNECT_POLL_S))
         if config.mode == "fail" or self._rng.random() < config.failure_rate:
             raise Unavailable(f"stub mode {config.mode}, failure rate {config.failure_rate}")
         decision: Decision = config.mode  # "fail" was handled above
