@@ -130,6 +130,7 @@ type JWKS struct {
 
 	fetchMu   sync.Mutex // one fetch at a time
 	nextFetch time.Time  // guarded by fetchMu
+	failures  int        // consecutive failed fetches, guarded by fetchMu
 }
 
 // NewJWKS returns a key source that reads the JWKS document at url.
@@ -189,7 +190,8 @@ func (j *JWKS) Key(ctx context.Context, kid string) (*rsa.PublicKey, error) {
 }
 
 // refresh fetches the key set and caches it, unless the last fetch was too recent: MinRefresh
-// after a success, a second after a failure. The caller holds fetchMu.
+// after a success; after failures, a second, then doubling up to MinRefresh. The caller holds
+// fetchMu.
 func (j *JWKS) refresh(ctx context.Context, reason string) (map[string]*rsa.PublicKey, error) {
 	now := j.now()
 	if now.Before(j.nextFetch) {
@@ -199,16 +201,28 @@ func (j *JWKS) refresh(ctx context.Context, reason string) (map[string]*rsa.Publ
 	keys, err := j.fetch(context.WithoutCancel(ctx))
 	if err != nil {
 		j.count(ctx, reason, "failed")
-		// Retry soon: auth may still be starting.
-		j.nextFetch = now.Add(time.Second)
+		// Retry soon, since auth may still be starting, but back off while it stays down.
+		j.failures++
+		j.nextFetch = now.Add(retryDelay(j.failures, j.minRefresh))
 		return nil, fmt.Errorf("fetch JWKS: %w", err)
 	}
 	j.count(ctx, reason, "success")
+	j.failures = 0
 	j.nextFetch = now.Add(j.minRefresh)
 	j.mu.Lock()
 	j.keys, j.fetchedAt = keys, now
 	j.mu.Unlock()
 	return keys, nil
+}
+
+// retryDelay is how long to wait after the nth consecutive failed fetch: 1 s, 2 s, 4 s, ...,
+// never more than max.
+func retryDelay(n int, max time.Duration) time.Duration {
+	d := time.Second
+	for i := 1; i < n && d < max; i++ {
+		d *= 2
+	}
+	return min(d, max)
 }
 
 func (j *JWKS) count(ctx context.Context, reason, result string) {

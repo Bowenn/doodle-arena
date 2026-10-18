@@ -309,7 +309,7 @@ func TestJWKSKeepsLastGoodSetUntilMaxStale(t *testing.T) {
 		t.Fatalf("refused while the last good set is still usable: %v", err)
 	}
 	wantFetches(t, auth, 2) // the refresh failed
-	// The next attempt waits a second, and requests meanwhile use the cached set.
+	// The next attempt waits a second (then longer), and requests meanwhile use the cached set.
 	if _, err := v.Verify(ctx, token); err != nil {
 		t.Fatal(err)
 	}
@@ -321,19 +321,57 @@ func TestJWKSKeepsLastGoodSetUntilMaxStale(t *testing.T) {
 	}
 	wantFetches(t, auth, 3)
 
+	// Past the max staleness the set is refused, even before the next fetch is due (the second
+	// failure backed off to 2 s).
 	clock.Advance(time.Second)
 	if _, err := v.Verify(ctx, token); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("accepted a key from a set past the max staleness (err = %v)", err)
 	}
-	wantFetches(t, auth, 4)
+	wantFetches(t, auth, 3)
 
-	// auth is back: the next fetch (a second later) restores the set.
+	// auth is back: the next fetch, 2 s after the last failure, restores the set.
 	auth.failing.Store(false)
 	clock.Advance(time.Second)
 	if _, err := v.Verify(ctx, token); err != nil {
 		t.Fatalf("refused after auth came back: %v", err)
 	}
-	wantFetches(t, auth, 5)
+	wantFetches(t, auth, 4)
+}
+
+// While auth stays down, fetches back off: 1 s, 2 s, 4 s ... up to MinRefresh, so an outage
+// costs auth at most one fetch per MinRefresh per process.
+func TestJWKSBacksOffWhileAuthIsDown(t *testing.T) {
+	key := newKey(t)
+	auth := newFakeAuth(t, map[string]*rsa.PublicKey{"k1": &key.PublicKey})
+	auth.failing.Store(true)
+	jwks, clock := newTestJWKS(t, auth, 30*time.Second)
+	v := NewVerifier(testIssuer, jwks)
+	ctx := context.Background()
+	token := validToken(t, key, "k1")
+
+	var gaps []time.Duration
+	last, fetches := clock.Now(), int32(0)
+	for range 150 { // two and a half minutes, one request a second
+		_, _ = v.Verify(ctx, token)
+		if n := auth.fetches.Load(); n != fetches {
+			if fetches > 0 {
+				gaps = append(gaps, clock.Now().Sub(last))
+			}
+			last, fetches = clock.Now(), n
+		}
+		clock.Advance(time.Second)
+	}
+	want := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
+		16 * time.Second, 30 * time.Second, 30 * time.Second, 30 * time.Second}
+	if !slices.Equal(gaps, want) {
+		t.Fatalf("gaps between fetches = %v, want %v", gaps, want)
+	}
+
+	auth.failing.Store(false)
+	clock.Advance(30 * time.Second)
+	if _, err := v.Verify(ctx, token); err != nil {
+		t.Fatalf("refused after auth came back: %v", err)
+	}
 }
 
 // While one request refreshes a stale set, the others keep using it instead of waiting for
