@@ -47,6 +47,11 @@ const (
 	// Short, so a key that was just created works almost at once.
 	negativeTTL = 5 * time.Second
 	maxEntries  = 10_000
+
+	// Auth's key shape (services/auth/app/api_keys.py): da_<12-character prefix>_<secret>.
+	prefixLength = 12
+	// Auth refuses to look at a longer key (VerifyKey in api_key_routes.py).
+	maxKeyLength = 200
 )
 
 type entry struct {
@@ -79,6 +84,10 @@ func NewVerifier(authInternalURL string) *Verifier {
 // Verify returns the key's identity, ErrInvalid or ErrUnavailable. The cache is keyed by the
 // key's SHA-256, so the process never keeps the key itself around.
 func (v *Verifier) Verify(ctx context.Context, key string) (Identity, error) {
+	if !wellFormed(key) {
+		// No key of this shape exists. Asking auth would only get a 400 (an outage to us).
+		return Identity{}, ErrInvalid
+	}
 	h := sha256.Sum256([]byte(key))
 	v.mu.Lock()
 	e, ok := v.cache[h]
@@ -105,6 +114,29 @@ func (v *Verifier) Verify(ctx context.Context, key string) (Identity, error) {
 	v.cache[h] = entry{id: id, valid: err == nil, expires: v.now().Add(ttl)}
 	v.mu.Unlock()
 	return id, err
+}
+
+// wellFormed reports whether key could be one of auth's keys: da_, a 12-character lowercase
+// alphanumeric prefix, _, then a URL-safe base64 secret, at most maxKeyLength in all.
+func wellFormed(key string) bool {
+	if len(key) > maxKeyLength {
+		return false
+	}
+	rest, ok := strings.CutPrefix(key, "da_")
+	if !ok || len(rest) < prefixLength+2 || rest[prefixLength] != '_' {
+		return false
+	}
+	for _, c := range rest[:prefixLength] {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	for _, c := range rest[prefixLength+1:] {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func (v *Verifier) ask(ctx context.Context, key string) (Identity, error) {

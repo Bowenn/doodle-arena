@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,7 +86,26 @@ func TestAuthOutageIsNotAnAnswer(t *testing.T) {
 
 	srv.Close()
 	v2 := NewVerifier(srv.URL)
-	if _, err := v2.Verify(context.Background(), "x"); !errors.Is(err, ErrUnavailable) {
+	if _, err := v2.Verify(context.Background(), "da_goodprefix12_other"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("auth down: err = %v", err)
+	}
+}
+
+// A key that can't be one of auth's is refused here: auth would answer 400 to an over-long one,
+// which the notifier must not report as an outage (503).
+func TestMalformedKeysNeverReachAuth(t *testing.T) {
+	var calls, status atomic.Int32
+	srv := fakeAuth(t, &calls, &status)
+	v := NewVerifier(srv.URL)
+	status.Store(http.StatusBadRequest)
+
+	long := "da_goodprefix12_" + strings.Repeat("a", 200)
+	for _, key := range []string{"x", "da_", "da_short_secret", "da_GOODPREFIX12_secret", "da_goodprefix12_", "da_goodprefix12_sec ret", "da_goodprefix12_s%3D", long} {
+		if _, err := v.Verify(context.Background(), key); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Verify(%.30q) = %v, want ErrInvalid", key, err)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("auth called %d times for malformed keys", calls.Load())
 	}
 }
