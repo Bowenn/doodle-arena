@@ -1,7 +1,9 @@
 package com.doodlearena.marketplace.logging;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -69,10 +71,14 @@ class JsonLogFormatterTests {
 		LoggingEvent event = new LoggingEvent("fqcn", this.logger, Level.INFO, "ledger transaction posted", null, null);
 		event.addKeyValuePair(new KeyValuePair("user_id", "u_bob"));
 		event.addKeyValuePair(new KeyValuePair("accounts", 2));
+		event.addKeyValuePair(new KeyValuePair("account_ids", List.of(3L, 7L)));
+		event.addKeyValuePair(new KeyValuePair("tx_id", UUID.fromString("01a14dcf-060c-77ec-8d78-6f243f5276bd")));
 
 		Map<String, Object> json = JsonParserFactory.getJsonParser().parseMap(this.formatter.format(event));
 
-		assertThat(json).containsEntry("user_id", "u_bob").containsEntry("accounts", "2");
+		assertThat(json).containsEntry("user_id", "u_bob").containsEntry("tx_id", "01a14dcf-060c-77ec-8d78-6f243f5276bd");
+		assertThat(json.get("accounts")).isInstanceOf(Number.class).hasToString("2");
+		assertThat(json.get("account_ids")).isInstanceOf(List.class).hasToString("[3, 7]");
 	}
 
 	// Like the context Spring Boot creates at runtime, which always has an MDC adapter.

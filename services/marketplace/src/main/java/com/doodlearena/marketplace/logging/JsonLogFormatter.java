@@ -3,6 +3,7 @@ package com.doodlearena.marketplace.logging;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -52,7 +53,12 @@ public class JsonLogFormatter implements StructuredLogFormatter<ILoggingEvent> {
 		List<KeyValuePair> pairs = event.getKeyValuePairs();
 		if (pairs != null) {
 			for (KeyValuePair pair : pairs) {
-				fields.put(pair.key, (pair.value != null) ? pair.value.toString() : null);
+				// Numbers, booleans and lists stay JSON numbers, booleans and arrays; anything else becomes
+				// its string.
+				Object value = pair.value;
+				boolean json = value == null || value instanceof Number || value instanceof Boolean
+						|| value instanceof Collection<?>;
+				fields.put(pair.key, json ? value : value.toString());
 			}
 		}
 		return fields;
