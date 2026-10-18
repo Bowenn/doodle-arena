@@ -155,6 +155,7 @@ describe('App', () => {
     ['Wallet', 'Wallet', '/wallet'],
     ['Market', 'Market', '/market'],
     ['My drawings', 'My drawings', '/my-drawings'],
+    ['Developer', 'Developer settings', '/developer'],
   ])('opens %s from the top bar', async (link, heading, path) => {
     signedIn()
     render(<App />)

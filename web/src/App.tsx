@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, loginUrl, logout, type Me } from './auth.ts'
+import { Developer } from './developer/Developer.tsx'
 import { DrawingPage } from './gallery/DrawingPage.tsx'
 import { Gallery } from './gallery/Gallery.tsx'
 import { Leaderboard } from './Leaderboard.tsx'
@@ -28,6 +29,7 @@ const NAV: [path: string, label: string][] = [
   ['/market', 'Market'],
   ['/my-drawings', 'My drawings'],
   ['/wallet', 'Wallet'],
+  ['/developer', 'Developer'],
 ]
 
 /** The drawing id in a /drawings/<uuid> path. */
@@ -152,6 +154,8 @@ export default function App() {
             checkout={new URLSearchParams(search).get('checkout')}
             onClearCheckout={() => go('/wallet')}
           />
+        ) : path === '/developer' ? (
+          <Developer />
         ) : path === '/moderate' ? (
           <Moderate onBack={() => go('/')} />
         ) : path === '/leaderboard' ? (
