@@ -134,10 +134,27 @@ S3_KEY, S3_SECRET = "testkey", "testsecret"
 
 @pytest.fixture(scope="session")
 def mongo_url() -> Iterator[str]:
+    import pymongo
     from testcontainers.community.mongodb import MongoDbContainer
 
     with MongoDbContainer(MONGO_IMAGE) as m:
-        yield m.get_connection_url().rstrip("/") + "/assets?authSource=admin"
+        url = m.get_connection_url().rstrip("/") + "/assets?authSource=admin"
+        # The image starts a temporary server to create the root user, stops it, then starts the
+        # real one; a connection in between is reset. Wait for a ping that sticks.
+        client: pymongo.MongoClient[dict[str, Any]] = pymongo.MongoClient(
+            url, serverSelectionTimeoutMS=1000
+        )
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                client.admin.command("ping")
+                break
+            except pymongo.errors.PyMongoError:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.5)
+        client.close()
+        yield url
 
 
 @pytest.fixture(scope="session")
