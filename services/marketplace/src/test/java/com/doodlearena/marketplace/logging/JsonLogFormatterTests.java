@@ -9,6 +9,7 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.LoggingEvent;
 import ch.qos.logback.classic.util.LogbackMDCAdapter;
 import org.junit.jupiter.api.Test;
+import org.slf4j.event.KeyValuePair;
 
 import org.springframework.boot.json.JsonParserFactory;
 import org.springframework.mock.env.MockEnvironment;
@@ -61,6 +62,17 @@ class JsonLogFormatterTests {
 		Map<String, Object> json = JsonParserFactory.getJsonParser().parseMap(this.formatter.format(event));
 
 		assertThat(json).doesNotContainKeys("trace_id", "span_id");
+	}
+
+	@Test
+	void writesKeyValuePairsAsFields() {
+		LoggingEvent event = new LoggingEvent("fqcn", this.logger, Level.INFO, "ledger transaction posted", null, null);
+		event.addKeyValuePair(new KeyValuePair("user_id", "u_bob"));
+		event.addKeyValuePair(new KeyValuePair("accounts", 2));
+
+		Map<String, Object> json = JsonParserFactory.getJsonParser().parseMap(this.formatter.format(event));
+
+		assertThat(json).containsEntry("user_id", "u_bob").containsEntry("accounts", "2");
 	}
 
 	// Like the context Spring Boot creates at runtime, which always has an MDC adapter.

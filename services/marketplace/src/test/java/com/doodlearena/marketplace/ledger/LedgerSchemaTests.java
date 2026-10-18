@@ -5,20 +5,17 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.doodlearena.marketplace.support.PostgresTestConfiguration;
+import com.doodlearena.marketplace.support.IntegrationTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** The rules Postgres enforces by itself, whatever the service does (migration V1). */
-@SpringBootTest
-@Import(PostgresTestConfiguration.class)
+@IntegrationTest
 class LedgerSchemaTests {
 
 	@Autowired
