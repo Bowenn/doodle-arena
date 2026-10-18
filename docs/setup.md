@@ -64,6 +64,18 @@ Put secrets in `.env`, which is gitignored. `.env.example` lists the variable na
 
 The stack is one origin, `http://localhost:8080`. Cookies are not `Secure` locally (`COOKIE_SECURE=false`, because Safari won't send `Secure` cookies to plain-http localhost); they are in AWS. `make up` adds any variable that appears in `.env.example` to an existing `.env` without changing values already there.
 
+### Stripe (task 4.5)
+
+Coin packs use Stripe Checkout in test mode. Without keys the stack still runs; coin packs answer 503.
+
+1. Create a Stripe account (or a sandbox) and stay in test mode. Copy the test secret key (`sk_test_…`) into `.env` as `STRIPE_SECRET_KEY`.
+2. Install the Stripe CLI (`brew install stripe/stripe-cli/stripe`) and run `stripe login`.
+3. Forward webhooks to the gateway: `stripe listen --forward-to localhost:8080/api/market/stripe/webhook`. It prints a signing secret (`whsec_…`) that stays the same for your account; put it into `.env` as `STRIPE_WEBHOOK_SECRET`.
+4. Recreate the marketplace so it reads them: `docker compose -f infra/docker-compose.yml --env-file .env up -d marketplace`.
+5. Pay with Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC. `stripe events resend <evt_id>` redelivers an event (the marketplace answers `duplicate`).
+
+Only test keys belong in `.env`; never commit it.
+
 ## 4. Working as two people
 
 - Each person works on their own track (see `docs/roadmap.md`) in their own branches.
