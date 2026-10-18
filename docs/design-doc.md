@@ -318,9 +318,12 @@ Marketplace:
 - `GET /api/market/wallet` returns `{user_id, balance, updated_at}` for the caller (the token's subject). A user who never had coins gets `balance` 0 and `updated_at` null; a read never creates an account.
 - `GET /api/market/wallet/transactions?limit=<1..50>&cursor=` returns `{transactions: [{tx_id, type, amount, created_at}], next_cursor}`: the caller's ledger entries, newest first (keyset on the entry id; limit 20 by default). `amount` is signed: positive for coins in, negative for coins out. A bad `limit` or `cursor` is `400 INVALID_REQUEST`.
 - Every marketplace endpoint answers `401 UNAUTHENTICATED` without a valid token, `404 NOT_FOUND` for an unknown path and `405 METHOD_NOT_ALLOWED` for another method, in the shared error format.
-- `GET /api/market/listings`, `POST /api/market/listings` (requires `Idempotency-Key`), `DELETE /api/market/listings/{id}`
-- `POST /api/market/listings/{id}/purchase` (requires `Idempotency-Key`): `200`, `409 LISTING_NOT_AVAILABLE` or `422 INSUFFICIENT_FUNDS`
-- Every endpoint that takes an `Idempotency-Key` can also return `409 IDEMPOTENCY_KEY_IN_PROGRESS` (the same key is still being processed) or `422 IDEMPOTENCY_KEY_REUSED` (the same key with a different request body). Clients tell these apart by `error.code`, not by the status code.
+- A listing is `{listing_id, drawing_id, seller_id, price, status, buyer_id, sale_id, created_at, closed_at}` (`status` is `ACTIVE`, `SOLD` or `CANCELLED`).
+- `POST /api/market/listings` takes `{drawing_id, price}` (requires `Idempotency-Key`) and returns `201` with the listing. `price` is a JSON integer from 1 to 1,000,000 coins (`1.5` or `"5"` are `400 INVALID_REQUEST`). `403 NOT_OWNER` unless the caller owns the drawing, `404 DRAWING_NOT_FOUND` for a drawing never minted, `409 ALREADY_LISTED` when it already has an active listing.
+- `DELETE /api/market/listings/{id}` cancels it and returns the listing; cancelling a cancelled listing returns it again (no key needed). `403 NOT_OWNER` for anyone but the seller, `409 LISTING_NOT_AVAILABLE` once sold, `404 LISTING_NOT_FOUND`.
+- `GET /api/market/listings?drawing_id=&seller_id=&limit=<1..50>&cursor=` returns `{listings, next_cursor}`: active listings, newest first. `GET /api/market/listings/{id}` returns one listing in any status.
+- `POST /api/market/listings/{id}/purchase` (requires `Idempotency-Key`, no body) returns `200 {sale_id, listing_id, drawing_id, seller_id, buyer_id, price, completed_at}`, `409 LISTING_NOT_AVAILABLE` (sold or cancelled: a lost race), `422 INSUFFICIENT_FUNDS`, `422 CANNOT_BUY_OWN_LISTING` or `404 LISTING_NOT_FOUND`.
+- Every endpoint that takes an `Idempotency-Key` answers `400 IDEMPOTENCY_KEY_REQUIRED` without one (1 to 255 printable characters), and can also return `409 IDEMPOTENCY_KEY_IN_PROGRESS` (the same key is still being processed) or `422 IDEMPOTENCY_KEY_REUSED` (the same key with a different method, path or body). Clients tell these apart by `error.code`, not by the status code. A key remembers successes and business outcomes (403, 404, 409, 422), which are replayed byte for byte with `Idempotency-Replayed: true`; a new attempt needs a new key (ADR 0012).
 - `GET /api/market/drawings/{id}/ownership-history` returns `{drawing_id, owner_id, version, author_ids, events: [{kind, from_owner, to_owner, sale_id, created_at}]}`: the current owner, authors in drawing order, and every change of hands oldest first (`kind` is `MINT`, with no `from_owner` or `sale_id`, or `SALE`). Any signed-in player may read it; a drawing that was never minted, or a malformed id, is `404 DRAWING_NOT_FOUND`.
 - `GET /api/market/coin-packs`, `POST /api/market/coin-packs/{id}/checkout` (returns a Stripe Checkout URL)
 - `POST /api/market/stripe/webhook` (verified by Stripe signature, no JWT)
@@ -451,10 +454,10 @@ Tables (the Flyway migrations are the source of truth):
 - `drawing_authors(drawing_id, user_id, author_order)`, primary key `(drawing_id, author_order)`, `UNIQUE(drawing_id, user_id)`
 - `ownership(drawing_id UUID PK, owner_id, version, minted_at, updated_at)`: `version` is 1 at mint and grows by one per sale, so it always equals the number of ownership events
 - `ownership_events(event_id BIGINT identity, drawing_id, from_owner, to_owner, sale_id, kind MINT|SALE, source_event_id, created_at)`: append-only provenance (a trigger refuses `UPDATE`, `DELETE` and `TRUNCATE`). A `MINT` has no `from_owner` or `sale_id`, a `SALE` has both (a `CHECK`), and a partial unique index allows one `MINT` per drawing. `source_event_id` is the `DrawingApproved`'s `event_id`. The identity gives a drawing's history a strict order
-- `listings(listing_id, drawing_id, seller_id, price, status ACTIVE|SOLD|CANCELLED, created_at, closed_at)`, with a partial unique index on `drawing_id WHERE status = 'ACTIVE'`
-- `idempotency_keys(user_id, key, request_hash, status IN_PROGRESS|DONE, response_code, response_body, created_at)`, primary key `(user_id, key)`, kept for 24 hours
+- `listings(listing_id UUIDv7, drawing_id, seller_id, price 1..1000000, status ACTIVE|SOLD|CANCELLED, buyer_id, sale_id, created_at, closed_at)`, with a partial unique index on `drawing_id WHERE status = 'ACTIVE'` and a `CHECK` on the shape of each status (a sold listing has a buyer and a sale id)
+- `idempotency_keys(user_id, key, operation, request_hash, status IN_PROGRESS|DONE, claim_token, locked_until, response_code, response_body TEXT, created_at, completed_at)`, primary key `(user_id, key)`, kept for 24 hours (ADR 0012)
 - `stripe_events(stripe_event_id PK, type, processed_at)`
-- `outbox(id, topic, key, payload, headers, created_at, published_at)`
+- `outbox(event_id, topic, key, payload, traceparent, created_at, published_at)`: `event_id` is also the event's `meta.event_id`
 
 Every money movement goes through one ledger posting (`LedgerService.post`, task 4.1), inside the caller's transaction when there is one:
 
@@ -465,17 +468,21 @@ Every money movement goes through one ledger posting (`LedgerService.post`, task
 
 Postgres enforces the same rules on its own, so a bug or a hand-written statement can't break them: a deferred constraint trigger checks at COMMIT that each transaction has at least two entries summing to zero, a trigger refuses `UPDATE`, `DELETE` and `TRUNCATE` on both ledger tables (mistakes are fixed with a reversing transaction), and the `CHECK` on `balances` refuses a negative user balance.
 
-The purchase transaction runs under READ COMMITTED with explicit row locks:
+A request with an `Idempotency-Key` first claims the key in its own committed transaction, as `IN_PROGRESS` with a random `claim_token` and a 30-second lease. The work runs in a second transaction that ends by completing the key with an `UPDATE` that matches only that token. A crashed request's key is taken over once its lease expires; if the slow original then tries to finish, its completion matches nothing and its whole transaction rolls back, so the work happens at most once (ADR 0012).
 
-1. `SELECT ... FOR UPDATE` the listing and check that it is `ACTIVE`. Otherwise return `409`.
-2. Lock the balance rows of the buyer, the seller and every royalty recipient in ascending `account_id` order. The fixed order prevents deadlocks.
-3. Check that the buyer can pay. Otherwise return `422`.
-4. Insert the ledger transaction and its entries (they sum to zero), update the balances, mark the listing `SOLD`, set the new owner and bump `ownership.version`, and append an ownership event.
-5. Insert `SaleCompleted` into the outbox. Commit.
+The purchase transaction runs under READ COMMITTED with explicit row locks, always in the order listing, ownership, balances:
+
+1. `SELECT ... FOR UPDATE` the listing and check that it is `ACTIVE` (otherwise `409`; concurrent buyers queue here) and that the buyer isn't the seller.
+2. `SELECT ... FOR UPDATE` the drawing's ownership row and check that the seller still owns it.
+3. Post the payment through the ledger with the key `sale:<listing_id>`, so a listing can be paid for only once: it locks the balance rows of the buyer, the seller (and, with task 4.6, every royalty recipient) in ascending `account_id` order and returns `422` if the buyer can't pay.
+4. Mark the listing `SOLD` with the buyer and the sale id (the ledger transaction's id), set the new owner and bump `ownership.version` (`WHERE version = ?`), and append a `SALE` ownership event.
+5. Insert `SaleCompleted` into the outbox, complete the idempotency key, and commit.
+
+Creating a listing locks the ownership row `FOR SHARE`, so it can't race a sale of the same drawing, and lets the partial unique index decide between two listings of one drawing. Until task 4.6 the seller gets the whole price and `SaleCompleted.royalties` is empty.
 
 Royalties apply when the seller isn't an author of the drawing. `royalty_total = floor(price * 10 / 100)`. Each author gets `floor(royalty_total / author_count)`, the remainder goes to the first author, and the seller gets `price - royalty_total`. When an author sells (the first sale), there is no royalty.
 
-The outbox publisher reads unpublished rows in batches (`FOR UPDATE SKIP LOCKED`), publishes them to Kafka and marks them published. Delivery is at-least-once, so consumers dedupe.
+The outbox relay runs in the marketplace process every 500 ms: it locks up to 100 unpublished rows (`FOR UPDATE SKIP LOCKED`, so several instances never send the same row at once), sends them with an idempotent producer (`acks=all`), waits up to 10 seconds for the acknowledgements, and marks the acknowledged rows published in the same transaction; the rest wait for the next pass. Each send runs under the trace context stored with its row. Delivery is at-least-once: a send that timed out may still arrive, and a crash after the acknowledgement resends the row, both with the same `event_id`, so consumers dedupe.
 
 The reconciliation job checks four invariants every minute:
 
@@ -629,6 +636,8 @@ Releases:
 | D32 | The web replay reconstructs timing from `server_received_ms` and `t_ms`, squeezes pauses to 1 s and leaves undone strokes out; the gallery has everyone's and my drawings, and a match's from its end | Server time orders strokes; the replay ends on the minted picture |
 | D33 | The ledger's invariants are enforced in Postgres as well as in the service: a deferred constraint trigger (entries sum to zero at COMMIT), append-only triggers, and a `CHECK` on `balances.owner_type`; the reconciliation job stays as the detector, and its gauges go missing rather than read 0 when it stops | A bug or a hand-written statement can't break the ledger; the job catches what gets past anyway, such as a disabled trigger or an edited balance |
 | D34 | The marketplace consumes with Spring for Apache Kafka; records that can never succeed (unreadable, unknown, against the contract, refused by Postgres as data) are logged, counted and skipped, and everything else is retried on the same offset with no limit | An approved drawing is never skipped because of an outage; a bad record never blocks a partition |
+| D35 | Idempotency keys are claimed in their own transaction with a 30-second lease and completed in the work's transaction by an update fenced with the claim's token; successes and business outcomes are stored and replayed byte for byte (ADR 0012) | A crashed request's key frees itself, the work happens at most once even when a retry overlaps the original, and the same key always gets the same answer |
+| D36 | The marketplace's outbox relay runs inside the marketplace process every 500 ms with `FOR UPDATE SKIP LOCKED` and an idempotent producer | One deployable; several instances share the outbox safely; a Kafka outage only delays events |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
@@ -636,7 +645,6 @@ New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and the reward amounts (defaults are in section 7).
-- Before task 4.3: what happens to an `IN_PROGRESS` idempotency key when the process crashes mid-request. One option is to insert the key in the same transaction as the purchase, so a crash rolls it back; another is to let `IN_PROGRESS` rows expire after a short timeout.
 - Before task 4.6: royalties for co-drawn drawings. Today, when one of two co-authors sells for the first time, the other gets nothing, and only `drawer_ids[0]` ever becomes the owner. (The buyer who is also an author no longer needs care: the ledger merges postings to one account before locking, since task 4.1.)
 - `docs/keyword-coverage.md` mentions two things this doc doesn't design yet: Redis cache-aside for listings and wallet reads (which Redis key prefix does the marketplace own, and should balances be cached at all, given they need strong consistency?), and a MongoDB replica set.
 
