@@ -127,9 +127,13 @@ func run(cfg config, logger *slog.Logger) error {
 	}
 	defer st.Close()
 	policy := ssrf.NewPolicy(cfg.allowedPrivateHosts)
+	jwks, err := authn.NewJWKS(cfg.jwksURL, &http.Client{Timeout: 3 * time.Second}, 30*time.Second)
+	if err != nil {
+		return err
+	}
 	routes := (&api.API{
 		Store: st, Keys: apikeys.NewVerifier(cfg.authInternalURL),
-		Tokens: authn.NewVerifier(cfg.jwtIssuer, authn.NewJWKS(cfg.jwksURL, &http.Client{Timeout: 3 * time.Second}, 30*time.Second)),
+		Tokens: authn.NewVerifier(cfg.jwtIssuer, jwks),
 		Box:    box, Policy: policy,
 		Log: logger, Now: time.Now,
 	}).Register
