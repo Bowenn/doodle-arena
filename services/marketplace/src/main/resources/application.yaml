@@ -15,6 +15,18 @@ spring:
   jackson:
     # JSON fields are snake_case, like every other service's API (design doc, section 6.3).
     property-naming-strategy: SNAKE_CASE
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    consumer:
+      group-id: marketplace
+      # A new consumer group starts at the beginning: every drawing already approved gets minted.
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+    listener:
+      # Commit a record's offset only after the listener returned, so after its transaction committed.
+      ack-mode: record
+      auto-startup: ${KAFKA_LISTENERS_ENABLED:true}
   flyway:
     # Migrations run at startup; Flyway's advisory lock keeps two starting instances apart.
     locations: classpath:db/migration

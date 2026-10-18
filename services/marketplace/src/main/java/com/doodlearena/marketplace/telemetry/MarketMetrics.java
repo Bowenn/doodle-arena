@@ -4,6 +4,7 @@ import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.DoubleHistogram;
+import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 
 import org.springframework.stereotype.Component;
@@ -18,6 +19,8 @@ public class MarketMetrics {
 
 	private static final AttributeKey<String> OPERATION = AttributeKey.stringKey("operation");
 
+	private static final AttributeKey<String> RESULT = AttributeKey.stringKey("result");
+
 	private final Meter meter = GlobalOpenTelemetry.getMeter("marketplace");
 
 	private final DoubleHistogram lockWait = this.meter.histogramBuilder("market.db.lock_wait.duration")
@@ -25,8 +28,17 @@ public class MarketMetrics {
 		.setDescription("Time spent waiting for row locks, per operation")
 		.build();
 
+	private final LongCounter drawingsReceived = this.meter.counterBuilder("market.drawings.received")
+		.setDescription("Records read from assets.drawings.v1, by outcome")
+		.build();
+
 	public Meter meter() {
 		return this.meter;
+	}
+
+	/** One record from assets.drawings.v1: minted, duplicate, rejected, skipped or failed. */
+	public void drawingReceived(String result) {
+		this.drawingsReceived.add(1, Attributes.of(RESULT, result));
 	}
 
 	public void recordLockWait(String operation, long nanos) {
