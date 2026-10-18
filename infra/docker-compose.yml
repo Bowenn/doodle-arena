@@ -53,6 +53,9 @@ x-assets-env: &assets-env
   # to drawings, replays to MongoDB with assets' own user.
   KAFKA_BROKERS: kafka:9092
   S3_ENDPOINT: http://seaweedfs:8333
+  # Browsers load images from presigned URLs signed for this address: SeaweedFS's port published
+  # on the host (in AWS, the S3 endpoint itself).
+  S3_PUBLIC_ENDPOINT: http://localhost:8333
   S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
   S3_SECRET_KEY: ${S3_SECRET_KEY:?}
   MONGO_URL: mongodb://assets:${MONGO_ASSETS_PASSWORD:?}@mongo:27017/assets
@@ -345,6 +348,33 @@ services:
     healthcheck:
       # The poll loop touches this file every second, even while Kafka is down.
       test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/consumer-alive') > 30)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # Publishes the outbox (DrawingApproved, DrawingRejected) to assets.drawings.v1.
+  assets-relay:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: services/assets/Dockerfile
+    command: ["python", "manage.py", "relay_outbox"]
+    environment:
+      <<: [*app-env, *assets-env]
+      SERVICE_INSTANCE_ID: assets-relay-1
+      OTEL_SERVICE_NAME: assets
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-relay-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
+      assets-migrate:
+        condition: service_completed_successfully
+      kafka-topics:
+        condition: service_completed_successfully
+    healthcheck:
+      # The relay loop touches this file on every pass, even while Kafka is down.
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/relay-alive') > 30)"]
       interval: 10s
       timeout: 5s
       start_period: 20s
