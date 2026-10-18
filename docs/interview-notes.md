@@ -315,6 +315,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Be kind to a dependency that is down.** Every service retried a failed JWKS fetch after one second, forever. They now back off from 1 s to 30 s. An auth outage costs auth one fetch per 30 seconds per process instead of one per second, and recovery is still quick.
 - **Alert on what you own.** A webhook going `DEAD` almost always means a developer's server is down. Paging on the dead-letter count would hand our on-call to strangers, so test pings stay out of it entirely and the alerts watch our own delivery health instead.
 
+### Task 4.R1: Checkout outside the database transaction
+
+- **A network call inside a transaction borrows a connection for as long as the other side takes.** The checkout called Stripe inside the transaction that completes the `Idempotency-Key`, so each checkout held one of 10 pooled connections for up to about 10 seconds. A slow Stripe would have starved purchases and even the Stripe webhook. Now the claim commits, Stripe is called with nothing open, and one short transaction records the session and completes the key: the connection is held for about 7 ms, not 820.
+- **Exactly once still comes from the fence, not from the transaction.** If the slow request loses its claim (past the lease) and the retry takes over, the slow request's completion matches nothing, so its record rolls back. One session is recorded, and the orphan was never shown to the browser, so it can't be paid.
+- **Read the provider's idempotency rules, not just its API.** Stripe's API v1 replays a saved response for an idempotency key, a 500 included, for 24 hours. Deriving Stripe's key from ours alone would have made one Stripe hiccup fail every retry of that checkout for a day. Deriving it per claim keeps the Stripe client's own retries safe and lets a new attempt ask afresh.
+- **Test doubles must behave like the real thing where it matters.** stripe-mock can't be slow and doesn't replay keys, so the tests use a small stub that saves responses per key like Stripe and can hold requests. Each test was run against the old code to make sure it fails.
+- **Rejected:** a nested `REQUIRES_NEW` transaction, because the outer one still holds its connection; an async checkout through an outbox, because the browser needs the URL now; a semaphore around checkouts, because it limits the damage without fixing the cause.
+
 ## Stage 5: Production readiness
 
 ## Stage 6: Scale and depth

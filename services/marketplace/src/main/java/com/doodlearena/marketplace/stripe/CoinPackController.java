@@ -56,7 +56,10 @@ public class CoinPackController {
 		String user = token.getSubject();
 		return this.idempotency
 			.execute(user, key, "checkout", IdempotencyService.hash("POST", request.getRequestURI(), body),
-					ErrorBody.requestId(request), HttpStatus.OK, (claim) -> this.checkouts.start(user, pack, claim))
+					ErrorBody.requestId(request), HttpStatus.OK,
+					// Stripe is called with no transaction open; only the record is in the completing one.
+					(claim) -> this.checkouts.createSession(user, pack, claim),
+					(claim, checkout) -> this.checkouts.record(user, pack, checkout))
 			.toResponseEntity();
 	}
 

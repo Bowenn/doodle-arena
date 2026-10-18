@@ -20,17 +20,19 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.doodlearena.marketplace.api.ApiException;
 import com.doodlearena.marketplace.idempotency.Claim;
 import com.doodlearena.marketplace.stripe.StripeProperties.CoinPack;
 
 /**
- * Starts a coin-pack purchase (design doc, section 7.7): a Stripe Checkout Session with the pack's
- * price inline, and a row recording what was sold. Runs as the work of an idempotent request (ADR
- * 0012); Stripe gets an idempotency key derived from ours, so a retried request that reaches Stripe
- * twice still gets the same session.
+ * Starts a coin-pack purchase (design doc, section 7.7) in two steps of an idempotent request (ADR
+ * 0012): {@link #createSession} calls Stripe with no transaction open, so a slow Stripe holds no
+ * database connection; {@link #record} then stores what was sold, in the transaction that completes
+ * the key. Stripe gets an idempotency key derived from our claim, so the Stripe client's own
+ * network retry can't create a second session, while every fresh claim of our key (after a
+ * release or a takeover) asks Stripe afresh: Stripe replays a saved response, a 500 included, for
+ * 24 hours.
  */
 @Service
 public class CheckoutService {
@@ -62,9 +64,9 @@ public class CheckoutService {
 	public record Checkout(String sessionId, String checkoutUrl) {
 	}
 
-	@Transactional
+	/** The Stripe call. Runs outside any transaction (the caller holds no connection meanwhile). */
 	@SuppressWarnings("try") // the scope only has to be open while Stripe is called
-	public Checkout start(String userId, CoinPack pack, Claim claim) {
+	public Checkout createSession(String userId, CoinPack pack, Claim claim) {
 		Span span = this.tracer.spanBuilder("market.checkout")
 			.setAttribute("user.id", userId)
 			.setAttribute("coin_pack.id", pack.id())
@@ -105,17 +107,7 @@ public class CheckoutService {
 					.log("Stripe refused or failed the checkout");
 				throw new ApiException(HttpStatus.BAD_GATEWAY, "STRIPE_UNAVAILABLE", "Stripe couldn't start the checkout");
 			}
-			this.db.sql("""
-					INSERT INTO stripe_checkouts (session_id, user_id, pack_id, coins, amount_cents, currency)
-					VALUES (?, ?, ?, ?, ?, ?)""")
-				.params(session.getId(), userId, pack.id(), pack.coins(), pack.priceCents(), pack.currency())
-				.update();
 			span.setAttribute("stripe.session_id", session.getId());
-			log.atInfo()
-				.addKeyValue("user_id", userId)
-				.addKeyValue("pack_id", pack.id())
-				.addKeyValue("stripe_session_id", session.getId())
-				.log("checkout started");
 			return new Checkout(session.getId(), session.getUrl());
 		}
 		catch (RuntimeException ex) {
@@ -128,11 +120,36 @@ public class CheckoutService {
 		}
 	}
 
-	/** One Stripe idempotency key per user and our key; hashed so it says nothing about either. */
-	private static String stripeKey(Claim claim) {
+	/**
+	 * Records the session the webhook will credit. Runs inside the transaction that completes the
+	 * key: if the claim was taken over during the Stripe call, this insert rolls back with it, and
+	 * the session is never recorded. Its URL never reached the browser, so it can't be paid, and
+	 * Stripe expires it after 24 hours.
+	 */
+	public Checkout record(String userId, CoinPack pack, Checkout checkout) {
+		this.db.sql("""
+				INSERT INTO stripe_checkouts (session_id, user_id, pack_id, coins, amount_cents, currency)
+				VALUES (?, ?, ?, ?, ?, ?)""")
+			.params(checkout.sessionId(), userId, pack.id(), pack.coins(), pack.priceCents(), pack.currency())
+			.update();
+		log.atInfo()
+			.addKeyValue("user_id", userId)
+			.addKeyValue("pack_id", pack.id())
+			.addKeyValue("stripe_session_id", checkout.sessionId())
+			.log("checkout started");
+		return checkout;
+	}
+
+	/**
+	 * One Stripe idempotency key per claim of our key (user, key and claim token), hashed so it says
+	 * nothing about them. Per claim, not per key: Stripe replays a saved 500 for 24 hours, so a key
+	 * derived from ours alone would fail every retry of that checkout for a day.
+	 */
+	static String stripeKey(Claim claim) {
 		try {
 			MessageDigest digest = MessageDigest.getInstance("SHA-256");
-			byte[] hash = digest.digest((claim.userId() + "\n" + claim.key()).getBytes(StandardCharsets.UTF_8));
+			byte[] hash = digest
+				.digest((claim.userId() + "\n" + claim.key() + "\n" + claim.token()).getBytes(StandardCharsets.UTF_8));
 			return "checkout-" + HexFormat.of().formatHex(hash);
 		}
 		catch (NoSuchAlgorithmException ex) {
