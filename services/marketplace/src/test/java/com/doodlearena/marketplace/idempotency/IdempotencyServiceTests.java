@@ -134,6 +134,10 @@ class IdempotencyServiceTests {
 	@Test
 	void takeoverFencesOutTheSlowRequest() throws Exception {
 		AccountRef user = this.fixtures.newUser();
+		// The slow request moves coins between two other users, so it holds no lock the takeover
+		// needs (paying from the rewards account would lock that account's balance row).
+		AccountRef slowPayer = this.fixtures.newUserWith(10);
+		AccountRef slowPayee = this.fixtures.newUser();
 		String key = UUID.randomUUID().toString();
 		CountDownLatch working = new CountDownLatch(1);
 		CountDownLatch resume = new CountDownLatch(1);
@@ -141,7 +145,8 @@ class IdempotencyServiceTests {
 		try (ExecutorService pool = Executors.newSingleThreadExecutor()) {
 			Future<IdempotentResponse> slow = pool.submit(() -> this.idempotency.execute(user.ownerId(), key, "test",
 					HASH, "req-slow", HttpStatus.CREATED, (claim) -> {
-						Object body = reward(user);
+						Object body = this.ledger.post(TransactionType.SALE, "test:" + UUID.randomUUID(), Map.of(),
+								List.of(debit(slowPayer, 10), credit(slowPayee, 10)));
 						working.countDown();
 						await(resume);
 						return body;
@@ -160,6 +165,9 @@ class IdempotencyServiceTests {
 						(ex) -> assertThat(ex.code()).isEqualTo("IDEMPOTENCY_KEY_IN_PROGRESS"));
 		}
 		assertThat(this.fixtures.balance(user)).isEqualTo(10);
+		// The slow request's payment rolled back with its lost claim.
+		assertThat(this.fixtures.balance(slowPayee)).isZero();
+		assertThat(this.fixtures.balance(slowPayer)).isEqualTo(10);
 		assertThat(pay(user, key, HASH).replayed()).isTrue();
 	}
 
