@@ -251,6 +251,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Remember the answer, not just success.** A lost race (409) or insufficient funds (422) is stored and replayed like a 200, byte for byte from a `TEXT` column (JSONB reformats it), so the same key always means the same outcome. A first version of the fencing test took 30 seconds: both requests paid from the rewards system account, and the slow one held its balance row. That is a real hot spot for 4.4's rewards.
 - **The outbox, honestly at least once.** The relay locks rows `FOR UPDATE SKIP LOCKED`, sends, and marks only acknowledged rows. With the broker paused, a send that the relay had given up on still arrived later, and the next pass sent it again: two copies with one `event_id`. That is why every consumer dedupes. Live, Kafka stopped for 50 s didn't stop a listing; the lag gauge rose to 42 s and drained 5 s after Kafka came back.
 
+### Task 4.4: Rewards
+
+- **The natural key is the dedupe.** The game server's outbox delivers `MatchFinished` at least once with a fixed `event_id`, but the marketplace dedupes on the match itself: one ledger transaction per match with the idempotency key `reward:<match_id>`. On the local topic, 3 of 55 records were the same match delivered again, and they paid nothing; resetting the consumer group and replaying all 56 changed not one coin.
+- **One transaction per match, not per player.** The design doc first said one key per player. One per match pays a match all or nothing and locks the `rewards_issuance` balance row once instead of once per player. That row is a hot spot: every reward and every Stripe credit locks it, which a 4.3 test had already shown when two requests waited 30 s on it. The cost: one bad player id refuses the whole match (counted and logged).
+- **The same event, many consumers, one trace.** `MatchFinished` is read in parallel by the lobby (leaderboard) and the marketplace (coins), each in its own consumer group, and the trace shows both under the game server's `game.match.end`. The reward committed about 60 ms after the match ended, and its `CoinsCredited` events went out through the outbox under the same trace.
+- **A security review made the contract stricter.** Kafka doesn't authenticate producers yet, so anything on the internal network could publish a `MatchFinished` and mint coins. Broker ACLs are infrastructure work for later; a cheap bound now: a room holds at most 8 players, so more results than that is refused as a contract violation.
+- **How it fails, and a rule to revisit.** A forged but well-formed match still pays up to 8 × 30 coins until Kafka has ACLs. And the data showed a farming gap: when nobody scores, everyone ties for first and gets 30. A rule such as "a score of 0 earns only the participation reward" would close it; it's Bowen's call.
+
 ## Stage 5: Production readiness
 
 ## Stage 6: Scale and depth

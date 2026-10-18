@@ -9,6 +9,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.ExponentialBackOff;
 
+import com.doodlearena.marketplace.reward.MatchEventsListener;
 import com.doodlearena.marketplace.telemetry.MarketMetrics;
 
 /**
@@ -37,7 +38,12 @@ public class KafkaConfig {
 				.addKeyValue("offset", record.offset())
 				.setCause(ex)
 				.log("record refused by the database; skipped");
-			metrics.drawingReceived("failed");
+			if (record.topic().equals(MatchEventsListener.TOPIC)) {
+				metrics.matchReceived("failed");
+			}
+			else {
+				metrics.drawingReceived("failed");
+			}
 		}, backOff);
 		// Classified by the first cause that is listed: Spring Kafka's own list (records it can't
 		// convert to the listener's arguments) plus this one; everything else is retried.

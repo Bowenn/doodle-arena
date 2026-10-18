@@ -7,14 +7,10 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.test.annotation.DirtiesContext;
 
-import com.doodlearena.marketplace.support.KafkaTestConfiguration;
-import com.doodlearena.marketplace.support.PostgresTestConfiguration;
+import com.doodlearena.marketplace.support.KafkaListenerTestSupport;
 import com.doodlearena.marketplace.support.TestEvents;
 import com.doodlearena.proto.doodle.events.v1.DrawingApproved;
 import com.doodlearena.proto.doodle.events.v1.DrawingEvent;
@@ -27,15 +23,7 @@ import static org.awaitility.Awaitility.await;
  * The consumer against a real broker and database. One partition, so records are handled in the
  * order they were sent: when a later record is done, every earlier one was handled too.
  */
-@SpringBootTest(properties = {
-		"spring.kafka.listener.auto-startup=true",
-		"spring.kafka.producer.value-serializer=org.apache.kafka.common.serialization.ByteArraySerializer",
-		// Fail fast while Postgres is paused, so the error handler's retries are what the test sees.
-		"spring.datasource.hikari.connection-timeout=2000",
-		"spring.datasource.hikari.data-source-properties.socketTimeout=3" })
-@Import({ PostgresTestConfiguration.class, KafkaTestConfiguration.class })
-@DirtiesContext
-class DrawingEventsListenerTests {
+class DrawingEventsListenerTests extends KafkaListenerTestSupport {
 
 	private static final Duration WAIT = Duration.ofSeconds(60);
 
