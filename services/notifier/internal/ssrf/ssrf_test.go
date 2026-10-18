@@ -18,6 +18,8 @@ func TestBlockedRanges(t *testing.T) {
 		"100.64.0.1": true, "::1": true, "::": true, "fc00::1": true, "fd12:3456::1": true,
 		"fe80::1": true, "::ffff:10.0.0.1": true, "::ffff:169.254.169.254": true,
 		"64:ff9b::a00:1": true, "224.0.0.1": true, "255.255.255.255": true,
+		// A zone must not hide a link-local or loopback address.
+		"fe80::1%eth0": true, "fe80::1%25": true, "::1%lo0": true,
 		// Public addresses go through.
 		"8.8.8.8": false, "1.1.1.1": false, "172.32.0.1": false, "2606:4700::1111": false,
 		"::ffff:8.8.8.8": false,
@@ -47,6 +49,7 @@ func TestCheckURL(t *testing.T) {
 		"https://user:pass@example.com/", "https://example.com/#frag",
 		"https://127.0.0.1/", "https://[::1]/", "https://169.254.169.254/latest/meta-data",
 		"https://10.0.0.5:8080/", "https://localhost/", "https://api.localhost/",
+		"https://[fe80::1%25eth0]/", "https://[fe80::1%25en0]:8443/x",
 		"https://example.com/" + strings.Repeat("a", MaxURLLength),
 		"mailto:dev@example.com",
 	}

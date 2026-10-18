@@ -56,6 +56,8 @@ func (p *Policy) CheckURL(raw string) (*url.URL, error) {
 	}
 	host := strings.ToLower(u.Hostname())
 	switch {
+	case strings.Contains(host, "%"):
+		return nil, fmt.Errorf("%w: the host must not contain a zone", ErrBlocked)
 	case u.User != nil:
 		return nil, fmt.Errorf("%w: the URL must not contain credentials", ErrBlocked)
 	case u.Fragment != "":
@@ -103,9 +105,11 @@ var blockedPrefixes = func() []netip.Prefix {
 }()
 
 // Blocked reports whether addr is in a range webhooks must not reach. IPv4-mapped IPv6
-// addresses (::ffff:10.0.0.1) are judged as the IPv4 address they carry.
+// addresses (::ffff:10.0.0.1) are judged as the IPv4 address they carry, and an IPv6 zone
+// (fe80::1%eth0) is dropped first: netip.Prefix.Contains is false for any zoned address, which
+// would otherwise let a zoned link-local address through.
 func Blocked(addr netip.Addr) bool {
-	addr = addr.Unmap()
+	addr = addr.WithZone("").Unmap()
 	for _, p := range blockedPrefixes {
 		if p.Contains(addr) {
 			return true
@@ -130,6 +134,9 @@ func (p *Policy) DialContext(ctx context.Context, network, address string) (net.
 	}
 	allowed := p.allowed[strings.ToLower(host)]
 	for _, a := range addrs {
+		if a.Zone() != "" {
+			return nil, fmt.Errorf("%w: %s resolves to a zoned address", ErrBlocked, host)
+		}
 		if Blocked(a) && !allowed {
 			return nil, fmt.Errorf("%w: %s resolves to %s", ErrBlocked, host, a.Unmap())
 		}
