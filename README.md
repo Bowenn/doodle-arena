@@ -10,16 +10,17 @@ It's a portfolio project for backend internship interviews, so depth, correctnes
 
 ## Status
 
-**Milestones M1 (foundations) and M2 (game core) are done.** Today the stack gives you:
+**Milestones M1 (foundations), M2 (game core) and M3 (drawing lifecycle) are done.** Today the stack gives you:
 
 - **A playable game:** rooms and quick play in the lobby, live rounds over WebSockets with an authoritative game server, two drawers on one canvas from four players, hints, scoring and a weekly leaderboard.
 - **Reliability:** one owner per room with a lease and fencing tokens, resume without missing events, and failover to the other game server within about 6.5 s of a kill (the [evidence log](docs/roadmap.md#evidence-log) has the measurements).
 - **Every service** runs in Docker Compose behind one Nginx gateway, and CI checks each one (lint, tests, Docker build).
 - **Google sign-in** works: RS256 access tokens with JWKS, and rotating refresh tokens with reuse detection.
 - **Contracts:** shared protobuf contracts for Kafka events and gRPC, with generated code for Go, Java and Python.
+- **Drawings:** every finished round becomes a drawing, rendered, stored by content hash, moderated by the AI stub (or a moderator in the Django admin at `/admin/`), announced on Kafka, and shown in the web app's gallery with a replay.
 - **Telemetry:** traces, metrics and logs from every service in Grafana, with logs linked to their traces.
 
-The drawing pipeline and the marketplace are still skeletons. They're built in Stages 3–4 of the [roadmap](docs/roadmap.md).
+The marketplace is still a skeleton; it's built in Stage 4 of the [roadmap](docs/roadmap.md).
 
 ## Architecture
 

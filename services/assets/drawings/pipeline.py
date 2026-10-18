@@ -25,8 +25,9 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import timedelta
 
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 from opentelemetry import metrics, trace
 
@@ -59,13 +60,16 @@ moderation_results = _meter.create_counter(
 )
 
 MAX_MODERATION_ATTEMPTS = 4
+# Longer than one call can take (the thumbnail read plus the AI's timeout), so a live claim is
+# never taken over, and short enough that a crashed task's drawing is soon free again.
+MODERATION_CLAIM = timedelta(seconds=60)
 
 
 @contextmanager
 def step(name: str, drawing: Drawing) -> Iterator[None]:
     start = time.monotonic()
     with tracer.start_as_current_span(
-        f"drawing.{name}", attributes={"drawing.id": str(drawing.id), "pipeline.step": name}
+        f"assets.drawing.{name}", attributes={"drawing.id": str(drawing.id), "pipeline.step": name}
     ):
         try:
             yield
@@ -91,7 +95,7 @@ def prepare(drawing_id: uuid.UUID) -> str:
     }
 
     with tracer.start_as_current_span(
-        "drawing.prepare", attributes={"drawing.id": str(drawing.id)}
+        "assets.drawing.prepare", attributes={"drawing.id": str(drawing.id)}
     ):
         try:
             replay = _fetch(drawing) if not drawing.replay_id else None
@@ -168,10 +172,27 @@ def moderate(drawing_id: uuid.UUID) -> str:
     drawing = Drawing.objects.filter(pk=drawing_id).first()
     if drawing is None or drawing.status != Status.PROCESSING or not drawing.sha256:
         return "skipped"  # decided already, failed, in the queue, or not prepared yet
-    # Count the attempt before making it, on the row, so a crash mid-call still spends it.
-    Drawing.objects.filter(pk=drawing.pk, status=Status.PROCESSING).update(
-        moderation_attempts=F("moderation_attempts") + 1, updated_at=timezone.now()
+    # Claim the drawing and count the attempt in one conditional UPDATE: of two tasks, one gets
+    # it and the other stops here. Counted before the call, so a crash mid-call still spends it.
+    now = timezone.now()
+    claimed = (
+        Drawing.objects.filter(pk=drawing.pk, status=Status.PROCESSING)
+        .filter(Q(moderation_claimed_until__isnull=True) | Q(moderation_claimed_until__lt=now))
+        .update(
+            moderation_attempts=F("moderation_attempts") + 1,
+            moderation_claimed_until=now + MODERATION_CLAIM,
+            updated_at=now,
+        )
     )
+    if not claimed:
+        return "skipped"  # another task is asking the AI service right now
+    try:
+        return _moderate_claimed(drawing)
+    finally:
+        Drawing.objects.filter(pk=drawing.pk).update(moderation_claimed_until=None)
+
+
+def _moderate_claimed(drawing: Drawing) -> str:
     drawing.refresh_from_db(fields=["moderation_attempts"])
     attempt = drawing.moderation_attempts
     fields = {"drawing_id": str(drawing.id), "match_id": drawing.match_id, "attempt": attempt}

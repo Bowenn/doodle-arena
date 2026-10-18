@@ -159,6 +159,8 @@ CELERY_WORKER_REDIRECT_STDOUTS = False
 # Celery beat (one process, assets-beat) runs the recovery sweeper (drawings/tasks.py).
 CELERY_BEAT_SCHEDULE = {
     "requeue-stale-drawings": {"task": "assets.requeue_stale_drawings", "schedule": 60.0},
+    # Admin sessions expire after an hour but stay in the table until deleted.
+    "clear-expired-sessions": {"task": "assets.clear_expired_sessions", "schedule": 3600.0},
 }
 
 KAFKA_BROKERS = env.kafka_brokers

@@ -398,6 +398,14 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    healthcheck:
+      # Beat rewrites its schedule store (a SQLite WAL) whenever it sends the sweep, once a
+      # minute; a stalled beat stops touching it.
+      test: ["CMD", "python", "-c", "import glob, os, sys, time; sys.exit(time.time() - max(os.path.getmtime(f) for f in glob.glob('/tmp/celerybeat-schedule*')) > 180)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
 
   # ----------------------------------------------------------- Java services
 
@@ -507,7 +515,10 @@ services:
     ports:
       - "127.0.0.1:27017:27017"
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      # Through the container's network address, not localhost: on a new volume the image first
+      # runs a temporary server on 127.0.0.1 to create the root user, and a localhost ping would
+      # pass about two seconds before the real server accepts other containers.
+      test: ["CMD-SHELL", "mongosh --quiet --host \"$$(hostname -i)\" --eval 'db.adminCommand(\"ping\").ok'"]
       interval: 3s
       timeout: 5s
       retries: 30

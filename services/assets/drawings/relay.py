@@ -94,7 +94,6 @@ def publish_batch(producer: Producer, limit: int = BATCH) -> tuple[int, int]:
         if not rows:
             return 0, 0
         confirmed: list[Any] = []
-        failed = 0
 
         for row in rows:
             parent = propagate.extract({"traceparent": row.traceparent} if row.traceparent else {})
@@ -113,11 +112,9 @@ def publish_batch(producer: Producer, limit: int = BATCH) -> tuple[int, int]:
                 propagate.inject(headers)  # the consumer continues this span's trace
 
                 def on_delivery(err: KafkaError | None, msg: Message, row_id: Any = row.id) -> None:
-                    nonlocal failed
                     if err is None:
                         confirmed.append(row_id)
                     else:
-                        failed += 1
                         log.warning(
                             "outbox event not confirmed",
                             extra={"event_id": str(row_id), "error": str(err)},
@@ -130,18 +127,20 @@ def publish_batch(producer: Producer, limit: int = BATCH) -> tuple[int, int]:
                     headers=[(k, v.encode()) for k, v in headers.items()],
                     on_delivery=on_delivery,
                 )
-        remaining = producer.flush(FLUSH_TIMEOUT)
-        if remaining:
-            failed += remaining  # not acknowledged in time; their rows are retried
-
-        if confirmed:
-            OutboxEvent.objects.filter(pk__in=confirmed).update(published_at=timezone.now())
-    if confirmed:
-        published.add(len(confirmed), {"result": "success"})
-        log.info("outbox events published", extra={"count": len(confirmed)})
+        producer.flush(FLUSH_TIMEOUT)
+        # What Kafka confirmed by now; every other row (refused, or still unanswered: flush's own
+        # count also includes librdkafka's internal requests) stays unpublished and is retried. A
+        # confirmation that arrives later only means that row goes out twice.
+        done = list(confirmed)
+        failed = len(rows) - len(done)
+        if done:
+            OutboxEvent.objects.filter(pk__in=done).update(published_at=timezone.now())
+    if done:
+        published.add(len(done), {"result": "success"})
+        log.info("outbox events published", extra={"count": len(done)})
     if failed:
         published.add(failed, {"result": "failed"})
-    return len(confirmed), failed
+    return len(done), failed
 
 
 def purge_published(older_than: timedelta = KEEP_PUBLISHED) -> int:

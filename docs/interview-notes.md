@@ -217,6 +217,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **The timeline is a pure function; only the painter touches the canvas.** `timeline(replay)` returns sorted events, `eventsUntil` is a binary search, and the painter draws only the new segments (repainting only when the replay goes back). That made the timing logic testable without a canvas, and the player testable with fake timers (1x, 4x, pause, replay from the end).
 - **One origin is a security property.** Checking a branch on a second dev server, auth refused the refresh because the Origin was `localhost:5174`, which is the CSRF defence doing its job. The local proxy presents the gateway's origin instead; in production there is only the gateway. Presigned URLs keep image bytes off the app entirely, so the gallery's cost is one small JSON request per page.
 
+### Stage 3 review fixes
+
+- **Health checks must test what the dependants need.** Mongo's check pinged localhost, and on a new volume the image's temporary init server answers there about 2 s before the real server accepts other containers, so `mongo-users` sometimes got `ECONNREFUSED`, and it failed CI once. The check now goes through the container's network address, and the job retries anyway. Same lesson as the test fixture in 3.2: "up" isn't "ready for me".
+- **Telemetry identity is per process, not per container.** gunicorn's workers and Celery's pool processes each export their own cumulative counters, and under one `service.instance.id` Prometheus saw one series that reset hundreds of times, so every `rate()` was wrong. A per-process suffix fixed it. The check that found it was simple: `resets()` should be 0 on a counter that never restarts.
+- **A test client that skips a check proves nothing about it.** Django's test client turns CSRF off, so "POST gives 405" passed while real requests got a 403 CSRF page. The API now declares what it is: token-authenticated with no cookies, so it's CSRF-exempt, with JSON errors for every status. Its test uses a CSRF-enforcing client.
+- **Count what you can observe, not two overlapping numbers.** The relay added librdkafka's `flush()` remainder (which includes internal requests) to the failed delivery reports. The fix counts the batch minus what Kafka confirmed. It made a flaky test (2 in 5) deterministic and the failure metric honest.
+- **Close the loop in CI.** The stack job only checked health endpoints, so nothing in CI ever ran a round through the pipeline, and the runner's small disk (the SeaweedFS volume bug) went unseen there. `make pipeline-check` now sends one `RoundFinished` and waits for the approved, stored, published drawing.
+
 ## Stage 4: Economy
 
 ## Stage 5: Production readiness

@@ -68,6 +68,10 @@ class Drawing(models.Model):
     status = models.CharField(max_length=16, choices=Status, default=Status.PROCESSING)
     # Moderation calls made so far (task 3.3), for the retry budget and the admin.
     moderation_attempts = models.PositiveSmallIntegerField(default=0)
+    # Set while one task is calling the AI service about this drawing, so a duplicate task
+    # (a redelivery, the sweeper) doesn't call too and spend the budget twice. It expires on its
+    # own if that task dies.
+    moderation_claimed_until = models.DateTimeField(null=True, blank=True)
     decided_by = models.CharField(max_length=16, choices=DecidedBy, blank=True, default="")
     # The moderator who decided, when decided_by is "moderator". Users are never deleted.
     moderator = models.ForeignKey(

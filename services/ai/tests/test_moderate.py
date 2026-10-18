@@ -109,3 +109,32 @@ def test_a_bad_mode_is_refused() -> None:
         json={"mode": "chaos", "delay_ms": 0, "failure_rate": 2},
     )
     assert resp.status_code == 422
+
+
+def test_a_slow_answer_stops_when_the_caller_leaves() -> None:
+    import asyncio
+
+    from app.moderation import Abandoned
+
+    moderator = StubModerator(Settings(moderation_delay_ms=5000))
+    checks = 0
+
+    async def disconnected() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks > 3  # the caller hangs up after about 150 ms
+
+    start = time.monotonic()
+    with pytest.raises(Abandoned):
+        asyncio.run(moderator.decide(PNG, disconnected))
+    assert time.monotonic() - start < 1.0  # not the full 5 s
+
+
+def test_a_slow_answer_still_arrives_for_a_patient_caller() -> None:
+    import asyncio
+
+    moderator = StubModerator(Settings(moderation_delay_ms=200))
+
+    verdict = asyncio.run(moderator.decide(PNG))
+
+    assert verdict.decision == "approve"

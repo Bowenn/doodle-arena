@@ -6,8 +6,20 @@ const password = process.env.MONGO_ASSETS_PASSWORD;
 if (!password || !process.env.MONGO_ROOT_PASSWORD) {
   throw new Error("MONGO_ASSETS_PASSWORD and MONGO_ROOT_PASSWORD must be set");
 }
-const conn = new Mongo("mongodb://mongo:27017");
-conn.getDB("admin").auth("root", process.env.MONGO_ROOT_PASSWORD);
+// The health check should only pass once the real server listens, but retry anyway: a refused
+// connection here would fail the whole `make up`.
+let conn;
+for (let attempt = 1; ; attempt++) {
+  try {
+    conn = new Mongo("mongodb://mongo:27017");
+    conn.getDB("admin").auth("root", process.env.MONGO_ROOT_PASSWORD);
+    break;
+  } catch (e) {
+    if (attempt >= 30) throw e;
+    print(`mongo not ready (${e.message}); retrying`);
+    sleep(1000);
+  }
+}
 const assets = conn.getDB("assets");
 const roles = [{ role: "readWrite", db: "assets" }];
 if (assets.getUser("assets")) {

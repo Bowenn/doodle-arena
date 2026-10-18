@@ -44,10 +44,24 @@ def start_pool_process_telemetry(**kwargs: Any) -> None:
     global _shutdown_telemetry
     from config import jobs, telemetry
 
-    _shutdown_telemetry = telemetry.setup_worker_telemetry()
+    # The pool index (0, 1, ...) is reused when a pool process is replaced, so ids stay stable.
+    _shutdown_telemetry = telemetry.setup_worker_telemetry(
+        process=f"p{current_process_index(base=0)}"
+    )
     # One process per worker reports the queue gauge, so the series isn't written twice.
     if telemetry.enabled() and current_process_index(base=0) == 0:
         jobs.register_queue_age_gauge(app.conf.broker_url, [app.conf.task_default_queue])
+
+
+@signals.beat_init.connect
+def start_beat_telemetry(**kwargs: Any) -> None:
+    """Beat is a single process: it sends the sweeper's task, with the trace context, and logs
+    over OTLP like the rest of the service."""
+    import atexit
+
+    from config import telemetry
+
+    atexit.register(telemetry.setup_worker_telemetry())
 
 
 @signals.worker_process_shutdown.connect

@@ -3,10 +3,10 @@
 
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | proto"
 
 up:
 	@./scripts/dev-up.sh
@@ -32,6 +32,9 @@ smoke:
 
 telemetry-check:
 	@./scripts/telemetry-check.sh
+
+pipeline-check:
+	@./scripts/pipeline-check.sh
 
 proto:
 	@./scripts/proto.sh

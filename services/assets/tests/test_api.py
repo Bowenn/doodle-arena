@@ -142,8 +142,37 @@ def test_bad_queries_are_refused(client: Client, as_user: Any, query: str) -> No
     assert resp.json()["error"]["code"] == "INVALID_REQUEST"
 
 
-def test_a_post_is_not_allowed(client: Client, as_user: Any) -> None:
-    assert client.post(API, headers=as_user("u_x")).status_code == 405
+def test_a_post_is_not_allowed(as_user: Any) -> None:
+    # A client that enforces CSRF like a browser does: the API answers 405 in JSON, not with
+    # Django's CSRF page, because it never relies on cookies.
+    resp = Client(enforce_csrf_checks=True).post(API, headers=as_user("u_x"))
+
+    assert resp.status_code == 405
+    assert resp.json()["error"]["code"] == "METHOD_NOT_ALLOWED"
+    assert resp["Allow"] == "GET, HEAD"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/assets/nothing-here",
+        f"{API}/not-a-uuid",
+        f"{API}/01a14d4c-3700-714c-97af-6822304866ec/x",
+    ],
+)
+def test_unknown_api_paths_answer_in_json(client: Client, path: str) -> None:
+    resp = client.get(path)
+
+    assert resp.status_code == 404
+    assert resp["Content-Type"] == "application/json"
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_the_admin_keeps_djangos_404_page(client: Client) -> None:
+    resp = client.get("/admin/nothing-here/")
+
+    assert resp.status_code in (302, 404)  # signed out: the sign-in redirect comes first
+    assert resp["Content-Type"].startswith("text/html")
 
 
 @pytest.mark.usefixtures("stores")
@@ -172,3 +201,37 @@ def test_the_replay_and_the_presigned_images_load(
     assert replay["schema_version"] == 1
     assert replay["strokes"][0]["points"][0] == [1000, 1000, 0]
     assert "_id" not in replay
+
+
+def test_image_urls_stay_the_same_for_a_while_so_browsers_can_cache_them(
+    client: Client, as_user: Any, make_drawing: Any
+) -> None:
+    storage.reset_clients_for_tests()
+    d = approved(make_drawing)
+
+    first = client.get(f"{API}/{d.id}", headers=as_user("u_a")).json()
+    again = client.get(f"{API}/{d.id}", headers=as_user("u_b")).json()
+
+    assert (again["image_url"], again["thumb_url"]) == (first["image_url"], first["thumb_url"])
+
+
+def test_presigned_urls_are_reused_then_signed_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    signed: list[str] = []
+
+    class Signer:
+        def generate_presigned_url(self, op: str, Params: dict[str, str], ExpiresIn: int) -> str:
+            signed.append(Params["Key"])
+            return f"url-{len(signed)}"
+
+    storage.reset_clients_for_tests()
+    monkeypatch.setattr(storage, "_client", lambda endpoint: Signer())
+
+    assert storage.presigned_url("k") == "url-1"
+    assert storage.presigned_url("k") == "url-1"
+    assert storage.presigned_url("other") == "url-2"
+
+    later = time.monotonic() + storage.PRESIGN_REUSE_SECONDS + 1
+    monkeypatch.setattr("drawings.storage.time.monotonic", lambda: later)
+    assert storage.presigned_url("k") == "url-3"  # still at least 5 minutes of validity each

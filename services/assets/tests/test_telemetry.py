@@ -35,6 +35,23 @@ def test_setup_without_an_endpoint_is_a_no_op(monkeypatch: pytest.MonkeyPatch) -
     assert settings.LOGGING["root"]["handlers"] == ["stdout"]
 
 
+def test_each_process_gets_its_own_instance_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "service.instance.id=assets-worker-1,deployment.environment=local",
+    )
+    res = telemetry.resource("1.2.3", "hostname")
+
+    assert (
+        telemetry.process_resource(res, "p0").attributes["service.instance.id"]
+        == "assets-worker-1-p0"
+    )
+    assert (
+        telemetry.process_resource(res, "").attributes["service.instance.id"] == "assets-worker-1"
+    )
+    assert telemetry.process_resource(res, "p1").attributes["deployment.environment"] == "local"
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -101,7 +118,7 @@ def test_gunicorn_workers_export_over_otlp() -> None:
         resource = collector.resources()[0]
         assert resource["service.name"] == "assets"
         assert resource["service.version"] == "1.2.3"
-        assert resource["service.instance.id"] == "assets-test"
+        assert resource["service.instance.id"] == "assets-test-w1"  # one id per gunicorn worker
         assert resource["deployment.environment"] == "test"
 
         spans = collector.spans()

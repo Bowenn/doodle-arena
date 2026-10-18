@@ -89,7 +89,7 @@ def sso(request: HttpRequest) -> HttpResponse:
         # A page on another origin can't read this response, so only the web app gets the token.
         return JsonResponse({"csrf_token": get_token(request)})
 
-    with tracer.start_as_current_span("admin.sso") as span:
+    with tracer.start_as_current_span("assets.admin.sso") as span:
         token = bearer_token(request.headers.get("Authorization", ""))
         if token is None:
             sign_ins.add(1, {"result": "unauthenticated"})

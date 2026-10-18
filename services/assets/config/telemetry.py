@@ -61,27 +61,37 @@ def resource(version: str, instance_id: str) -> Resource:
     return defaults.merge(OTELResourceDetector().detect())
 
 
-def setup_telemetry() -> Callable[[], None]:
+def process_resource(res: Resource, process: str) -> Resource:
+    """One instance per process. gunicorn's workers and Celery's pool processes share the
+    container's id; each exports its own cumulative counters, and under one id Prometheus sees
+    them as a single series that keeps resetting. So `process` ("w1", "p0") is appended."""
+    if not process:
+        return res
+    base = res.attributes.get("service.instance.id", "")
+    return res.merge(Resource({"service.instance.id": f"{base}-{process}"}))
+
+
+def setup_telemetry(process: str = "") -> Callable[[], None]:
     """For gunicorn workers: installs the global providers and instruments Django, psycopg and
     Celery (which puts the trace context into the tasks it sends). Must run before Django loads
     the WSGI app, because the instrumentation adds a middleware. Returns a function that flushes
     and stops the exporters; call it on shutdown."""
     if not enabled():
         return lambda: None
-    shutdown = _install_providers()
+    shutdown = _install_providers(process)
     DjangoInstrumentor().instrument(excluded_urls=EXCLUDED_URLS)
     PsycopgInstrumentor().instrument()
     CeleryInstrumentor().instrument()  # type: ignore[no-untyped-call]
     return shutdown
 
 
-def setup_worker_telemetry() -> Callable[[], None]:
+def setup_worker_telemetry(process: str = "") -> Callable[[], None]:
     """For Celery pool processes, beat and the round consumer: installs the global providers and
     instruments Celery (a span per task, continuing the trace of whoever sent it), psycopg,
     pymongo, botocore (S3) and httpx (the AI service)."""
     if not enabled():
         return lambda: None
-    shutdown = _install_providers()
+    shutdown = _install_providers(process)
     PsycopgInstrumentor().instrument()
     CeleryInstrumentor().instrument()  # type: ignore[no-untyped-call]
     PymongoInstrumentor().instrument()
@@ -90,13 +100,13 @@ def setup_worker_telemetry() -> Callable[[], None]:
     return shutdown
 
 
-def _install_providers() -> Callable[[], None]:
+def _install_providers(process: str) -> Callable[[], None]:
     # The instrumentation reads settings.MIDDLEWARE; without this it would configure empty
     # settings. wsgi.py sets the same default.
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     from config.settings import env
 
-    res = resource(env.service_version, env.service_instance_id)
+    res = process_resource(resource(env.service_version, env.service_instance_id), process)
     # Exporters read the endpoint, headers and timeouts from OTEL_EXPORTER_OTLP_*; the metric
     # reader reads OTEL_METRIC_EXPORT_INTERVAL. Shutdown is explicit, not atexit.
     tracer_provider = TracerProvider(resource=res, shutdown_on_exit=False)

@@ -65,7 +65,7 @@ def decide(
         raise ValueError("a moderator decision names the moderator, and only it does")
     status = Status.APPROVED if approve else Status.REJECTED
     with tracer.start_as_current_span(
-        "drawing.decide", attributes={"drawing.id": str(drawing_id), "decision.by": by.value}
+        "assets.drawing.decide", attributes={"drawing.id": str(drawing_id), "decision.by": by.value}
     ) as span:
         now = timezone.now()
         allowed = Drawing.objects.filter(pk=drawing_id, status__in=_DECIDE_FROM[by])
