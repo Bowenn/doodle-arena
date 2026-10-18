@@ -210,6 +210,13 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Presigned URLs keep bytes off the app servers.** The API hands out 15-minute GET URLs signed with SigV4, so images go from storage to the browser, which is how S3 works in AWS. The signature covers the host, so the URL must be signed for the address the browser uses (`localhost:8333`), not the internal one. The live check caught exactly that: the setting had landed in the wrong compose anchor.
 - **404, not 403, for what you can't see.** A drawing that isn't approved exists only for its authors; everyone else gets the same 404 as for an id that never existed, so ids leak nothing. Pagination is keyset on the UUIDv7 primary key (`WHERE id < cursor ORDER BY id DESC`), with a partial index on approved drawings, so page 1,000 costs the same as page 1.
 
+### 3.5 Web gallery
+
+- **Reconstructing time from what the server recorded.** The log has each stroke's `server_received_ms` (when the last batch arrived, by the server's clock) and per-point `t_ms` (client clock, since the stroke began). So a stroke starts at receive time minus its duration, and its points land at their offsets from there. Server time orders and spaces the strokes, so two drawers interleave correctly; client time only paces points within a stroke, which matches the rule that client clocks never decide anything. A fast client clock can't place a stroke before the round, because the start is clamped at 0.
+- **What the data can't tell you, don't fake.** The log records that a stroke was undone, not when, so the replay leaves undone strokes out rather than invent an undo moment, and it ends on exactly the image that was moderated and minted. Long pauses are squeezed to one second and the leading wait is dropped, a choice about the viewer's experience that doesn't change the order of anything.
+- **The timeline is a pure function; only the painter touches the canvas.** `timeline(replay)` returns sorted events, `eventsUntil` is a binary search, and the painter draws only the new segments (repainting only when the replay goes back). That made the timing logic testable without a canvas, and the player testable with fake timers (1x, 4x, pause, replay from the end).
+- **One origin is a security property.** Checking a branch on a second dev server, auth refused the refresh because the Origin was `localhost:5174`, which is the CSRF defence doing its job. The local proxy presents the gateway's origin instead; in production there is only the gateway. Presigned URLs keep image bytes off the app entirely, so the gallery's cost is one small JSON request per page.
+
 ## Stage 4: Economy
 
 ## Stage 5: Production readiness

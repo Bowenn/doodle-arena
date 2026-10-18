@@ -141,4 +141,13 @@ describe('App', () => {
     expect(await screen.findByText(/Logged in as Ada Lovelace/)).toBeTruthy()
     expect(screen.queryByRole('link', { name: 'Moderate' })).toBeNull()
   })
+  it('opens the drawing gallery from the lobby', async () => {
+    signedIn()
+
+    render(<App />)
+    fireEvent.click(await screen.findByRole('link', { name: 'Drawing gallery' }))
+
+    expect(await screen.findByRole('heading', { name: 'Drawing gallery' })).toBeTruthy()
+    expect(window.location.pathname).toBe('/gallery')
+  })
 })
