@@ -417,8 +417,18 @@ services:
       SERVICE_INSTANCE_ID: marketplace-1
       OTEL_SERVICE_NAME: marketplace
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=marketplace-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      # The ledger (design doc, section 8). Flyway migrates it at startup.
+      DB_HOST: postgres
+      DB_NAME: marketplace
+      DB_USER: marketplace
+      DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD:?}
+      # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
+      AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
+      JWT_ISSUER: http://localhost:8080/api/auth
     depends_on:
       otel-lgtm:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       kafka-topics:
         condition: service_completed_successfully

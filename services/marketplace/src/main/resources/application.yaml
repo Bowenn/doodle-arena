@@ -6,6 +6,15 @@ spring:
     timeout-per-shutdown-phase: 10s
   main:
     banner-mode: "off"
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:marketplace}
+    username: ${DB_USER:marketplace}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 10
+  flyway:
+    # Migrations run at startup; Flyway's advisory lock keeps two starting instances apart.
+    locations: classpath:db/migration
 
 server:
   port: ${PORT:8080}
@@ -14,6 +23,15 @@ server:
 app:
   version: ${SERVICE_VERSION:dev}
   instance: ${SERVICE_INSTANCE_ID:${HOSTNAME:local}}
+  jwt:
+    # ADR 0001: RS256 access tokens from auth, verified here against its JWKS.
+    jwks-url: ${AUTH_JWKS_URL:http://localhost:8080/api/auth/.well-known/jwks.json}
+    issuer: ${JWT_ISSUER:http://localhost:8080/api/auth}
+    audience: doodle-api
+  reconciliation:
+    interval: 60s
+    # The gauges stop reporting when the last successful run is older than this.
+    stale-after: 3m
 
 logging:
   structured:
