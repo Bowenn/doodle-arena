@@ -130,12 +130,13 @@ Tracks:
 ## Stage 5: Production readiness (both tracks, Day 7)
 
 - [ ] **5.1 Dashboards and alerts**: dashboards as code (a service overview plus one per deep part), alert rules, a Discord contact point, and runbooks in `docs/runbooks/`.
-- [ ] **5.2 AWS deployment**: the humans decide ADR 0003 first. Then Terraform, both S3 buckets, CloudWatch, the billing alarm and secrets, and security groups that open the internal gRPC port only between the lobby and game servers (ADR 0006).
+- [ ] **5.2 AWS deployment**: the humans decide ADR 0003 first, and 5.5's Kafka ACLs (ADR 0013) land before the stack is reachable by anyone outside the team. Then Terraform, both S3 buckets, CloudWatch, the billing alarm and secrets, and security groups that open the internal gRPC port only between the lobby and game servers (ADR 0006).
 - [ ] **5.3 First measurements**: a k6 load test with many small rooms, and a kill test of a game server mid-round. Record the numbers.
 - [ ] **5.4 Frontend performance**: Lighthouse CI and Core Web Vitals reporting.
 - [ ] **5.5 Hardening**: one deliberate refactor of agent-written code, fixing flaky tests, and a README with the architecture diagram and how to run everything.
   - From the Stage 1–2 review (2026-10-17): `DrainServer` hands rooms to another server instead of letting them fail over after a shutdown (the proto already promises it).
   - From the review: per-service credentials outside Postgres, Redis ACL users per key prefix and a SeaweedFS identity per bucket, so data ownership is enforced, not just a convention.
+  - Kafka users and topic ACLs (ADR 0013), **before 5.2 exposes the stack**: one SCRAM-SHA-512 user per service, the ACL table from the ADR (deny by default, only each topic's producer writes, consumers use only their own groups, no service has admin rights), a `kafka-init` job that creates topics, users and ACLs idempotently, a Kafka-only Compose network, `SASL_SSL` in AWS, and `make kafka-acl-check` in the stack job (no credential refused, `lobby` can't write `game.matches.v1`, `assets` can't join group `marketplace`, `marketplace` can't create a topic).
   - From the review: the leaderboard script touches `lobby:lb:seen:*` and `lobby:leaderboard:*` without a shared hash tag, so it needs one before Redis runs in cluster mode.
 
 **M5 exit criteria (MVP)**

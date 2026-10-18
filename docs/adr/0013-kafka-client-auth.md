@@ -1,6 +1,6 @@
 # ADR 0013: Authenticating Kafka clients and restricting each topic to its producer and consumers
 
-- Status: Proposed
+- Status: Accepted (Option A with Option C's network split; implementation in task 5.5, before 5.2 exposes the stack)
 - Date: 2026-10-18
 - Deciders: Bowen
 
@@ -135,7 +135,7 @@ A signature on each event (for example Ed25519 over the payload, in a header) wo
 - **Option D** only after ADR 0003 picks MSK, and then as the AWS half of Option A.
 - The ACL table and the Compose network split from Option C apply whatever is chosen.
 
-## Recommendation (for Bowen to decide)
+## Recommendation
 
 Option A (SCRAM-SHA-512 per service plus the ACL table), together with Option C's network split, and `SASL_SSL` with a server certificate in AWS:
 
@@ -169,8 +169,23 @@ One difference: Redis and SeaweedFS ownership is about one service corrupting an
 
 ## Decision
 
-(empty while Proposed)
+Option A: SASL/SCRAM-SHA-512 with one Kafka user per service, and the ACL table above enforced by `StandardAuthorizer` with deny by default. Together with Option C's network split: Kafka moves to its own Compose network, joined only by its clients. Locally the listeners are `SASL_PLAINTEXT`; in AWS they are `SASL_SSL` with a server certificate (a Kafka container), or MSK's SCRAM listener if ADR 0003 picks MSK. Option D (MSK IAM) stays possible later as the AWS half, and Option B (mTLS) can replace SCRAM when ADR 0006's upgrade builds a CA; both keep the same principals and the same table.
+
+Why:
+
+- **It closes the money path.** Only the game server can write `game.matches.v1` and only assets can write `assets.drawings.v1`, so minting coins or drawings needs that service's credential, not just a foothold on the network. Only each consumer can join or commit for its own group, and no service can delete topics or records.
+- **It is the smallest change that does that**: configuration in all three client libraries, and the same generated-password pattern as the Postgres users.
+- **The ACLs are the control, not the mechanism**, so this doesn't lock out mTLS or IAM later.
+- **The network split costs nothing** and takes the gateway, auth, the AI service and the assets web process and Celery worker off the broker's network entirely.
+
+Rejected: B for now (certificate operations in every environment, better done together with ADR 0006's upgrade), C alone (it doesn't separate topics, so any Kafka client could still mint coins), and D as the only mechanism (it exists only on MSK and would leave local dev unauthenticated). Events carry no producer proof (see above).
 
 ## Consequences
 
-(fill in once decided)
+- **Task 5.5 implements it, before task 5.2 exposes the stack** to anyone outside the team (roadmap). Until then Kafka stays open, and task 4.4's 8-player check remains the only bound on a forged `MatchFinished`. Design doc sections 7.9 and 11 name the gap.
+- **The work, as described in "Local dev, CI and rollout" above:** spike the first-credential bootstrap first; the `kafka-init` job (topics, SCRAM users, ACLs from one declarative list); the six `KAFKA_*_PASSWORD` entries in `.env.example`; client config in game-server, lobby, assets (consumer and relay only), marketplace and eventctl; the host scripts reading `KAFKA_DEV_TOOLS_PASSWORD`; the Kafka-only Compose network; `make kafka-acl-check` in CI's stack job; denials logged and counted; `docs/setup.md`, CLAUDE.md's commands and the design doc updated.
+- **Every new Kafka client adds a principal and its rows** to the ACL table and the init job's list, in the same task: the notifier (4.7), analytics and relays (Stage 6). A Flink exactly-once sink also needs a prefixed `TransactionalId` grant.
+- **Integration tests stay on unauthenticated brokers**; each service's client-config function is unit-tested with and without credentials, and the stack job's negative checks test the ACLs themselves.
+- **Still trusted:** an authenticated producer's content. A compromised or buggy game server can still publish wrong results, so the marketplace keeps its contract checks. Locally the traffic is unencrypted; that is accepted for a single-host bridge network and fixed by `SASL_SSL` in AWS.
+- **Watch:** the `admin` credential is all-powerful; only the init job and humans use it, and an `admin` login outside the init job is worth an alert once dashboards exist (5.1).
+- Interview angle: authorization per topic and per consumer group, why consumer-group hijacking is as dangerous as forged events, why the mechanism (SCRAM, mTLS, IAM) is swappable while the ACLs stay, and why a topic ACL makes a per-event signature unnecessary.
