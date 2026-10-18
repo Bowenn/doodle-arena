@@ -11,11 +11,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/api"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/events"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/server"
@@ -39,6 +42,7 @@ type config struct {
 	secretKey string
 	// Hostnames that may resolve to private addresses: only the local test receiver.
 	allowedPrivateHosts string
+	kafkaBrokers        []string
 }
 
 func loadConfig() config {
@@ -58,6 +62,7 @@ func loadConfig() config {
 		authInternalURL:     envOr("AUTH_INTERNAL_URL", "http://auth:9091"),
 		secretKey:           os.Getenv("NOTIFIER_SECRET_KEY"),
 		allowedPrivateHosts: os.Getenv("NOTIFIER_ALLOWED_PRIVATE_HOSTS"),
+		kafkaBrokers:        strings.Split(envOr("KAFKA_BROKERS", "kafka:9092"), ","),
 	}
 }
 
@@ -116,6 +121,15 @@ func run(cfg config, logger *slog.Logger) error {
 		Store: st, Keys: apikeys.NewVerifier(cfg.authInternalURL), Box: box, Policy: policy,
 		Log: logger, Now: time.Now,
 	}).Register
+
+	consumer, err := events.NewConsumer(cfg.kafkaBrokers, st, logger)
+	if err != nil {
+		return err
+	}
+	var workers sync.WaitGroup
+	workers.Go(func() { consumer.Run(ctx) })
+	// The consumer leaves its group before the pool closes.
+	defer workers.Wait()
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.port,

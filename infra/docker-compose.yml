@@ -182,7 +182,10 @@ services:
 
   notifier:
     <<: *app
-    build: ../services/notifier
+    # Built from the repository root, for the generated contracts in proto/gen/go.
+    build:
+      context: ..
+      dockerfile: services/notifier/Dockerfile
     environment:
       <<: *app-env
       SERVICE_INSTANCE_ID: notifier-1
@@ -197,6 +200,8 @@ services:
       AUTH_INTERNAL_URL: http://auth:9091
       # Encrypts the endpoints' signing secrets at rest (ADR 0014).
       NOTIFIER_SECRET_KEY: ${NOTIFIER_SECRET_KEY:?}
+      # SaleCompleted and CoinsCredited in, DeliveryDead out.
+      KAFKA_BROKERS: kafka:9092
     depends_on:
       otel-lgtm:
         condition: service_healthy
