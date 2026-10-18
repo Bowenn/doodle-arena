@@ -164,8 +164,13 @@ def s3_endpoint() -> Iterator[str]:
         .with_command(
             [
                 "-c",
+                # Every bucket is its own collection, and its first write grows up to 7 volumes.
+                # With -volume.max=0, SeaweedFS fits as many 30 GB volumes as the free disk
+                # allows, which on a CI runner leaves nothing for the second bucket: its writes
+                # fail with InternalError. Small volumes and a fixed count keep both writable.
                 f"echo '{config}' > /tmp/s3.json && exec weed server -dir=/data "
-                "-ip.bind=0.0.0.0 -volume.max=0 -s3 -s3.port=8333 -s3.config=/tmp/s3.json",
+                "-ip.bind=0.0.0.0 -volume.max=50 -master.volumeSizeLimitMB=64 "
+                "-s3 -s3.port=8333 -s3.config=/tmp/s3.json",
             ]
         )
     )

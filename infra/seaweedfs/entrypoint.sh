@@ -15,5 +15,9 @@ cat > /tmp/s3.json <<EOF
 }
 EOF
 
-exec weed server -dir=/data -ip=seaweedfs -ip.bind=0.0.0.0 -volume.max=0 \
+# Each bucket is a collection whose first write grows up to 7 volumes of its own, and
+# -volume.max=0 fits as many volumes as the free disk allows. With the 30 GB default the second
+# bucket gets none on a laptop or CI runner with little free disk (its writes fail with
+# InternalError); 1 GB volumes need about 8 GB free for both.
+exec weed server -dir=/data -ip=seaweedfs -ip.bind=0.0.0.0 -volume.max=0 -master.volumeSizeLimitMB=1024 \
   -s3 -s3.port=8333 -s3.config=/tmp/s3.json
