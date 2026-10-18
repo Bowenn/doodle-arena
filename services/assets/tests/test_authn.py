@@ -1,9 +1,11 @@
 """The access-token verifier against the shared JWT fixtures (fixtures/jwt/, ADR 0001), so assets
-accepts and rejects exactly the tokens auth and the lobby do; and the JWKS cache's refetch rule."""
+accepts and rejects exactly the tokens auth and the lobby do; and the JWKS cache's refetch and
+max-age rules."""
 
 import json
 import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, wait
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,8 @@ from typing import Any
 import pytest
 
 from config.authn import (
+    MAX_AGE_SECONDS,
+    MAX_STALE_SECONDS,
     InvalidTokenError,
     Jwks,
     StaticKeys,
@@ -56,16 +60,28 @@ def test_bearer_token(header: str, token: str | None) -> None:
 
 
 class _JwksServer:
-    """Serves the fixture JWKS and counts requests."""
+    """Serves a JWKS document that a test can change (the fixture's by default), or fails with
+    503, and counts requests. A test can also hold the next fetch open until it releases it."""
 
     def __init__(self) -> None:
         self.hits = 0
+        self.doc: dict[str, Any] = JWKS_DOC
+        self.failing = False
+        self.hold: threading.Event | None = None  # set by a test to hold fetches open
+        self.in_fetch = threading.Event()
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 outer.hits += 1
-                body = json.dumps(JWKS_DOC).encode()
+                if outer.hold is not None:
+                    outer.in_fetch.set()
+                    outer.hold.wait(5)
+                if outer.failing:
+                    self.send_response(503)
+                    self.end_headers()
+                    return
+                body = json.dumps(outer.doc).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -83,15 +99,32 @@ class _JwksServer:
 def jwks_server() -> Iterator[_JwksServer]:
     s = _JwksServer()
     yield s
+    if s.hold is not None:
+        s.hold.set()
     s.server.shutdown()
+
+
+class _Clock:
+    """A fake monotonic clock for the JWKS cache. Tokens are still checked by the real clock."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+VALID = next(c for c in DOC["cases"] if c["name"] == "valid")
 
 
 def test_jwks_is_fetched_once_and_cached(jwks_server: _JwksServer) -> None:
     verifier = TokenVerifier(Jwks(jwks_server.url), DOC["issuer"])
-    valid = next(c for c in DOC["cases"] if c["name"] == "valid")
 
     for _ in range(3):
-        assert verifier.verify(valid["token"]).user_id == valid["sub"]
+        assert verifier.verify(VALID["token"]).user_id == VALID["sub"]
     assert jwks_server.hits == 1
 
 
@@ -107,7 +140,93 @@ def test_unknown_key_ids_refetch_at_most_once_per_interval(jwks_server: _JwksSer
 
 def test_an_unreachable_jwks_rejects_the_token() -> None:
     verifier = TokenVerifier(Jwks("http://127.0.0.1:9/jwks.json"), DOC["issuer"])
-    valid = next(c for c in DOC["cases"] if c["name"] == "valid")
 
     with pytest.raises(InvalidTokenError):
-        verifier.verify(valid["token"])
+        verifier.verify(VALID["token"])
+
+
+def test_a_removed_key_is_refused_after_the_max_age(jwks_server: _JwksServer) -> None:
+    clock = _Clock()
+    verifier = TokenVerifier(Jwks(jwks_server.url, clock=clock), DOC["issuer"])
+    assert verifier.verify(VALID["token"]).user_id == VALID["sub"]
+
+    # auth withdraws the key. Until the max age the cached set still has it, and a hundred
+    # requests spread over that time cause no fetch.
+    jwks_server.doc = {"keys": []}
+    for _ in range(100):
+        clock.advance((MAX_AGE_SECONDS - 1) / 100)
+        assert verifier.verify(VALID["token"]).user_id == VALID["sub"]
+    assert jwks_server.hits == 1
+
+    # Past the max age one request refreshes the set, and the key is gone.
+    clock.advance(1)
+    with pytest.raises(InvalidTokenError):
+        verifier.verify(VALID["token"])
+    assert jwks_server.hits == 2
+
+
+def test_the_last_good_set_is_kept_until_the_max_staleness(jwks_server: _JwksServer) -> None:
+    clock = _Clock()
+    verifier = TokenVerifier(Jwks(jwks_server.url, clock=clock), DOC["issuer"])
+    verifier.verify(VALID["token"])
+    jwks_server.failing = True
+
+    clock.advance(MAX_AGE_SECONDS)
+    assert verifier.verify(VALID["token"]).user_id == VALID["sub"]
+    assert jwks_server.hits == 2  # the refresh failed
+    # The next attempt waits a second, and requests meanwhile use the cached set.
+    verifier.verify(VALID["token"])
+    assert jwks_server.hits == 2
+
+    clock.advance(MAX_STALE_SECONDS - MAX_AGE_SECONDS - 1)
+    verifier.verify(VALID["token"])
+    assert jwks_server.hits == 3
+
+    clock.advance(1)
+    with pytest.raises(InvalidTokenError):
+        verifier.verify(VALID["token"])
+    assert jwks_server.hits == 4
+    # Within the retry second, still refused, without a fetch.
+    with pytest.raises(InvalidTokenError):
+        verifier.verify(VALID["token"])
+    assert jwks_server.hits == 4
+
+    # auth is back: the next fetch (a second later) restores the set.
+    jwks_server.failing = False
+    clock.advance(1)
+    assert verifier.verify(VALID["token"]).user_id == VALID["sub"]
+    assert jwks_server.hits == 5
+
+
+def test_a_stale_refresh_does_not_block_other_requests(jwks_server: _JwksServer) -> None:
+    clock = _Clock()
+    verifier = TokenVerifier(Jwks(jwks_server.url, clock=clock), DOC["issuer"])
+    verifier.verify(VALID["token"])
+    clock.advance(MAX_AGE_SECONDS)
+
+    jwks_server.hold = threading.Event()
+    errors: list[Exception] = []
+
+    def refresh() -> None:
+        try:
+            verifier.verify(VALID["token"])
+        except Exception as e:
+            errors.append(e)
+
+    refresher = threading.Thread(target=refresh)
+    refresher.start()
+    assert jwks_server.in_fetch.wait(5), "the stale set wasn't refreshed"
+
+    # The refresh is in flight and holds the lock; other requests use the cached set at once.
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        futures = [pool.submit(verifier.verify, VALID["token"]) for _ in range(20)]
+        # Well under the fetch's 3-second timeout.
+        done, _ = wait(futures, timeout=1)
+        assert len(done) == 20, "requests waited for the refresh instead of using the cached set"
+        for f in done:
+            assert f.result().user_id == VALID["sub"]
+
+    jwks_server.hold.set()
+    refresher.join(5)
+    assert not errors
+    assert jwks_server.hits == 2
