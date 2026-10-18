@@ -52,11 +52,13 @@ public class OwnershipController {
 			.query(String.class)
 			.list();
 		List<HistoryEvent> events = this.db.sql("""
-				SELECT kind, from_owner, to_owner, sale_id, created_at
-				FROM ownership_events WHERE drawing_id = ? ORDER BY event_id""")
+				SELECT e.kind, e.from_owner, e.to_owner, e.sale_id, l.price, e.created_at
+				FROM ownership_events e LEFT JOIN listings l ON l.sale_id = e.sale_id
+				WHERE e.drawing_id = ? ORDER BY e.event_id""")
 			.param(drawingId)
 			.query((rs, row) -> new HistoryEvent(rs.getString("kind"), rs.getString("from_owner"), rs.getString("to_owner"),
-					rs.getObject("sale_id", UUID.class), rs.getObject("created_at", OffsetDateTime.class).toInstant()))
+					rs.getObject("sale_id", UUID.class), rs.getObject("price", Long.class),
+					rs.getObject("created_at", OffsetDateTime.class).toInstant()))
 			.list();
 		return new OwnershipHistory(drawingId, (String) ownership.get("owner_id"), (Long) ownership.get("version"), authors,
 				events);
@@ -153,8 +155,9 @@ public class OwnershipController {
 			List<HistoryEvent> events) {
 	}
 
-	/** One change of hands, oldest first: MINT (from nobody) or SALE. */
-	public record HistoryEvent(String kind, String fromOwner, String toOwner, UUID saleId, Instant createdAt) {
+	/** One change of hands, oldest first: MINT (from nobody, no price) or SALE. */
+	public record HistoryEvent(String kind, String fromOwner, String toOwner, UUID saleId, Long price,
+			Instant createdAt) {
 	}
 
 }
