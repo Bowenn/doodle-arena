@@ -14,7 +14,7 @@ import (
 )
 
 func TestHealthz(t *testing.T) {
-	h := NewHandler(Info{Service: "lobby", Version: "1.2.3", Instance: "lobby-1"})
+	h := NewHandler(Info{Service: "lobby", Version: "1.2.3", Instance: "lobby-1"}, nil)
 
 	tests := []struct {
 		method string
@@ -50,7 +50,7 @@ func TestHealthz(t *testing.T) {
 func TestRequestsAreTracedButHealthChecksAreNot(t *testing.T) {
 	recorder := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	h := NewHandler(Info{Service: "lobby"}, otelhttp.WithTracerProvider(tp))
+	h := NewHandler(Info{Service: "lobby"}, nil, otelhttp.WithTracerProvider(tp))
 
 	for _, path := range []string{"/healthz", "/api/lobby/rooms"} {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
@@ -68,7 +68,7 @@ func TestRequestsAreTracedButHealthChecksAreNot(t *testing.T) {
 func TestServerSpanContinuesTheCallersTrace(t *testing.T) {
 	recorder := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	h := NewHandler(Info{Service: "lobby"},
+	h := NewHandler(Info{Service: "lobby"}, nil,
 		otelhttp.WithTracerProvider(tp), otelhttp.WithPropagators(propagation.TraceContext{}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/lobby/rooms", nil)

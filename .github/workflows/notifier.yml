@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - services/notifier/**
+      - proto/doodle/**
+      - proto/gen/go/**
       - .github/workflows/notifier.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
@@ -15,6 +17,8 @@ on:
     branches: [master]
     paths:
       - services/notifier/**
+      - proto/doodle/**
+      - proto/gen/go/**
       - .github/workflows/notifier.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
@@ -42,4 +46,6 @@ jobs:
     uses: ./.github/workflows/_docker.yml
     with:
       service: notifier
-      context: services/notifier
+      # The repository root, for the generated contracts in proto/gen/go.
+      context: .
+      file: services/notifier/Dockerfile

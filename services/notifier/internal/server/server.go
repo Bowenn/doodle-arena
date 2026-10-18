@@ -16,9 +16,13 @@ type Info struct {
 }
 
 // NewHandler returns the service's HTTP routes, traced with OpenTelemetry (a server span per
-// request, continuing the caller's traceparent). Health checks are not traced.
-func NewHandler(info Info, opts ...otelhttp.Option) http.Handler {
+// request, continuing the caller's traceparent). Health checks are not traced. routes, when not
+// nil, adds the API's routes.
+func NewHandler(info Info, routes func(*http.ServeMux), opts ...otelhttp.Option) http.Handler {
 	mux := http.NewServeMux()
+	if routes != nil {
+		routes(mux)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(struct {

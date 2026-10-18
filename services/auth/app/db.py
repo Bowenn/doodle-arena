@@ -51,6 +51,22 @@ refresh_tokens = Table(
     Index("refresh_tokens_user_id_idx", "user_id"),
 )
 
+api_keys = Table(
+    "api_keys",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("user_id", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    # The public part of da_<prefix>_<secret>; the secret is stored only as its SHA-256.
+    Column("prefix", Text, nullable=False, unique=True),
+    Column("secret_hash", LargeBinary, nullable=False),
+    Column("scopes", ARRAY(Text), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("last_used_at", DateTime(timezone=True)),
+    Column("revoked_at", DateTime(timezone=True)),
+    Index("api_keys_user_id_idx", "user_id"),
+)
+
 
 def make_engine(url: str) -> Engine:
     # pool_pre_ping survives Postgres restarts in the local stack.

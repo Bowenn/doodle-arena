@@ -114,5 +114,5 @@ def engine() -> Iterator[Engine]:
 def db(engine: Engine) -> Iterator[Engine]:
     """The migrated database, emptied before each test."""
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE refresh_tokens, users"))
+        conn.execute(text("TRUNCATE refresh_tokens, users, api_keys"))
     yield engine

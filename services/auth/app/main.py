@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from opentelemetry.metrics import Meter
 from sqlalchemy import Engine
 
-from app import SERVICE_NAME
+from app import SERVICE_NAME, api_key_routes
 from app.context import AuthContext
 from app.db import make_engine
 from app.errors import install_error_handlers
@@ -63,4 +63,6 @@ def create_app(settings: Settings | None = None, ctx: AuthContext | None = None)
         }
 
     app.include_router(router)
+    app.include_router(api_key_routes.router)
+    app.include_router(api_key_routes.internal_router)
     return app
