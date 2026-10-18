@@ -220,6 +220,11 @@ The room client (task 2.3):
 - The timer counts down to the server's deadline on the local clock. It is display only; the server ends phases. Clock skew shows as a timer that is a little off.
 - The ping round-trip time is shown next to the connection status; exporting it as `web.ws.rtt` comes with browser telemetry (task 5.4).
 
+The gallery (task 3.5):
+
+- `/gallery` lists everyone's approved drawings (newest first, "Load more" follows `next_cursor`) or, on "My drawings", your own in any state with its status. Opened from the end of a match (`/gallery?match_id=<id>`), it lists that match's drawings in round order. Thumbnails load straight from storage through their presigned URLs.
+- `/drawings/<id>` shows a drawing and plays its replay with the live canvas's `drawPoints`, so it looks like the round did. A stroke starts at its `server_received_ms` minus its last point's `t_ms`, and each point lands at that start plus its own `t_ms` (`game/replay.ts`). The replay starts at the first point, pauses longer than a second are squeezed to one, and it plays at 1x, 2x or 4x. Undone strokes are left out: the log says that a stroke was undone, not when, so the replay ends on the same picture as the PNG.
+
 ## 5. Data ownership
 
 | Store | Database, prefix or bucket | What it holds | Owner |
@@ -299,7 +304,7 @@ Lobby:
 
 Assets:
 
-- `GET /api/assets/drawings?author_id=&limit=<1..50>&cursor=` returns `{drawings, next_cursor}`, newest first (keyset on the UUIDv7 id). Without `author_id` it lists approved drawings (the gallery); with it, that author's approved drawings, plus every one of their own when the caller is the author.
+- `GET /api/assets/drawings?author_id=&match_id=&limit=<1..50>&cursor=` returns `{drawings, next_cursor}`, newest first (keyset on the UUIDv7 id). Without a filter it lists approved drawings (the gallery); with `author_id` or `match_id`, the matching approved drawings, plus the caller's own in any state.
 - `GET /api/assets/drawings/{id}` returns `{id, match_id, round_no, word, author_ids, initial_owner_id, status, ended_at, created_at, has_replay, image_url, thumb_url}`. `image_url` and `thumb_url` are presigned GET URLs straight to object storage, valid 15 minutes, `null` before the images exist. Approved drawings are visible to every signed-in player; other drawings only to their authors, and `404 DRAWING_NOT_FOUND` to everyone else.
 - `GET /api/assets/drawings/{id}/replay` returns the replay document: `{drawing_id, schema_version, canvas_width, canvas_height, round_started_at, strokes: [{user_id, color, width, undone, server_received_ms, points: [[x, y, t_ms], ...]}]}`, or `404 REPLAY_NOT_FOUND`.
 - A bad `limit`, `cursor` or `author_id` is `400 INVALID_REQUEST`; a missing or invalid token `401 UNAUTHENTICATED`.
