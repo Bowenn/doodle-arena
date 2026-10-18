@@ -142,3 +142,68 @@ def test_prepare_sends_the_moderation_task(
     tasks.prepare_drawing.apply(args=(str(drawing.id),)).get()
 
     assert sent == [str(drawing.id)]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_tasks_for_one_drawing_make_one_call(make_drawing: Any, fake_ai: FakeAI) -> None:
+    """A redelivered task (or the sweeper) running alongside the first doesn't call the AI
+    service too, so it can't spend the attempt budget twice."""
+    import threading
+
+    from django.db import connection
+
+    from drawings import storage
+
+    storage.s3().put_object(
+        Bucket="round-logs", Key="m_two/1.binpb.gz", Body=stroke_log_bytes("m_two")
+    )
+    drawing = make_drawing(match_id="m_two", stroke_log_key="m_two/1.binpb.gz", stroke_count=1)
+    pipeline.prepare(drawing.id)
+    fake_ai.delay = 0.2  # slow enough for the two to overlap, within the 0.3 s timeout
+    results: list[str] = []
+
+    def run() -> None:
+        try:
+            results.append(pipeline.moderate(drawing.id))
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(results) == ["approved", "skipped"]
+    assert len(fake_ai.calls) == 1
+    drawing.refresh_from_db()
+    assert drawing.moderation_attempts == 1
+    assert drawing.moderation_claimed_until is None
+
+
+def test_a_dead_tasks_claim_expires(prepared: Drawing, fake_ai: FakeAI) -> None:
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    Drawing.objects.filter(pk=prepared.pk).update(
+        moderation_claimed_until=timezone.now() + timedelta(seconds=30)
+    )
+    assert pipeline.moderate(prepared.id) == "skipped"
+    assert fake_ai.calls == []
+
+    Drawing.objects.filter(pk=prepared.pk).update(
+        moderation_claimed_until=timezone.now() - timedelta(seconds=1)
+    )
+    assert pipeline.moderate(prepared.id) == "approved"
+
+
+def test_the_claim_is_released_after_a_failed_call(prepared: Drawing, fake_ai: FakeAI) -> None:
+    fake_ai.status = 503
+
+    with pytest.raises(ai_client.ModerationUnavailable):
+        pipeline.moderate(prepared.id)
+
+    prepared.refresh_from_db()
+    assert prepared.moderation_claimed_until is None
+    assert prepared.moderation_attempts == 1
