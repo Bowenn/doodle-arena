@@ -8,8 +8,8 @@ package com.doodlearena.proto.doodle.events.v1;
 /**
  * <pre>
  * WalletEvent is the only message type on the topic market.wallet.v1 (key: user_id).
- * Produced by the marketplace through its transactional outbox; optionally consumed by the
- * notifier.
+ * Produced by the marketplace through its transactional outbox; consumed by the notifier
+ * (webhooks for coin credits).
  * </pre>
  *
  * Protobuf type {@code doodle.events.v1.WalletEvent}
@@ -314,8 +314,8 @@ private static final long serialVersionUID = 0L;
   /**
    * <pre>
    * WalletEvent is the only message type on the topic market.wallet.v1 (key: user_id).
-   * Produced by the marketplace through its transactional outbox; optionally consumed by the
-   * notifier.
+   * Produced by the marketplace through its transactional outbox; consumed by the notifier
+   * (webhooks for coin credits).
    * </pre>
    *
    * Protobuf type {@code doodle.events.v1.WalletEvent}

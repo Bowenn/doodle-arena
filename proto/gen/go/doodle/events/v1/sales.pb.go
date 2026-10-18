@@ -24,7 +24,7 @@ const (
 
 // SaleEvent is the only message type on the topic market.sales.v1 (key: drawing_id).
 // Produced by the marketplace through its transactional outbox; consumed by the notifier
-// (webhooks), assets (search index) and analytics (wash-trading detection).
+// (webhooks) and, from Stage 6, analytics (wash-trading detection).
 type SaleEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The event this message carries. Consumers skip an unset or unknown case (ADR 0004).

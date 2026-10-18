@@ -307,6 +307,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **The bug was copied once already.** The notifier copied the lobby's verifier, bug included, and assets wrote the same design in Python. Fixing the copies was the small change; extracting a shared Go module is the real fix for drift between the Go services, and it is its own decision. Across languages, the shared test fixtures are what keeps them honest.
 - **The same rule in two languages has different traps.** Python has `Lock.acquire(blocking=False)` where Go has `TryLock`, and a lock-free reader checks the age outside the lock, so keys and fetch time are one tuple replaced in one assignment: as two attributes, a reader could pair a new fetch time with the old keys and accept a just-removed key.
 
+### Stage 4 review
+
+- **A review against the exit criteria, not just the diff.** Every M4 criterion was traced to a named test or an evidence row, and the suites were rerun several times (the marketplace 3 times, the notifier 5 times with `-race`) to look for flakes. None failed. The real findings came from comparing code with the design doc: a cache that was claimed but never built, a consumer the catalog listed that didn't exist, and a dead-letter alert that would have paged us for other people's broken servers.
+- **Check-then-insert needs a lock, even for a soft limit.** The 10-API-key cap counted, then inserted. Thirty concurrent creates made 15 keys. A transaction-scoped advisory lock per user (`pg_advisory_xact_lock`) fixed it, without a table-wide lock or a schema change, and the new test fails without it.
+- **Metrics have commit semantics too.** `market.purchases{result=success}` was counted inside the purchase, before the idempotency completion and the commit, so a rolled-back sale still showed up. It's now counted in an after-commit callback. A dashboard that disagrees with the ledger is a bug.
+- **Be kind to a dependency that is down.** Every service retried a failed JWKS fetch after one second, forever. They now back off from 1 s to 30 s. An auth outage costs auth one fetch per 30 seconds per process instead of one per second, and recovery is still quick.
+- **Alert on what you own.** A webhook going `DEAD` almost always means a developer's server is down. Paging on the dead-letter count would hand our on-call to strangers, so test pings stay out of it entirely and the alerts watch our own delivery health instead.
+
 ## Stage 5: Production readiness
 
 ## Stage 6: Scale and depth

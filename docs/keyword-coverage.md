@@ -19,7 +19,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Docker | Every service; Docker Compose locally; multi-stage builds | 1 |
 | Amazon S3 | `round-logs` and `drawings` buckets (SeaweedFS locally) | 2, 3, 5 |
 | Distributed storage | Content-addressed object storage; MongoDB replica set; optional cross-cloud copy | 3, 6, 7 |
-| Caching | Redis cache-aside for listings and wallet reads; CDN for images | 4, 5 |
+| Caching | Redis cache-aside for the gallery's drawing reads in assets (task 6.7b); CDN for images | 5, 6 |
 | Redis | Room event streams, snapshots, leases, rate limits, leaderboards, caches, Celery broker | 2+ |
 | Databases / database systems | Postgres, MongoDB, Redis, Elasticsearch, each with a stated reason | All |
 | Database transactions (ACID) | The purchase transaction | 4 |

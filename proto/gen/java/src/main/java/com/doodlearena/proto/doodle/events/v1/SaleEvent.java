@@ -9,7 +9,7 @@ package com.doodlearena.proto.doodle.events.v1;
  * <pre>
  * SaleEvent is the only message type on the topic market.sales.v1 (key: drawing_id).
  * Produced by the marketplace through its transactional outbox; consumed by the notifier
- * (webhooks), assets (search index) and analytics (wash-trading detection).
+ * (webhooks) and, from Stage 6, analytics (wash-trading detection).
  * </pre>
  *
  * Protobuf type {@code doodle.events.v1.SaleEvent}
@@ -315,7 +315,7 @@ private static final long serialVersionUID = 0L;
    * <pre>
    * SaleEvent is the only message type on the topic market.sales.v1 (key: drawing_id).
    * Produced by the marketplace through its transactional outbox; consumed by the notifier
-   * (webhooks), assets (search index) and analytics (wash-trading detection).
+   * (webhooks) and, from Stage 6, analytics (wash-trading detection).
    * </pre>
    *
    * Protobuf type {@code doodle.events.v1.SaleEvent}
