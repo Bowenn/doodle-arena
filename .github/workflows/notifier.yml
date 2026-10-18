@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - services/notifier/**
+      - fixtures/jwt/**
       - proto/doodle/**
       - proto/gen/go/**
       - .github/workflows/notifier.yml
@@ -17,6 +18,7 @@ on:
     branches: [master]
     paths:
       - services/notifier/**
+      - fixtures/jwt/**
       - proto/doodle/**
       - proto/gen/go/**
       - .github/workflows/notifier.yml

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -14,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/api"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/authn"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/pgtest"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
@@ -34,13 +37,31 @@ func (keys) Verify(_ context.Context, key string) (apikeys.Identity, error) {
 	}
 	switch parts[2] {
 	case "ok":
-		return apikeys.Identity{KeyID: uuid.New(), UserID: parts[1], Scopes: []string{"webhooks"}}, nil
+		return apikeys.Identity{KeyID: ptr(uuid.New()), UserID: parts[1], Scopes: []string{"webhooks"}}, nil
 	case "noscope":
-		return apikeys.Identity{KeyID: uuid.New(), UserID: parts[1], Scopes: []string{"other"}}, nil
+		return apikeys.Identity{KeyID: ptr(uuid.New()), UserID: parts[1], Scopes: []string{"other"}}, nil
 	case "down":
 		return apikeys.Identity{}, apikeys.ErrUnavailable
 	}
 	return apikeys.Identity{}, apikeys.ErrInvalid
+}
+
+const issuer = "http://localhost:8080/api/auth"
+
+var signingKey, _ = rsa.GenerateKey(rand.Reader, 2048)
+
+// session signs an access token like auth's (ADR 0001); change adjusts the claims.
+func session(user string, change func(jwt.MapClaims)) string {
+	now := time.Now()
+	claims := jwt.MapClaims{"sub": user, "roles": []string{"player"}, "iss": issuer, "aud": "doodle-api",
+		"iat": now.Unix(), "exp": now.Add(15 * time.Minute).Unix()}
+	if change != nil {
+		change(claims)
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	tok.Header["kid"] = "k1"
+	s, _ := tok.SignedString(signingKey)
+	return s
 }
 
 func newServer(t *testing.T) (*httptest.Server, *api.API) {
@@ -49,7 +70,8 @@ func newServer(t *testing.T) (*httptest.Server, *api.API) {
 	_, _ = rand.Read(k)
 	box, _ := secretbox.New(hex.EncodeToString(k))
 	a := &api.API{
-		Store: pgtest.Store(t), Keys: keys{}, Box: box, Policy: ssrf.NewPolicy("webhook-receiver"),
+		Store: pgtest.Store(t), Keys: keys{}, Tokens: authn.NewVerifier(issuer, authn.StaticKeys{"k1": &signingKey.PublicKey}),
+		Box: box, Policy: ssrf.NewPolicy("webhook-receiver"),
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now,
 	}
 	mux := http.NewServeMux()
@@ -147,7 +169,7 @@ func TestEndpoints(t *testing.T) {
 			code   string
 		}{
 			"no key":       {"", 401, "UNAUTHENTICATED"},
-			"a JWT":        {"eyJhbGciOi.x.y", 401, "UNAUTHENTICATED"},
+			"a bad JWT":    {"eyJhbGciOi.x.y", 401, "UNAUTHENTICATED"},
 			"unknown key":  {"da_ada_nope", 401, "UNAUTHENTICATED"},
 			"wrong scope":  {"da_ada_noscope", 403, "FORBIDDEN"},
 			"auth is down": {"da_x_down", 503, "AUTH_UNAVAILABLE"},
@@ -155,6 +177,38 @@ func TestEndpoints(t *testing.T) {
 		for name, c := range cases {
 			status, out := call(t, srv, "GET", "/api/notifier/endpoints", c.key, nil)
 			if status != c.status || errCode(out) != c.code {
+				t.Errorf("%s: %d %v", name, status, out)
+			}
+		}
+	})
+
+	t.Run("the web app's session works like a key with the webhooks scope", func(t *testing.T) {
+		status, out := call(t, srv, "POST", "/api/notifier/endpoints", session("web", nil),
+			map[string]any{"url": "https://example.com/web", "event_types": []string{"coins.credited"}})
+		if status != 201 {
+			t.Fatalf("status %d %v", status, out)
+		}
+		var keyID *string
+		_ = a.Store.Pool.QueryRow(context.Background(), "SELECT api_key_id::text FROM endpoints WHERE id = $1", out["id"]).Scan(&keyID)
+		if keyID != nil {
+			t.Fatalf("a session's endpoint has api_key_id %s", *keyID)
+		}
+		// The same user's API key sees it.
+		_, list := call(t, srv, "GET", "/api/notifier/endpoints", "da_web_ok", nil)
+		if len(list["endpoints"].([]any)) != 1 {
+			t.Fatalf("list by key = %v", list)
+		}
+		bad := map[string]string{
+			"expired": session("web", func(c jwt.MapClaims) {
+				c["exp"] = time.Now().Add(-time.Hour).Unix()
+				c["iat"] = time.Now().Add(-2 * time.Hour).Unix()
+			}),
+			"wrong audience": session("web", func(c jwt.MapClaims) { c["aud"] = "other" }),
+			"wrong issuer":   session("web", func(c jwt.MapClaims) { c["iss"] = "https://evil.example" }),
+			"garbage":        "not.a.token",
+		}
+		for name, tok := range bad {
+			if status, out := call(t, srv, "GET", "/api/notifier/endpoints", tok, nil); status != 401 || errCode(out) != "UNAUTHENTICATED" {
 				t.Errorf("%s: %d %v", name, status, out)
 			}
 		}
@@ -200,3 +254,5 @@ func TestEndpoints(t *testing.T) {
 		}
 	})
 }
+
+func ptr[T any](v T) *T { return &v }

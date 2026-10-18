@@ -16,7 +16,7 @@ import (
 
 func endpoint(owner string, types ...string) store.Endpoint {
 	return store.Endpoint{
-		ID: uuid.New(), OwnerID: owner, APIKeyID: uuid.New(), URL: "https://example.com/hook",
+		ID: uuid.New(), OwnerID: owner, APIKeyID: ptr(uuid.New()), URL: "https://example.com/hook",
 		EventTypes: types, SecretCiphertext: []byte("ct"), SecretNonce: []byte("nonce"),
 	}
 }
@@ -218,3 +218,5 @@ func ids(ds []store.Delivery) []string {
 	}
 	return out
 }
+
+func ptr[T any](v T) *T { return &v }

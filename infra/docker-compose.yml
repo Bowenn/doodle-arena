@@ -198,6 +198,9 @@ services:
       DB_PASSWORD: ${NOTIFIER_DB_PASSWORD:?}
       # API keys are checked on auth's internal port, which compose never publishes (ADR 0001).
       AUTH_INTERNAL_URL: http://auth:9091
+      # The web app's access tokens are verified against auth's JWKS (ADR 0001).
+      AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
+      JWT_ISSUER: http://localhost:8080/api/auth
       # Encrypts the endpoints' signing secrets at rest (ADR 0014).
       NOTIFIER_SECRET_KEY: ${NOTIFIER_SECRET_KEY:?}
       # SaleCompleted and CoinsCredited in, DeliveryDead out.

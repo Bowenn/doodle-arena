@@ -21,6 +21,7 @@ import (
 
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/api"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/authn"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/delivery"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/events"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/logging"
@@ -42,6 +43,9 @@ type config struct {
 	databaseURL string
 	// Auth's internal port, where API keys are checked (ADR 0001).
 	authInternalURL string
+	// Auth's public keys and issuer, for the web app's access tokens (ADR 0001).
+	jwksURL   string
+	jwtIssuer string
 	// Encrypts the endpoints' signing secrets (ADR 0014): base64 of 32 bytes.
 	secretKey string
 	// Hostnames that may resolve to private addresses: only the local test receiver.
@@ -64,6 +68,8 @@ func loadConfig() config {
 			RawQuery: "sslmode=disable",
 		}).String(),
 		authInternalURL:     envOr("AUTH_INTERNAL_URL", "http://auth:9091"),
+		jwksURL:             envOr("AUTH_JWKS_URL", "http://auth:8080/api/auth/.well-known/jwks.json"),
+		jwtIssuer:           envOr("JWT_ISSUER", "http://localhost:8080/api/auth"),
 		secretKey:           os.Getenv("NOTIFIER_SECRET_KEY"),
 		allowedPrivateHosts: os.Getenv("NOTIFIER_ALLOWED_PRIVATE_HOSTS"),
 		kafkaBrokers:        strings.Split(envOr("KAFKA_BROKERS", "kafka:9092"), ","),
@@ -122,7 +128,9 @@ func run(cfg config, logger *slog.Logger) error {
 	defer st.Close()
 	policy := ssrf.NewPolicy(cfg.allowedPrivateHosts)
 	routes := (&api.API{
-		Store: st, Keys: apikeys.NewVerifier(cfg.authInternalURL), Box: box, Policy: policy,
+		Store: st, Keys: apikeys.NewVerifier(cfg.authInternalURL),
+		Tokens: authn.NewVerifier(cfg.jwtIssuer, authn.NewJWKS(cfg.jwksURL, &http.Client{Timeout: 3 * time.Second}, 30*time.Second)),
+		Box:    box, Policy: policy,
 		Log: logger, Now: time.Now,
 	}).Register
 

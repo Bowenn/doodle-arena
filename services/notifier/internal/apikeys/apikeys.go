@@ -18,11 +18,11 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-// Identity is who a valid key acts for.
+// Identity is who a valid key (or session) acts for. KeyID is nil for a session.
 type Identity struct {
-	KeyID  uuid.UUID `json:"key_id"`
-	UserID string    `json:"user_id"`
-	Scopes []string  `json:"scopes"`
+	KeyID  *uuid.UUID `json:"key_id"`
+	UserID string     `json:"user_id"`
+	Scopes []string   `json:"scopes"`
 }
 
 // HasScope reports whether the key was granted scope.
