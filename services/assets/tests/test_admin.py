@@ -10,6 +10,7 @@ from django.test import Client
 from drawings import moderation
 from drawings.models import DecidedBy, Drawing, Status
 from sso.views import sync_user
+from tests.conftest import IMAGE
 
 pytestmark = pytest.mark.django_db
 
@@ -26,7 +27,7 @@ def moderator(client: Client) -> User:
 
 
 def queued(make_drawing: Any, **fields: Any) -> Drawing:
-    drawing: Drawing = make_drawing(**fields)
+    drawing: Drawing = make_drawing(**{**IMAGE, **fields})
     moderation.send_to_review(drawing.id, reason="moderation failed after 4 attempts")
     return drawing
 
@@ -36,7 +37,7 @@ def test_queue_lists_only_drawings_in_review(
 ) -> None:
     waiting = queued(make_drawing, round_no=1, word="waiting")
     make_drawing(round_no=2, word="processing")
-    done = make_drawing(round_no=3, word="done")
+    done = make_drawing(round_no=3, word="done", **IMAGE)
     moderation.decide(done.id, approve=True, by=DecidedBy.AI)
 
     page = client.get(QUEUE).content.decode()

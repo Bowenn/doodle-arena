@@ -35,6 +35,9 @@ class Env(BaseSettings):
     # Object storage: SeaweedFS locally, S3 in AWS. The stroke logs are the game server's bucket
     # (read only here); drawings is assets' own.
     s3_endpoint: str = "http://seaweedfs:8333"
+    # Where browsers fetch images: presigned URLs are signed for this address, which must reach
+    # the same store (SeaweedFS's published port locally; the S3 endpoint in AWS).
+    s3_public_endpoint: str = ""
     s3_region: str = "us-east-1"
     s3_access_key: str = ""
     s3_secret_key: str = ""
@@ -161,6 +164,7 @@ CELERY_BEAT_SCHEDULE = {
 KAFKA_BROKERS = env.kafka_brokers
 SERVICE_INSTANCE_ID = env.service_instance_id
 S3_ENDPOINT = env.s3_endpoint
+S3_PUBLIC_ENDPOINT = env.s3_public_endpoint or env.s3_endpoint
 S3_REGION = env.s3_region
 S3_ACCESS_KEY = env.s3_access_key
 S3_SECRET_KEY = env.s3_secret_key

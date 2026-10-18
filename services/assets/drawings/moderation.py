@@ -11,9 +11,11 @@ import logging
 import uuid
 
 from django.contrib.auth.models import AbstractBaseUser
+from django.db import transaction
 from django.utils import timezone
 from opentelemetry import trace
 
+from drawings import events
 from drawings.models import DecidedBy, Drawing, Status
 
 log = logging.getLogger(__name__)
@@ -66,15 +68,22 @@ def decide(
         "drawing.decide", attributes={"drawing.id": str(drawing_id), "decision.by": by.value}
     ) as span:
         now = timezone.now()
-        # Task 3.4 writes DrawingApproved or DrawingRejected to an outbox in the same transaction.
-        changed = Drawing.objects.filter(pk=drawing_id, status__in=_DECIDE_FROM[by]).update(
-            status=status,
-            decided_by=by,
-            moderator=moderator,
-            decided_at=now,
-            decision_reason=reason,
-            updated_at=now,
-        )
+        allowed = Drawing.objects.filter(pk=drawing_id, status__in=_DECIDE_FROM[by])
+        if approve:
+            allowed = allowed.exclude(sha256="")  # nothing to mint without the image
+        # The decision and its event (DrawingApproved or DrawingRejected) commit together or not
+        # at all: the outbox row is the only way the decision leaves this service.
+        with transaction.atomic():
+            changed = allowed.update(
+                status=status,
+                decided_by=by,
+                moderator=moderator,
+                decided_at=now,
+                decision_reason=reason,
+                updated_at=now,
+            )
+            if changed:
+                events.enqueue_decision(Drawing.objects.get(pk=drawing_id))
         span.set_attribute("decision.applied", changed == 1)
         extra = {"drawing_id": str(drawing_id), "status": status.value, "decided_by": by.value}
         if moderator is not None:

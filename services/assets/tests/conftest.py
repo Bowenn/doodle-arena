@@ -76,6 +76,15 @@ def round_fields(**overrides: Any) -> dict[str, Any]:
     return fields
 
 
+# The pipeline's results for a drawing that has its images (only such a drawing can be approved).
+IMAGE = {
+    "sha256": "ab" * 32,
+    "image_key": f"sha256/{'ab' * 32}.png",
+    "thumb_key": f"sha256/{'ab' * 32}.thumb.png",
+    "replay_id": "r",
+}
+
+
 @pytest.fixture
 def make_drawing() -> Any:
     from drawings.models import Drawing

@@ -5,6 +5,7 @@ from django.views.decorators.http import require_GET
 
 from config import SERVICE_NAME
 from config.settings import env
+from drawings import api
 from sso import views as sso_views
 
 
@@ -26,4 +27,7 @@ urlpatterns = [
     path("admin/login/", sso_views.admin_login),
     path("admin/sso/", sso_views.sso),
     path("admin/", admin.site.urls),
+    path("api/assets/drawings", api.list_drawings),
+    path("api/assets/drawings/<uuid:drawing_id>", api.get_drawing),
+    path("api/assets/drawings/<uuid:drawing_id>/replay", api.get_replay),
 ]

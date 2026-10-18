@@ -95,6 +95,8 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `assets.rounds.received` | Counter | `result` = created, duplicate, empty, skipped | assets (consumer) |
 | `assets.pipeline.results` | Counter | `result` = prepared, skipped, failed | assets |
 | `assets.pipeline.requeued` | Counter | – | assets (sweeper) |
+| `assets.outbox.lag` | Gauge (s) | – (age of the oldest outbox event Kafka hasn't confirmed; 0 when drained) | assets (relay) |
+| `assets.events.published` | Counter | `result` = success, failed (left in the outbox and retried) | assets (relay) |
 | `assets.moderation` | Counter | `result` = approved, rejected, retry, manual | assets (`manual`: sent to the review queue, after the last failed call, a refusal, or an unsure AI) |
 | `ai.moderation.requests` | Counter | `decision` = approve, reject, review, unavailable, invalid | ai |
 | `market.purchases` | Counter | `result` = success, conflict, insufficient_funds | marketplace |
@@ -150,6 +152,7 @@ Starting rules (tune the thresholds after the first load test):
 | SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
 | HighErrorRate | Server errors above 1% of requests for 5 minutes, per service | warning |
 | ConsumerLagGrowing | Kafka lag growing for 10 minutes for any consumer group | warning |
+| DrawingEventsStuck | `assets.outbox.lag` above 60 s for 5 minutes (Kafka down, or the relay stopped; the marketplace isn't minting approved drawings) | warning |
 | DrawingsFailing | `assets.pipeline.results{result=failed}` above 0 for 10 minutes (stroke logs missing or unreadable: an S3 outage longer than 7 days, or a game-server bug) | warning |
 | JobsBacklog | `assets.jobs.oldest_age` above 300 s for 5 minutes, or the series missing for 5 minutes (no worker) | warning |
 | DeadLetters | `notifier.dlq.size > 0` | warning |
