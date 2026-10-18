@@ -66,6 +66,7 @@ Keep this list accurate:
 - Drills against `make up` (they need `~/.docker/bin` on PATH; in a worktree, set `DRILL_JWT_KEY` to the main checkout's `secrets/jwt-private.pem` instead of copying it):
   - `uv run --project services/auth --with websockets python scripts/drills/failover.py kill|pause [n]`: kill or freeze the room's game server mid-round and measure the resume.
   - `uv run --project services/auth python scripts/drills/mint_tokens.py [--roles player,moderator] <name>...`: dev access tokens for drills (keep them in shell variables; never write them to a file).
+  - `uv run --project services/auth --with confluent-kafka --with 'protobuf>=7.36.2,<8' python scripts/drills/webhooks.py`: an API key, a healthy and a failing webhook endpoint on the `webhook-receiver` test service (admin on `localhost:9000`), a fake `MatchFinished`; reports the verified delivery, the failing one's 8 attempts, DEAD and its `DeliveryDead` (a few minutes).
   - `node scripts/drills/web-seats.mts [room_id] [--seats n]` (Node 24): extra players running the web app's own client; with no room id, a bot-only match that exits 0 when every seat agrees.
 - Planned: `make seed` (later). Don't use it before it exists.
 

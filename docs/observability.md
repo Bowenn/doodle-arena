@@ -111,9 +111,11 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `market.ownership.violations` | Gauge | – | marketplace |
 | `market.matches.received` | Counter | `result` = paid, duplicate (the match was paid before: a redelivery), ineligible (fewer than two players), skipped (undecodable, or an unset or unknown event), failed (an event that breaks its contract, or a record Postgres refuses as data) | marketplace |
 | `market.drawings.received` | Counter | `result` = minted, duplicate (the drawing was minted before: a redelivery), rejected (a `DrawingRejected`, nothing to do), skipped (undecodable, or an unset or unknown event), failed (an event that breaks its contract, or a record Postgres refuses as data) | marketplace |
-| `notifier.deliveries` | Counter | `result` = success, retry, dead | notifier |
-| `notifier.delivery.duration` | Histogram (ms) | – | notifier |
-| `notifier.dlq.size` | Gauge | – | notifier |
+| `notifier.deliveries` | Counter | `result` = success, retry (failed, will try again), dead (failed for the last time) | notifier |
+| `notifier.delivery.duration` | Histogram (ms) | – (from sending to the answer or the failure) | notifier |
+| `notifier.dlq.size` | Gauge | – (deliveries that went DEAD in the last 24 hours, so the alert clears on its own) | notifier |
+| `notifier.events` | Counter | `result` = queued, no_subscribers, duplicate (queued before: a redelivery), skipped (unreadable) | notifier |
+| `auth.api_keys.verifications` | Counter | `result` = valid, invalid, revoked | auth |
 | `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram | `page` | web |
 | `web.ws.rtt` | Histogram (ms) | – | web |
 
@@ -175,6 +177,8 @@ Each run is a `market.reconcile` span (attributes `ledger.imbalance`, `ledger.mi
 A purchase is a `market.purchase` span (`listing.id`, `drawing.id`, `sale.id`, `user.id`; `purchase.result` for a refused one) inside the HTTP server span, with the SQL in lock order below it. The relay sends each outbox row under a `market.outbox.publish` span whose parent is the trace context stored with the row, so the agent's `market.sales.v1 publish` span and every consumer of the event join the purchase's trace.
 
 Starting a checkout is a `market.checkout` span (`user.id`, `coin_pack.id`, `stripe.session_id`) around the Stripe API call; a webhook is a `market.stripe.webhook` span (`stripe.event_type`, `stripe.event_id`, `stripe.result`). The webhook starts a new trace (Stripe sends no `traceparent`); its `CoinsCredited` is published under it. Logs carry the session id and `user_id`, never the payload or any key.
+
+A webhook's trace continues the event's: the notifier's `notifier.queue` span (under kotel's consumer span) stores its trace context on the delivery row, and every attempt, however much later, is a `notifier.deliver` span under it (`delivery.id`, `endpoint.id`, `event.type`, `delivery.attempt`, `http.response.status_code`, `result`). Outgoing webhooks carry no `traceparent` (trace ids stay inside). Logs carry `endpoint_id`, `delivery_id` and the event id, never secrets, keys or response bodies; an API key appears only as its prefix.
 
 Paying a match is a `market.reward` span (`match.id`, `reward.players`, `reward.coins`, `reward.duplicate`) under the agent's consumer span for `game.matches.v1`, so the trace starts at the game server's `game.match.end`; its `CoinsCredited` events are published under that trace by the relay.
 

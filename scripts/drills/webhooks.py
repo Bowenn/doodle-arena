@@ -41,6 +41,9 @@ from google.protobuf.timestamp_pb2 import Timestamp
 GW = "http://localhost:8080"
 RECEIVER = "http://localhost:9000"
 KAFKA = os.environ.get("KAFKA_BROKERS", "localhost:9094")
+# Compose publishes Kafka on 127.0.0.1 only and the broker advertises "localhost", which
+# librdkafka may resolve to ::1 first: stay on IPv4.
+KAFKA_CONF = {"bootstrap.servers": KAFKA, "broker.address.family": "v4"}
 
 
 def http(
@@ -91,7 +94,7 @@ def publish_match(players: list[str]) -> str:
             ],
         )
     )
-    producer = Producer({"bootstrap.servers": KAFKA})
+    producer = Producer(KAFKA_CONF)
     producer.produce(
         "game.matches.v1", key=b"r_webhooks_drill", value=event.SerializeToString()
     )
@@ -113,7 +116,7 @@ def wait(what: str, timeout: float, check):  # type: ignore[no-untyped-def]
 def find_dead_letter(delivery_id: str) -> Any:
     consumer = Consumer(
         {
-            "bootstrap.servers": KAFKA,
+            **KAFKA_CONF,
             "group.id": "webhooks-drill-" + uuid.uuid4().hex,
             "enable.auto.commit": False,
         }

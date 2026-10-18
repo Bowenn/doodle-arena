@@ -95,8 +95,8 @@ Owns the Postgres database `auth`.
 - `/refresh` and `/logout` are cookie-authenticated POSTs. Besides SameSite=Strict, they refuse any `Origin` other than the web app's. A request without an `Origin` header is allowed: SameSite=Strict already keeps the cookie off every cross-site request, and requiring the header would only break clients that omit it.
 - JWT claims: `sub` (user id), `roles` (`player`, `moderator`, `admin`), `name` (the display name, which the lobby copies into join tickets so game servers can show it; a rename shows after the next refresh), `iss`, `aud`, `iat`, `exp`, `jti`. The header carries `kid`, the RFC 7638 thumbprint of the signing key.
 - Stores the minimum user data: Google subject id, display name, avatar URL and roles. No email address.
-- API keys (Stage 4) for developers who register webhooks or call the public read API. Format `da_<prefix>_<secret>`, stored as the prefix plus a hash, with scopes and `last_used_at`. Other services verify keys through an internal endpoint and cache the result briefly.
-- Internal endpoints (such as `/internal/api-keys/verify`) are served on a separate internal port that the gateway never routes.
+- API keys (task 4.7) for developers who register webhooks. Format `da_<prefix>_<secret>`: a 12-character prefix that finds the row and 32 random bytes stored only as their SHA-256 (random and long, so a plain hash is enough), with scopes (`webhooks`) and `last_used_at` (updated at most once a minute). A key is shown once; at most 10 are active per user. Other services verify keys through `/internal/api-keys/verify` (constant-time comparison; revoked keys refused) and cache the result briefly. When a rotated refresh token is replayed (theft), the user's API keys are revoked along with the session, since a stolen access token could have created one.
+- Internal endpoints (`/internal/api-keys/verify`) are served on a separate internal port, 9091 (one uvicorn on two sockets, like the AI service), that the gateway never routes and compose never publishes.
 - Each service verifies JWTs itself, against the cached JWKS: see ADR 0001 (Accepted) for the exact checks and for how the Django admin signs moderators in.
 
 ### 4.3 Lobby (Go)
@@ -190,12 +190,13 @@ Owns the Postgres database `marketplace`.
 
 Owns the Postgres database `notifier`.
 
-- Developers register webhook endpoints with an API key and choose event types. Each endpoint gets its own signing secret.
-- Consumes `SaleCompleted` (and optionally `CoinsCredited`) and delivers events as signed HTTP POST requests.
+- Developers register webhook endpoints with an API key and choose event types (`sale.completed`, `coins.credited`). Each endpoint gets its own signing secret, shown once and stored AES-256-GCM encrypted (ADR 0014). At most 10 endpoints per user.
+- Consumes `SaleCompleted` and `CoinsCredited` (group `notifier`, from the newest offset) and delivers each to the endpoints of the users it involves only: seller, buyer and royalty recipients of a sale, the credited user of a credit (ADR 0014). The body is `{id, type, created, data}`, with `data` a plain JSON object (numbers as numbers, RFC 3339 times).
 - Signature header: `Doodle-Signature: t=<unix-seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>">`. A `Doodle-Event-Id` header lets receivers dedupe. Receivers should reject timestamps older than 5 minutes.
-- Retries use exponential backoff with full jitter (base 2 seconds, cap 30 minutes, at most 8 attempts) and 5-second timeouts. After the last attempt, the delivery is marked `DEAD` and published to `notifier.dlq.v1`.
-- The delivery log can be queried over REST.
-- Endpoint URLs come from outside users, so the notifier blocks server-side request forgery: it resolves the host at send time and refuses loopback, private, link-local (including `169.254.169.254`) and unique-local addresses, and it doesn't follow redirects. Production endpoints must use HTTPS.
+- Retries use exponential backoff with full jitter (base 2 seconds, cap 30 minutes, at most 8 attempts: the wait after the n-th failure is uniform in [0, min(30 min, 2 s × 2^(n−1)))) and 5-second timeouts. After the last attempt, the delivery is marked `DEAD` and published to `notifier.dlq.v1`.
+- Deliveries live in Postgres: one row per (endpoint, event), which is the queue and the log at once (ADR 0014). Workers claim due rows with `FOR UPDATE SKIP LOCKED` and a 60-second lease; each attempt is logged with its status code, a short error (never the response body) and duration. The delivery log can be queried over REST.
+- Headers: `Doodle-Signature`, `Doodle-Event-Id` (dedupe on it: delivery is at least once), `Doodle-Event-Type`, `Doodle-Delivery-Id`.
+- Endpoint URLs come from outside users, so the notifier blocks server-side request forgery: it resolves the host at send time, refuses loopback, private, carrier-grade NAT, link-local (including `169.254.169.254`), unique-local, multicast and NAT64 addresses (IPv4-mapped addresses judged by their IPv4 address, IPv6 zones stripped first), dials the address it checked (so DNS rebinding can't swap it), and doesn't follow redirects. Endpoints must use HTTPS. Locally, only the hostnames in `NOTIFIER_ALLOWED_PRIVATE_HOSTS` (the `webhook-receiver` test endpoint) may resolve to private addresses and use http.
 
 ### 4.8 AI service (FastAPI)
 
@@ -294,7 +295,7 @@ Auth:
 - `GET /api/auth/google/login` and `GET /api/auth/google/callback` (no JWT)
 - `POST /api/auth/refresh` (refresh cookie), `POST /api/auth/logout`, `GET /api/auth/me`
 - `GET /api/auth/.well-known/jwks.json` (public)
-- `POST`, `GET`, `DELETE /api/auth/api-keys` (Stage 4)
+- `POST /api/auth/api-keys` takes `{name, scopes: ["webhooks"]}` and returns `201 {id, name, prefix, scopes, created_at, last_used_at, key}` (the key appears only here; `Cache-Control: no-store`). `GET /api/auth/api-keys` returns `{api_keys: [...]}` without keys; `DELETE /api/auth/api-keys/{id}` revokes (`204`, or `404 API_KEY_NOT_FOUND`). `400 INVALID_SCOPE`, `409 TOO_MANY_API_KEYS` (10 active). JWT-authenticated.
 
 Lobby:
 
@@ -331,8 +332,10 @@ Marketplace:
 
 Notifier (authenticated with an API key):
 
-- `POST`, `GET`, `DELETE /api/notifier/endpoints`
-- `GET /api/notifier/endpoints/{id}/deliveries`, `POST /api/notifier/endpoints/{id}/test`
+- `Authorization: Bearer da_…` with the `webhooks` scope: `401 UNAUTHENTICATED` without a valid key, `403 FORBIDDEN` without the scope, `503 AUTH_UNAVAILABLE` when auth can't be asked. A key acts as its owner; another owner's endpoint is `404 ENDPOINT_NOT_FOUND`.
+- `POST /api/notifier/endpoints` takes `{url, event_types}` and returns `201 {id, url, event_types, created_at, secret}` (the secret appears only here). `400 INVALID_URL`, `400 INVALID_EVENT_TYPES`, `409 TOO_MANY_ENDPOINTS` (10). `GET` lists `{endpoints}`; `DELETE /api/notifier/endpoints/{id}` deletes it and cancels its pending deliveries (`204`).
+- `GET /api/notifier/endpoints/{id}/deliveries?limit=<1..50>&cursor=` returns `{deliveries: [{id, event_id, event_type, status (PENDING, SUCCEEDED, DEAD, CANCELLED), attempts, last_status_code, last_error, next_attempt_at, created_at, finished_at, attempt_log: [{attempt, status_code, error, duration_ms, at}]}], next_cursor}`, newest first.
+- `POST /api/notifier/endpoints/{id}/test` queues a `ping` event to that endpoint and returns `202 {delivery_id, event_id}`.
 
 ### 6.4 WebSocket protocol
 
@@ -442,8 +445,8 @@ Locally, the Stripe CLI forwards the two checkout events to the gateway (`stripe
 
 ### 7.10 Outgoing webhooks
 
-1. `SaleCompleted` reaches the notifier, which finds every endpoint subscribed to that event type and creates a delivery row for each.
-2. It sends a signed POST. On failure it schedules a retry with backoff and jitter.
+1. `SaleCompleted` or `CoinsCredited` reaches the notifier, which finds the live endpoints, subscribed to that type, of the users the event involves, and creates a delivery row for each (`ON CONFLICT DO NOTHING` on endpoint and event, so a redelivery adds nothing), with the trace context it was queued under. Then it commits the Kafka offset.
+2. A worker claims the delivery and sends a signed POST through the SSRF-safe client. On failure it schedules a retry with backoff and jitter. Every attempt continues the event's trace.
 3. After the last attempt, the delivery becomes `DEAD`, a `DeliveryDead` event goes to `notifier.dlq.v1`, and an alert fires.
 
 ## 8. Marketplace data model and rules
@@ -647,6 +650,7 @@ Releases:
 | D38 | Kafka clients authenticate with SASL/SCRAM-SHA-512, one user per service; `StandardAuthorizer` ACLs (deny by default) let only each topic's producer write it and only its consumers read it and use their own groups; Kafka gets its own Compose network; `SASL_SSL` in AWS (ADR 0013) | Only the game server can mint coins through `MatchFinished` and only assets can mint drawings; configuration-only client changes and the same secret pattern as Postgres; the ACLs stay if the mechanism later becomes mTLS or MSK IAM |
 | D39 | Coin packs live in config and are priced inline in Stripe Checkout; checkout takes an Idempotency-Key (ADR 0012) with a derived Stripe idempotency key; the webhook credits the coins recorded at checkout, deduped by Stripe event id and by the ledger key `stripe:<session_id>`; tests run against stripe-mock | Every environment works without setting up Stripe Products; a retried click gets the same session; a redelivered or second event never pays twice; the API calls are checked against Stripe's real shapes in CI |
 | D40 | Royalties go to the drawing's authors who are neither the seller nor the buyer: 10 % floored, split in whole coins with the remainder to the first in drawing order, zero shares left out | One rule for solo and co-drawn drawings; nobody pays themselves; integer math whose shares always add up to the price |
+| D41 | API keys in auth (`da_<prefix>_<secret>`, SHA-256 of the secret, verified on internal port 9091, revoked on refresh-token theft); webhooks only for the owner's own events, queued and logged in a Postgres table, secrets AES-256-GCM encrypted, a hostname allow-list for the local test receiver (ADR 0014) | Developers integrate with their own account and nobody else's; delivery is durable and inspectable; a database copy can't forge webhooks; the SSRF guard is never switched off |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 

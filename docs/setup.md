@@ -58,6 +58,7 @@ Put secrets in `.env`, which is gitignored. `.env.example` lists the variable na
 | JWT signing key (RSA 2048) | `scripts/gen-jwt-key.sh` creates `secrets/jwt-private.pem` (gitignored); `make up` runs it, and compose mounts it into auth as a secret | Stage 1 | none |
 | Join-ticket signing key (Ed25519, ADR 0005) | `scripts/gen-ticket-key.sh` creates `secrets/ticket-private.pem` and `secrets/ticket-public.pem` (gitignored); `make up` runs it, and compose mounts the private key only into the lobby, and the public key into both game servers | Stage 2 | none |
 | OAuth state cookie secret | `make up` generates it in `.env` | Stage 1 | `OAUTH_STATE_SECRET` |
+| Webhook secret encryption key (notifier, ADR 0014) | `make up` generates it in `.env` | Stage 4 | `NOTIFIER_SECRET_KEY` (random, 32+ characters; losing it makes registered endpoints' secrets unreadable) |
 | Stripe account in test mode (or a sandbox); test keys only | Stripe Dashboard | Stage 4 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (printed by `stripe listen`) |
 | Discord channel webhook for alerts | Discord channel settings, Integrations | Stage 5 | `DISCORD_ALERT_WEBHOOK_URL` |
 | AWS account with a budget alarm set first | AWS console | Stage 5 | AWS CLI profile; never commit keys |
