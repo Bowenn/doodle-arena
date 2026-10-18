@@ -53,12 +53,14 @@ Keep this list accurate:
 - `make up` / `make down`: start or stop the local stack (`infra/docker-compose.yml`). The first `make up` creates `.env` with random local passwords.
 - `make smoke`: checks every service's `/healthz` through the gateway (`http://localhost:8080/healthz/<service>`).
 - `make telemetry-check`: one request with a known trace id must reach Tempo and Loki, and every service must export metrics (Grafana: `http://localhost:3000`).
+- `make pipeline-check`: one `RoundFinished` in, then an approved drawing, its image and its `DrawingApproved` out (CI's stack job runs it). Needs the AI stub to approve.
 - `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
 - `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows, `s=secrets` scans the git history with gitleaks), `make logs s=<service>` (`s=game-server` follows both instances, `s=assets` the web process, the consumer, the Celery worker, the outbox relay and beat), `make ps`.
 - CI (`.github/workflows/`) runs the same `scripts/lint.sh` and `scripts/test.sh` per service, so `make lint s=<svc> && make test s=<svc>` predicts CI. Pin new actions to a full commit SHA with the version in a comment.
 - `make proto`: lint `proto/`, regenerate Go, Java and Python code into `proto/gen/`, and build it. `make test s=proto` checks without regenerating.
 - `scripts/fake-events.sh [-match-id <id>] [-dry-run]`: publish a fake `RoundFinished` and `MatchFinished` (and upload the stroke log). Read events back with `(cd tools/eventctl && go run . decode -topic <topic> -n <k>)`.
 - `scripts/grant-role.sh <user_id> moderator`: give a local user a role (the user id is `id` in `/api/auth/me`); it reaches their next access token. Moderators open the Django admin at `http://localhost:8080/admin/` (Google sign-in through the web app's `/moderate`).
+- `docker compose -f infra/docker-compose.yml --env-file .env exec assets python manage.py backfill_decision_events [--dry-run]`: write the missing `DrawingApproved`/`DrawingRejected` for drawings decided before the outbox existed (once, idempotent).
 - `scripts/ai-mode.sh [approve|reject|review|fail] [delay_ms] [failure_rate]`: show or change the AI moderation stub's behaviour until the ai container restarts (for example `scripts/ai-mode.sh fail` to test the review-queue fallback).
 - Drills against `make up` (they need `~/.docker/bin` on PATH; in a worktree, set `DRILL_JWT_KEY` to the main checkout's `secrets/jwt-private.pem` instead of copying it):
   - `uv run --project services/auth --with websockets python scripts/drills/failover.py kill|pause [n]`: kill or freeze the room's game server mid-round and measure the resume.
@@ -71,7 +73,7 @@ Keep this list accurate:
 1. Humans own the architecture. If a task needs a decision the design doc doesn't cover (a new service or datastore, a different technology, a contract change), stop and ask. Record each decision as an ADR (use `/adr`).
 2. Technology choices are deliberate. Never swap one out to make a task easier, for example Kafka for direct HTTP calls, Flink for a plain consumer, or Postgres for SQLite.
 3. Contracts first: change `proto/` before the code that uses it. Changes are additive; never reuse or renumber a field. Regenerate with `make proto`.
-4. Database per service. A service never reads or writes another service's database, bucket or Redis key prefix. Data crosses services through Kafka events, gRPC or REST.
+4. Database per service. A service never reads or writes another service's database, bucket or Redis key prefix. Data crosses services through Kafka events, gRPC or REST. The one deliberate exception is the claim check: assets reads the stroke logs the game server puts in `round-logs` (design doc, D13).
 5. Simple, readable code beats clever code. Bugs are acceptable outside the critical paths below, but the critical paths must be correct and tested.
 6. Work in small steps on a branch named `stage-<n>/<task-id>-<short-name>`. Make one commit per working step, using Conventional Commits in English (for example `feat(marketplace): add purchase transaction`).
 7. Write all code, comments, docs and commit messages in English.

@@ -36,6 +36,8 @@ Configuration is the standard `OTEL_*` environment, set once in `infra/docker-co
 | Java (marketplace) | OpenTelemetry Java agent, pinned and checksum-verified in the Dockerfile | the agent exports logback records; trace ids come from the MDC |
 | Gateway (Nginx) | `ngx_otel_module`: a server span per proxied API request, propagated upstream | no: its JSON access log (with `trace_id`) stays in stdout |
 
+`service.instance.id` names one process, not one container: gunicorn's workers and Celery's pool processes append their own suffix (`assets-1-w1`, `assets-worker-1-p0`), because each exports its own cumulative counters, and under one id Prometheus sees a single series that keeps resetting.
+
 Health checks and the Vite dev-server assets are not traced, except in marketplace: the Java agent has no simple path exclusion, so its container health check produces a small trace every few seconds until tail sampling arrives (Stage 6). Browser telemetry (Web Vitals, errors, fetch spans) comes with task 5.4. `make telemetry-check` proves the pipeline end to end: a request with a known trace id must show up in Tempo (gateway and auth spans) and in Loki (an auth log line with that `trace_id`), and every service must export metrics. CI runs it in `stack.yml`.
 
 ## 2. Logging
@@ -98,7 +100,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `assets.outbox.lag` | Gauge (s) | – (age of the oldest outbox event Kafka hasn't confirmed; 0 when drained) | assets (relay) |
 | `assets.events.published` | Counter | `result` = success, failed (left in the outbox and retried) | assets (relay) |
 | `assets.moderation` | Counter | `result` = approved, rejected, retry, manual | assets (`manual`: sent to the review queue, after the last failed call, a refusal, or an unsure AI) |
-| `ai.moderation.requests` | Counter | `decision` = approve, reject, review, unavailable, invalid | ai |
+| `ai.moderation.requests` | Counter | `decision` = approve, reject, review, unavailable, invalid, abandoned (the caller left before the answer) | ai |
 | `market.purchases` | Counter | `result` = success, conflict, insufficient_funds | marketplace |
 | `market.idempotency.replays` | Counter | `operation` | marketplace |
 | `market.stripe.webhooks` | Counter | `result` = processed, duplicate, invalid_signature | marketplace |
