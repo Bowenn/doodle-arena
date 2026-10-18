@@ -5,6 +5,8 @@ connection pool nor pymongo's monitor threads survive a fork. Every call has a t
 """
 
 import threading
+import time
+from collections import OrderedDict
 from typing import Any
 
 import boto3
@@ -29,13 +31,18 @@ class StrokeLogMissing(Exception):
 # store, not the drawing, so it must never mark a drawing failed.
 TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (BotoCoreError, ClientError, PyMongoError)
 
-# How long a presigned image URL works. Short, so a leaked URL soon stops working; the API hands
-# out fresh ones on every read.
+# How long a presigned image URL works. Short, so a leaked URL soon stops working.
 PRESIGN_SECONDS = 900
+# The same URL is handed out again for this long, so a browser that already has the image finds it
+# in its cache (a fresh signature is a new URL); every URL still has at least 5 minutes left.
+PRESIGN_REUSE_SECONDS = 600
+PRESIGN_CACHE_SIZE = 10_000
 
 _lock = threading.Lock()
 _s3: Any = None
 _signer: Any = None
+# key -> (url, when it was signed); the oldest entries go first once it's full.
+_presigned: OrderedDict[str, tuple[str, float]] = OrderedDict()
 _replays: Collection[dict[str, Any]] | None = None
 
 
@@ -68,7 +75,12 @@ def presigned_url(key: str) -> str:
     """A short-lived GET URL for a drawings object, signed for the address browsers use.
     Signing is local: no request to the store."""
     global _signer
+    now = time.monotonic()
     with _lock:
+        cached = _presigned.get(key)
+        if cached and now - cached[1] < PRESIGN_REUSE_SECONDS:
+            _presigned.move_to_end(key)
+            return cached[0]
         if _signer is None:
             _signer = _client(settings.S3_PUBLIC_ENDPOINT)
         signer = _signer
@@ -77,6 +89,11 @@ def presigned_url(key: str) -> str:
         Params={"Bucket": settings.DRAWINGS_BUCKET, "Key": key},
         ExpiresIn=PRESIGN_SECONDS,
     )
+    with _lock:
+        _presigned[key] = (url, now)
+        _presigned.move_to_end(key)
+        while len(_presigned) > PRESIGN_CACHE_SIZE:
+            _presigned.popitem(last=False)
     return url
 
 
@@ -101,6 +118,7 @@ def reset_clients_for_tests() -> None:
         _s3 = None
         _signer = None
         _replays = None
+        _presigned.clear()
 
 
 def _is_missing(e: ClientError) -> bool:

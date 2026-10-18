@@ -201,3 +201,37 @@ def test_the_replay_and_the_presigned_images_load(
     assert replay["schema_version"] == 1
     assert replay["strokes"][0]["points"][0] == [1000, 1000, 0]
     assert "_id" not in replay
+
+
+def test_image_urls_stay_the_same_for_a_while_so_browsers_can_cache_them(
+    client: Client, as_user: Any, make_drawing: Any
+) -> None:
+    storage.reset_clients_for_tests()
+    d = approved(make_drawing)
+
+    first = client.get(f"{API}/{d.id}", headers=as_user("u_a")).json()
+    again = client.get(f"{API}/{d.id}", headers=as_user("u_b")).json()
+
+    assert (again["image_url"], again["thumb_url"]) == (first["image_url"], first["thumb_url"])
+
+
+def test_presigned_urls_are_reused_then_signed_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    signed: list[str] = []
+
+    class Signer:
+        def generate_presigned_url(self, op: str, Params: dict[str, str], ExpiresIn: int) -> str:
+            signed.append(Params["Key"])
+            return f"url-{len(signed)}"
+
+    storage.reset_clients_for_tests()
+    monkeypatch.setattr(storage, "_client", lambda endpoint: Signer())
+
+    assert storage.presigned_url("k") == "url-1"
+    assert storage.presigned_url("k") == "url-1"
+    assert storage.presigned_url("other") == "url-2"
+
+    later = time.monotonic() + storage.PRESIGN_REUSE_SECONDS + 1
+    monkeypatch.setattr("drawings.storage.time.monotonic", lambda: later)
+    assert storage.presigned_url("k") == "url-3"  # still at least 5 minutes of validity each
