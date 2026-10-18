@@ -40,3 +40,7 @@ Option B, with a fence: each claim gets a random `claim_token`, and the work's t
 - Easier: task 4.5 reuses the same claim and completion around its Stripe call; a stuck key is visible in a table and frees itself.
 - Harder: three transactions per request instead of one (claim, work, and for a business outcome a third), and a fencing rule every future operation must keep: complete the key inside the work's transaction.
 - Watch: a crashed request blocks its own retries for up to 30 seconds (409); `market.idempotency.replays` shows how often clients retry.
+
+## Implementation note (2026-10-18, task 4.R1)
+
+Until 4.R1 the checkout called Stripe inside the work's transaction, holding a pooled connection for the whole call. `IdempotencyService.execute` now has an optional call step between the claim and the work: it runs with no transaction open, and its result goes to the work, which records it and completes the key. The Stripe idempotency key is derived per claim (it includes the claim token), not per key: Stripe's API v1 replays a saved response, a 500 included, for 24 hours, so a key-derived Stripe key would fail every retry of a checkout for a day. A takeover therefore creates a second session, but only the claim holder's is recorded and returned.
