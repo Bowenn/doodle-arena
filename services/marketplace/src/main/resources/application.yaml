@@ -12,6 +12,9 @@ spring:
     password: ${DB_PASSWORD:}
     hikari:
       maximum-pool-size: 10
+  jackson:
+    # JSON fields are snake_case, like every other service's API (design doc, section 6.3).
+    property-naming-strategy: SNAKE_CASE
   flyway:
     # Migrations run at startup; Flyway's advisory lock keeps two starting instances apart.
     locations: classpath:db/migration
