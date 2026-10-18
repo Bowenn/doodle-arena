@@ -56,6 +56,9 @@ x-assets-env: &assets-env
   S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
   S3_SECRET_KEY: ${S3_SECRET_KEY:?}
   MONGO_URL: mongodb://assets:${MONGO_ASSETS_PASSWORD:?}@mongo:27017/assets
+  # Moderation (design doc 4.8). Not a startup dependency: while the AI service is down,
+  # drawings retry and then wait in the review queue.
+  AI_URL: http://ai:8080
 
 # Go services check their own /healthz (their runtime image has no shell).
 x-go-healthcheck: &go-healthcheck
@@ -235,6 +238,11 @@ services:
       SERVICE_INSTANCE_ID: ai-1
       OTEL_SERVICE_NAME: ai
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=ai-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      # The moderation stub's starting behaviour. scripts/ai-mode.sh changes it at runtime
+      # through the internal port 9091, which is never published or routed.
+      MODERATION_MODE: approve
+      MODERATION_DELAY_MS: "0"
+      MODERATION_FAILURE_RATE: "0"
     depends_on:
       otel-lgtm:
         condition: service_healthy
