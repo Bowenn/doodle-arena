@@ -94,8 +94,9 @@ def _uuid(value: str | None) -> uuid.UUID | None:
 @require_GET
 @authenticated
 def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
-    """GET /api/assets/drawings?author_id=&limit=&cursor=: approved drawings, newest first.
-    With author_id, that author's drawings (their own, in any state, when it's the caller)."""
+    """GET /api/assets/drawings?author_id=&match_id=&limit=&cursor=: approved drawings, newest
+    first. With author_id, that author's drawings; with match_id, that match's. Either way the
+    caller's own drawings are included in any state."""
     try:
         limit = int(request.GET.get("limit", DEFAULT_LIMIT))
     except ValueError:
@@ -107,12 +108,16 @@ def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
     if cursor_raw and cursor is None:
         return error(request, 400, "INVALID_REQUEST", "bad cursor")
     author = request.GET.get("author_id", "")
-    if len(author) > 64:
-        return error(request, 400, "INVALID_REQUEST", "bad author_id")
+    match = request.GET.get("match_id", "")
+    if len(author) > 64 or len(match) > 64:
+        return error(request, 400, "INVALID_REQUEST", "bad author_id or match_id")
 
-    drawings = visible(claims) if author else Drawing.objects.filter(status=Status.APPROVED)
+    filtered = bool(author or match)
+    drawings = visible(claims) if filtered else Drawing.objects.filter(status=Status.APPROVED)
     if author:
         drawings = drawings.filter(author_ids__contains=[author])
+    if match:
+        drawings = drawings.filter(match_id=match)  # the (match_id, round_no) unique index
     if cursor is not None:
         drawings = drawings.filter(id__lt=cursor)  # keyset: UUIDv7 ids sort by creation time
     page = list(drawings.order_by("-id")[: limit + 1])

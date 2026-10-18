@@ -109,8 +109,31 @@ def test_an_authors_list_includes_their_own_undecided_drawings(
     assert str(pending.id) not in str(other)
 
 
+def test_a_matchs_drawings(client: Client, as_user: Any, make_drawing: Any) -> None:
+    approved(make_drawing, match_id="m_one", round_no=1)
+    mine = make_drawing(
+        match_id="m_one", round_no=2, author_ids=["u_cyd"], initial_owner_id="u_cyd"
+    )
+    approved(make_drawing, match_id="m_two", round_no=1)
+
+    as_cyd = client.get(f"{API}?match_id=m_one", headers=as_user("u_cyd")).json()["drawings"]
+    as_other = client.get(f"{API}?match_id=m_one", headers=as_user("u_ada")).json()["drawings"]
+
+    assert {d["round_no"] for d in as_cyd} == {1, 2}
+    assert [d["round_no"] for d in as_other] == [1]
+    assert str(mine.id) not in str(as_other)
+
+
 @pytest.mark.parametrize(
-    "query", ["limit=0", "limit=51", "limit=x", "cursor=nope", "author_id=" + "u" * 65]
+    "query",
+    [
+        "limit=0",
+        "limit=51",
+        "limit=x",
+        "cursor=nope",
+        "author_id=" + "u" * 65,
+        "match_id=" + "m" * 65,
+    ],
 )
 def test_bad_queries_are_refused(client: Client, as_user: Any, query: str) -> None:
     resp = client.get(f"{API}?{query}", headers=as_user("u_x"))
