@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -34,11 +35,15 @@ import com.doodlearena.marketplace.telemetry.MarketMetrics;
  * claim token and a lease. If the key exists: another request body is 422 IDEMPOTENCY_KEY_REUSED;
  * DONE replays the stored answer; IN_PROGRESS within its lease is 409 IDEMPOTENCY_KEY_IN_PROGRESS;
  * IN_PROGRESS past its lease (the request crashed or hangs) is taken over with a new token.</li>
+ * <li><b>Call</b> (optional), with no transaction open and no connection held: a call to another
+ * system, such as Stripe, whose wait mustn't tie up the connection pool. It must be safe to repeat
+ * under the same key (Stripe's idempotency key, derived from ours), since a request that takes the
+ * claim over calls again.</li>
  * <li><b>Work</b>, in the operation's own transaction, which ends by completing the key: an UPDATE
  * that matches only this claim's token. If the claim was taken over meanwhile, it matches nothing,
  * and the whole transaction rolls back: the work happens at most once.</li>
- * <li>A business outcome (403, 404, 409 or 422 from the work) is stored the same way, after the
- * work rolled back, and replayed like a success. Anything else releases the claim, so a retry can
+ * <li>A business outcome (403, 404, 409 or 422 from the call or the work) is stored the same way,
+ * after the work rolled back, and replayed like a success. Anything else releases the claim, so a retry can
  * start at once.</li>
  * </ol>
  */
@@ -75,6 +80,17 @@ public class IdempotencyService {
 	 */
 	public IdempotentResponse execute(String userId, String key, String operation, String requestHash, String requestId,
 			HttpStatus successStatus, Function<Claim, Object> work) {
+		return execute(userId, key, operation, requestHash, requestId, successStatus, (claim) -> null,
+				(claim, nothing) -> work.apply(claim));
+	}
+
+	/**
+	 * Like {@link #execute(String, String, String, String, String, HttpStatus, Function)}, with a
+	 * {@code call} that runs after the claim and outside any transaction; its result is passed to
+	 * {@code work}, which runs inside the transaction that completes the key.
+	 */
+	public <T> IdempotentResponse execute(String userId, String key, String operation, String requestHash,
+			String requestId, HttpStatus successStatus, Function<Claim, T> call, BiFunction<Claim, T, Object> work) {
 		if (key == null || !KEY.matcher(key).matches()) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "IDEMPOTENCY_KEY_REQUIRED",
 					"an Idempotency-Key header of 1 to 255 printable characters is required");
@@ -87,8 +103,9 @@ public class IdempotencyService {
 		}
 		Claim claim = (Claim) claimed;
 		try {
+			T called = call.apply(claim);
 			String body = this.tx.execute((status) -> {
-				String text = this.json.writeValueAsString(work.apply(claim));
+				String text = this.json.writeValueAsString(work.apply(claim, called));
 				complete(claim, successStatus.value(), text);
 				return text;
 			});

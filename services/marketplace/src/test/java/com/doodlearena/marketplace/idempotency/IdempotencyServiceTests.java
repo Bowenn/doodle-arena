@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.doodlearena.marketplace.api.ApiException;
 import com.doodlearena.marketplace.ledger.AccountRef;
@@ -66,6 +67,34 @@ class IdempotencyServiceTests {
 		assertThat(second.status()).isEqualTo(201);
 		assertThat(second.body()).isEqualTo(first.body());
 		assertThat(this.fixtures.balance(user)).isEqualTo(10);
+	}
+
+	/** The call step runs with no transaction; a business outcome from it is stored like the work's. */
+	@Test
+	void callRunsOutsideTheTransactionAndItsOutcomeIsStored() {
+		String user = "u_" + UUID.randomUUID();
+		String key = UUID.randomUUID().toString();
+		AtomicInteger calls = new AtomicInteger();
+		AtomicInteger works = new AtomicInteger();
+		List<Boolean> inTransaction = new ArrayList<>();
+
+		for (int i = 0; i < 2; i++) {
+			IdempotentResponse response = this.idempotency.execute(user, key, "test", HASH, "req", HttpStatus.CREATED,
+					(claim) -> {
+						calls.incrementAndGet();
+						inTransaction.add(TransactionSynchronizationManager.isActualTransactionActive());
+						throw new ApiException(HttpStatus.CONFLICT, "SOLD_OUT", "nothing left");
+					}, (claim, called) -> {
+						works.incrementAndGet();
+						return Map.of();
+					});
+			assertThat(response.status()).isEqualTo(409);
+			assertThat(response.body()).contains("SOLD_OUT");
+			assertThat(response.replayed()).isEqualTo(i == 1);
+		}
+		assertThat(calls).hasValue(1);
+		assertThat(works).hasValue(0);
+		assertThat(inTransaction).containsExactly(false);
 	}
 
 	@Test
