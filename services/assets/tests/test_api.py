@@ -142,8 +142,37 @@ def test_bad_queries_are_refused(client: Client, as_user: Any, query: str) -> No
     assert resp.json()["error"]["code"] == "INVALID_REQUEST"
 
 
-def test_a_post_is_not_allowed(client: Client, as_user: Any) -> None:
-    assert client.post(API, headers=as_user("u_x")).status_code == 405
+def test_a_post_is_not_allowed(as_user: Any) -> None:
+    # A client that enforces CSRF like a browser does: the API answers 405 in JSON, not with
+    # Django's CSRF page, because it never relies on cookies.
+    resp = Client(enforce_csrf_checks=True).post(API, headers=as_user("u_x"))
+
+    assert resp.status_code == 405
+    assert resp.json()["error"]["code"] == "METHOD_NOT_ALLOWED"
+    assert resp["Allow"] == "GET, HEAD"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/assets/nothing-here",
+        f"{API}/not-a-uuid",
+        f"{API}/01a14d4c-3700-714c-97af-6822304866ec/x",
+    ],
+)
+def test_unknown_api_paths_answer_in_json(client: Client, path: str) -> None:
+    resp = client.get(path)
+
+    assert resp.status_code == 404
+    assert resp["Content-Type"] == "application/json"
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_the_admin_keeps_djangos_404_page(client: Client) -> None:
+    resp = client.get("/admin/nothing-here/")
+
+    assert resp.status_code in (302, 404)  # signed out: the sign-in redirect comes first
+    assert resp["Content-Type"].startswith("text/html")
 
 
 @pytest.mark.usefixtures("stores")

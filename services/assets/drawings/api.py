@@ -14,7 +14,9 @@ from typing import Any
 
 from django.db.models import Q, QuerySet
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.views.decorators.http import require_GET
+from django.views.decorators.csrf import csrf_exempt
+from django.views.defaults import page_not_found as django_page_not_found
+from django.views.defaults import server_error as django_server_error
 from opentelemetry import trace
 
 from config.authn import Claims, InvalidTokenError, bearer_token, verifier
@@ -36,10 +38,17 @@ def error(request: HttpRequest, status: int, code: str, message: str) -> JsonRes
 
 
 def authenticated(view: View) -> View:
-    """Verifies the bearer token and passes its claims to the view."""
+    """A read-only API endpoint: GET only, the bearer token verified, its claims passed to the
+    view. Exempt from CSRF: the API authenticates with the Authorization header, never a cookie,
+    so a cross-site page can't make a request that carries the user's identity."""
 
+    @csrf_exempt
     @functools.wraps(view)
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if request.method not in ("GET", "HEAD"):
+            refused = error(request, 405, "METHOD_NOT_ALLOWED", "only GET is allowed here")
+            refused["Allow"] = "GET, HEAD"
+            return refused
         token = bearer_token(request.headers.get("Authorization", ""))
         if token is None:
             return error(request, 401, "UNAUTHENTICATED", "a bearer token is required")
@@ -91,7 +100,6 @@ def _uuid(value: str | None) -> uuid.UUID | None:
         return None
 
 
-@require_GET
 @authenticated
 def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
     """GET /api/assets/drawings?author_id=&match_id=&limit=&cursor=: approved drawings, newest
@@ -131,7 +139,6 @@ def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
     )
 
 
-@require_GET
 @authenticated
 def get_drawing(request: HttpRequest, claims: Claims, drawing_id: uuid.UUID) -> HttpResponse:
     drawing = visible(claims).filter(pk=drawing_id).first()
@@ -140,7 +147,6 @@ def get_drawing(request: HttpRequest, claims: Claims, drawing_id: uuid.UUID) -> 
     return JsonResponse(represent(drawing))
 
 
-@require_GET
 @authenticated
 def get_replay(request: HttpRequest, claims: Claims, drawing_id: uuid.UUID) -> HttpResponse:
     """The stored replay: every stroke with its points as [x, y, t_ms], undone strokes flagged."""
@@ -153,3 +159,17 @@ def get_replay(request: HttpRequest, claims: Claims, drawing_id: uuid.UUID) -> H
     if started is not None:
         doc["round_started_at"] = started.isoformat()
     return JsonResponse({"drawing_id": str(drawing_id), **doc})
+
+
+def not_found(request: HttpRequest, exception: Exception | None = None) -> HttpResponse:
+    """handler404: the shared JSON error for API paths, Django's page elsewhere (the admin)."""
+    if request.path.startswith("/api/"):
+        return error(request, 404, "NOT_FOUND", "no such resource")
+    return django_page_not_found(request, exception or Exception())
+
+
+def server_error(request: HttpRequest) -> HttpResponse:
+    """handler500: the shared JSON error for API paths. The exception itself is in the logs."""
+    if request.path.startswith("/api/"):
+        return error(request, 500, "INTERNAL", "something went wrong; try again")
+    return django_server_error(request)

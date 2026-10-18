@@ -31,3 +31,7 @@ urlpatterns = [
     path("api/assets/drawings/<uuid:drawing_id>", api.get_drawing),
     path("api/assets/drawings/<uuid:drawing_id>/replay", api.get_replay),
 ]
+
+# The shared JSON error format (design doc 6.3) for API paths; Django's pages for the admin.
+handler404 = "drawings.api.not_found"
+handler500 = "drawings.api.server_error"
