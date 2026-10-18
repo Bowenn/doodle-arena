@@ -104,7 +104,7 @@ class LedgerSchemaTests {
 			.update()).hasMessageContaining("append-only");
 		assertThatThrownBy(() -> this.db.sql("DELETE FROM ledger_transactions WHERE tx_id = ?").param(id).update())
 			.hasMessageContaining("append-only");
-		assertThatThrownBy(() -> this.db.sql("TRUNCATE ledger_entries, ledger_transactions").update())
+		assertThatThrownBy(() -> this.db.sql("TRUNCATE ledger_entries, ledger_transactions CASCADE").update())
 			.hasMessageContaining("append-only");
 	}
 
