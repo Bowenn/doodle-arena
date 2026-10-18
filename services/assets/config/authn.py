@@ -96,6 +96,7 @@ class Jwks:
         self._cache: tuple[dict[str, RSAPublicKey], float] | None = None
         self._lock = threading.Lock()  # one fetch at a time
         self._next_fetch = 0.0
+        self._failures = 0  # consecutive failed fetches
 
     def key(self, kid: str) -> RSAPublicKey | None:
         k, age = self._cached(kid)
@@ -139,9 +140,13 @@ class Jwks:
             keys = self._fetch()
         except Exception:
             jwks_fetches.add(1, {"reason": reason, "result": "failed"})
-            self._next_fetch = now + 1.0
+            # Retry soon, since auth may still be starting, but back off while it stays down:
+            # 1 s, 2 s, 4 s, ... up to min_refresh.
+            self._failures += 1
+            self._next_fetch = now + min(2.0 ** min(self._failures - 1, 16), self.min_refresh)
             raise
         jwks_fetches.add(1, {"reason": reason, "result": "success"})
+        self._failures = 0
         self._next_fetch = now + self.min_refresh
         self._cache = (keys, now)
         return keys

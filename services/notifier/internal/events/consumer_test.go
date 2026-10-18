@@ -121,8 +121,10 @@ func TestConsumerQueuesForOwnersOnly(t *testing.T) {
 		ds, _ := st.ListDeliveries(ctx, e.OwnerID, e.ID, uuid.Nil, 50)
 		return len(ds)
 	}
+	// Wait for every expected delivery: the two topics are consumed independently, so the
+	// credit can be stored before the sale.
 	deadline := time.Now().Add(20 * time.Second)
-	for count(creditsOnly) == 0 && time.Now().Before(deadline) {
+	for (count(sellerHook) == 0 || count(royaltyHook) == 0 || count(creditsOnly) == 0) && time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if got := []int{count(sellerHook), count(royaltyHook), count(creditsOnly), count(stranger)}; got[0] != 1 || got[1] != 1 || got[2] != 1 || got[3] != 0 {

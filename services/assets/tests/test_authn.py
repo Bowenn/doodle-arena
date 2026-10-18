@@ -2,6 +2,7 @@
 accepts and rejects exactly the tokens auth and the lobby do; and the JWKS cache's refetch and
 max-age rules."""
 
+import itertools
 import json
 import threading
 from collections.abc import Iterator
@@ -174,7 +175,7 @@ def test_the_last_good_set_is_kept_until_the_max_staleness(jwks_server: _JwksSer
     clock.advance(MAX_AGE_SECONDS)
     assert verifier.verify(VALID["token"]).user_id == VALID["sub"]
     assert jwks_server.hits == 2  # the refresh failed
-    # The next attempt waits a second, and requests meanwhile use the cached set.
+    # The next attempt waits a second (then longer), and requests meanwhile use the cached set.
     verifier.verify(VALID["token"])
     assert jwks_server.hits == 2
 
@@ -182,20 +183,36 @@ def test_the_last_good_set_is_kept_until_the_max_staleness(jwks_server: _JwksSer
     verifier.verify(VALID["token"])
     assert jwks_server.hits == 3
 
+    # Past the max staleness the set is refused, even before the next fetch is due (the second
+    # failure backed off to 2 s).
     clock.advance(1)
     with pytest.raises(InvalidTokenError):
         verifier.verify(VALID["token"])
-    assert jwks_server.hits == 4
-    # Within the retry second, still refused, without a fetch.
-    with pytest.raises(InvalidTokenError):
-        verifier.verify(VALID["token"])
-    assert jwks_server.hits == 4
+    assert jwks_server.hits == 3
 
-    # auth is back: the next fetch (a second later) restores the set.
+    # auth is back: the next fetch, 2 s after the last failure, restores the set.
     jwks_server.failing = False
     clock.advance(1)
     assert verifier.verify(VALID["token"]).user_id == VALID["sub"]
-    assert jwks_server.hits == 5
+    assert jwks_server.hits == 4
+
+
+def test_fetches_back_off_while_auth_is_down(jwks_server: _JwksServer) -> None:
+    """1 s, 2 s, 4 s, ... up to the minimum refresh interval: an outage costs auth at most one
+    fetch per interval per process."""
+    clock = _Clock()
+    jwks_server.failing = True
+    verifier = TokenVerifier(Jwks(jwks_server.url, clock=clock), DOC["issuer"])
+    fetched_at: list[float] = []
+    for _ in range(150):  # one request a second
+        hits = jwks_server.hits
+        with pytest.raises(InvalidTokenError):
+            verifier.verify(VALID["token"])
+        if jwks_server.hits != hits:
+            fetched_at.append(clock.now)
+        clock.advance(1)
+    gaps = [b - a for a, b in itertools.pairwise(fetched_at)]
+    assert gaps[:8] == [1, 2, 4, 8, 16, 30, 30, 30]
 
 
 def test_a_stale_refresh_does_not_block_other_requests(jwks_server: _JwksServer) -> None:

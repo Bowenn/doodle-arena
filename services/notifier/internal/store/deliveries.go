@@ -230,7 +230,7 @@ func (s *Store) UnpublishedDead(ctx context.Context, limit int) ([]Delivery, err
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id, endpoint_id, source_event_id, event_type, attempts, last_status_code, last_error,
 			first_attempt_at, finished_at
-		FROM deliveries WHERE status = 'DEAD' AND dead_published_at IS NULL
+		FROM deliveries WHERE status = 'DEAD' AND dead_published_at IS NULL AND event_type <> 'ping'
 		ORDER BY finished_at LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("unpublished dead: %w", err)
@@ -256,9 +256,10 @@ func (s *Store) MarkDeadPublished(ctx context.Context, ids []uuid.UUID) error {
 	return nil
 }
 
-// DeadSince counts deliveries that went DEAD after t (the notifier.dlq.size gauge).
+// DeadSince counts deliveries that went DEAD after t, test pings aside (the notifier.dlq.size
+// gauge).
 func (s *Store) DeadSince(ctx context.Context, t time.Time) (int64, error) {
 	var n int64
-	err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM deliveries WHERE status = 'DEAD' AND finished_at > $1", t).Scan(&n)
+	err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM deliveries WHERE status = 'DEAD' AND finished_at > $1 AND event_type <> 'ping'", t).Scan(&n)
 	return n, err
 }

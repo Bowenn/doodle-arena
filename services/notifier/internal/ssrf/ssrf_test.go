@@ -18,6 +18,10 @@ func TestBlockedRanges(t *testing.T) {
 		"100.64.0.1": true, "::1": true, "::": true, "fc00::1": true, "fd12:3456::1": true,
 		"fe80::1": true, "::ffff:10.0.0.1": true, "::ffff:169.254.169.254": true,
 		"64:ff9b::a00:1": true, "224.0.0.1": true, "255.255.255.255": true,
+		// Reserved and tunnelling ranges (the review of Stage 4).
+		"192.0.2.1": true, "198.51.100.7": true, "203.0.113.9": true, "2001:db8::1": true,
+		"2002:a00:1::1": true, "2001:0:4136:e378::1": true, "::a00:1": true, "::169.254.169.254": true,
+		"100::1": true,
 		// A zone must not hide a link-local or loopback address.
 		"fe80::1%eth0": true, "fe80::1%25": true, "::1%lo0": true,
 		// Public addresses go through.

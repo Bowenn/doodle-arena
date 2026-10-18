@@ -21,6 +21,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.doodlearena.marketplace.api.ApiException;
 import com.doodlearena.marketplace.ledger.AccountRef;
@@ -83,7 +85,14 @@ public class PurchaseService {
 			.startSpan();
 		try (Scope scope = span.makeCurrent()) {
 			Sale sale = buy(buyerId, listingId, span);
-			this.metrics.purchase("success");
+			// Counted once the sale is real: the idempotency completion or the commit can still
+			// roll it back.
+			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+				@Override
+				public void afterCommit() {
+					PurchaseService.this.metrics.purchase("success");
+				}
+			});
 			return sale;
 		}
 		catch (ApiException ex) {

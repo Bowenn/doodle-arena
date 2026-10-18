@@ -1,6 +1,7 @@
 """API keys (design doc 4.2): created and listed by their owner with an access token, verified by
 other services on the internal port only, stored as a hash."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -132,6 +133,22 @@ def test_at_most_ten_active_keys(client: TestClient) -> None:
     assert r.status_code == 409
     client.delete(f"/api/auth/api-keys/{keys[0]['id']}", headers=bearer(client, "u-ada"))
     create(client, "u-ada", "after a revoke")
+
+
+def test_concurrent_creates_stop_at_the_cap(db: Engine) -> None:
+    def attempt(i: int) -> bool:
+        try:
+            with db.begin() as conn:
+                api_keys.create_within_cap(conn, "u-race", f"key {i}", ["webhooks"])
+            return True
+        except api_keys.TooManyKeys:
+            return False
+
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        results = list(pool.map(attempt, range(30)))
+    assert results.count(True) == api_keys.MAX_ACTIVE_KEYS
+    with db.connect() as conn:
+        assert api_keys.active_count(conn, "u-race") == api_keys.MAX_ACTIVE_KEYS
 
 
 def test_last_used_is_updated_at_most_once_a_minute(client: TestClient, db: Engine) -> None:

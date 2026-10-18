@@ -146,6 +146,50 @@ class PurchaseApiTests extends ApiTestSupport {
 		assertThat(result.clean()).isTrue();
 	}
 
+	/**
+	 * Two players buying each other's drawings at the same moment lock the same two balance rows
+	 * in opposite request order; the sorted lock order keeps them from deadlocking.
+	 */
+	@Test
+	void crossingPurchasesDoNotDeadlock() throws Exception {
+		AccountRef ada = this.fixtures.newUserWith(10_000);
+		AccountRef bob = this.fixtures.newUserWith(10_000);
+		int rounds = 25;
+		List<String> adaSells = new ArrayList<>();
+		List<String> bobSells = new ArrayList<>();
+		for (int i = 0; i < rounds; i++) {
+			adaSells.add(list(ada, mint(ada), 10));
+			bobSells.add(list(bob, mint(bob), 10));
+		}
+		Queue<Integer> statuses = new ConcurrentLinkedQueue<>();
+		try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+			for (int i = 0; i < rounds; i++) {
+				CountDownLatch start = new CountDownLatch(1);
+				String fromAda = adaSells.get(i);
+				String fromBob = bobSells.get(i);
+				Future<?> adaBuys = pool.submit(() -> {
+					start.await();
+					statuses.add(purchase(ada, fromBob, key()).andReturn().getResponse().getStatus());
+					return null;
+				});
+				Future<?> bobBuys = pool.submit(() -> {
+					start.await();
+					statuses.add(purchase(bob, fromAda, key()).andReturn().getResponse().getStatus());
+					return null;
+				});
+				start.countDown();
+				adaBuys.get(30, TimeUnit.SECONDS);
+				bobBuys.get(30, TimeUnit.SECONDS);
+			}
+		}
+
+		assertThat(statuses).hasSize(2 * rounds).containsOnly(200);
+		// Each paid 250 and received 250.
+		assertThat(this.fixtures.balance(ada)).isEqualTo(10_000);
+		assertThat(this.fixtures.balance(bob)).isEqualTo(10_000);
+		assertThat(this.reconciliation.reconcile().clean()).isTrue();
+	}
+
 	/** M4: replaying a purchase request has no extra effect. */
 	@Test
 	void replayedPurchaseHasNoExtraEffect() throws Exception {

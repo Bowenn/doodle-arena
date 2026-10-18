@@ -75,8 +75,8 @@ func (CreditReason) EnumDescriptor() ([]byte, []int) {
 }
 
 // WalletEvent is the only message type on the topic market.wallet.v1 (key: user_id).
-// Produced by the marketplace through its transactional outbox; optionally consumed by the
-// notifier.
+// Produced by the marketplace through its transactional outbox; consumed by the notifier
+// (webhooks for coin credits).
 type WalletEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The event this message carries. Consumers skip an unset or unknown case (ADR 0004).

@@ -50,8 +50,8 @@ With KRaft, the authorizer is `org.apache.kafka.metadata.authorizer.StandardAuth
 | `game.matches.v1` | `game-server` | `marketplace`, `lobby` | `marketplace`, `lobby-leaderboard` | 2 |
 | `assets.drawings.v1` | `assets` | `marketplace` | `marketplace` | 3 |
 | `market.listings.v1` | `marketplace` | `assets` (Stage 6) | `assets` | 4 |
-| `market.sales.v1` | `marketplace` | `notifier`, `assets`, `analytics` | `notifier`, `assets`, `analytics` (its Flink group) | 4 |
-| `market.wallet.v1` | `marketplace` | `notifier` (optional) | `notifier` | 4 |
+| `market.sales.v1` | `marketplace` | `notifier`, `analytics` | `notifier`, `analytics` (its Flink group) | 4 |
+| `market.wallet.v1` | `marketplace` | `notifier` | `notifier` | 4 |
 | `notifier.dlq.v1` | `notifier` | humans (`dev-tools`) | none | 4 |
 | `live.guesses.v1` | `game-server` (relays) | `analytics` | `analytics` | 6 |
 | `live.top-guesses.v1` | `analytics` | `game-server` | one group per relay, or none (assigned partitions) | 6 |

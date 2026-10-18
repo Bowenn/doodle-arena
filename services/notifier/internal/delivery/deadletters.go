@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/webhook"
 )
 
 // DLQTopic carries DeliveryDead (design doc 6.2).
@@ -35,7 +36,9 @@ type DeadLetters struct {
 }
 
 // NewDeadLetters registers the notifier.dlq.size gauge (deliveries that went DEAD in the last
-// 24 hours, so the DeadLetters alert clears by itself once nothing new dies).
+// 24 hours, so an alert on it clears by itself once nothing new dies). Test pings are left out
+// of both the gauge and the topic: they carry no event, and a developer testing a broken
+// endpoint is not news.
 func NewDeadLetters(st *store.Store, client *kgo.Client, log *slog.Logger, every time.Duration) (*DeadLetters, error) {
 	_, err := otel.Meter("notifier").Int64ObservableGauge("notifier.dlq.size",
 		metric.WithDescription("Deliveries that went DEAD in the last 24 hours"),
@@ -91,7 +94,7 @@ func (d *DeadLetters) PublishOnce(ctx context.Context) (int, error) {
 				Producer:      "notifier",
 			},
 			DeliveryId: x.ID.String(), EndpointId: x.EndpointID.String(),
-			SourceEventId: x.SourceEventID, SourceEventType: x.EventType, Attempts: uint32(x.Attempts),
+			SourceEventId: x.SourceEventID, SourceEventType: webhook.SourceEventType(x.EventType), Attempts: uint32(x.Attempts),
 			FirstAttemptAt: timestamppb.New(*x.FirstAttemptAt), DeadAt: timestamppb.New(*x.FinishedAt),
 		}
 		if x.LastStatusCode != nil {

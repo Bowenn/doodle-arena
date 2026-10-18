@@ -74,10 +74,14 @@ public class OutboxRelay {
 
 	private final boolean enabled;
 
+	private final Duration retention;
+
 	public OutboxRelay(JdbcClient db, PlatformTransactionManager transactions, KafkaTemplate<String, byte[]> kafka,
-			MarketMetrics metrics, @Value("${app.outbox.relay-enabled:true}") boolean enabled) {
+			MarketMetrics metrics, @Value("${app.outbox.relay-enabled:true}") boolean enabled,
+			@Value("${app.outbox.retention:7d}") Duration retention) {
 		this.db = db;
 		this.enabled = enabled;
+		this.retention = retention;
 		this.tx = new TransactionTemplate(transactions);
 		this.kafka = kafka;
 		metrics.meter()
@@ -92,6 +96,21 @@ public class OutboxRelay {
 					// No value rather than a wrong one while the database can't be read.
 				}
 			});
+	}
+
+	/**
+	 * Deletes events Kafka acknowledged more than the retention ago (7 days by default): by then
+	 * they're on the topics, and the rows only grow the table. Unpublished rows are never touched.
+	 */
+	@Scheduled(fixedDelayString = "${app.outbox.cleanup-interval:1h}")
+	public int deletePublished() {
+		int deleted = this.db.sql("DELETE FROM outbox WHERE published_at < now() - make_interval(secs => ?)")
+			.param(this.retention.toSeconds())
+			.update();
+		if (deleted > 0) {
+			log.atInfo().addKeyValue("deleted", deleted).log("published outbox events deleted");
+		}
+		return deleted;
 	}
 
 	@Scheduled(fixedDelayString = "${app.outbox.interval}")
