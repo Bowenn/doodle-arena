@@ -36,6 +36,9 @@ class CoinPackApiTests extends ApiTestSupport {
 			.header("Idempotency-Key", "k"))
 			.andExpect(status().isServiceUnavailable())
 			.andExpect(jsonPath("$.error.code").value("STRIPE_NOT_CONFIGURED"));
+		this.mvc.perform(post("/api/market/stripe/webhook").header("Stripe-Signature", "t=1,v1=x").content("{}"))
+			.andExpect(status().isServiceUnavailable())
+			.andExpect(jsonPath("$.error.code").value("STRIPE_NOT_CONFIGURED"));
 	}
 
 }
