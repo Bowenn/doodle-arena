@@ -2,8 +2,9 @@
 
 Every login starts a family. Using a token marks it used and issues its successor in the same
 family. If a used (or revoked) token ever comes back, someone has a copy, so the whole family
-is revoked and both the thief and the user have to sign in again (design doc 4.2). The user's API
-keys are revoked too, since a stolen session could have created some.
+is revoked and both the thief and the user have to sign in again (design doc 4.2). When a rotated
+token comes back, the user's API keys are revoked too, since a stolen session could have created
+some.
 """
 
 import hashlib
@@ -58,6 +59,7 @@ class RotateResult:
     token: str | None = None  # the successor, when rotated
     user_id: uuid.UUID | None = None
     family_id: uuid.UUID | None = None
+    api_keys_revoked: int = 0
 
 
 def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> RotateResult:
@@ -73,9 +75,18 @@ def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> Rotat
         return RotateResult("invalid")
     if row.used_at is not None or row.revoked_at is not None:
         revoke_family(conn, row.family_id, now, "reuse_detected")
-        # The thief may have used an access token from that session to create API keys.
-        api_keys.revoke_all(conn, str(row.user_id), now)
-        return RotateResult("reuse_detected", user_id=row.user_id, family_id=row.family_id)
+        keys_revoked = 0
+        if row.used_at is not None:
+            # A rotated token came back: someone else had this session, and may have used one of
+            # its access tokens to create API keys. (A token revoked by logout coming back is more
+            # likely a stale cookie, so it ends the family but leaves the keys alone.)
+            keys_revoked = api_keys.revoke_all(conn, str(row.user_id), now)
+        return RotateResult(
+            "reuse_detected",
+            user_id=row.user_id,
+            family_id=row.family_id,
+            api_keys_revoked=keys_revoked,
+        )
     if row.expires_at <= now:
         return RotateResult("expired", user_id=row.user_id, family_id=row.family_id)
 

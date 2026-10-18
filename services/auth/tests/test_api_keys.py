@@ -184,3 +184,21 @@ def test_refresh_token_reuse_revokes_the_users_api_keys(
 
     assert verify(client, mine["key"]).status_code == 401
     assert verify(client, other["key"]).status_code == 200
+
+
+def test_a_logged_out_token_coming_back_leaves_the_keys(
+    client: TestClient, google: FakeGoogle, db: Engine
+) -> None:
+    # Probably a stale cookie, not a theft: the family ends, the keys stay.
+    token = login(client, google)
+    with db.connect() as conn:
+        user_id = str(conn.execute(text("SELECT id FROM users")).scalar_one())
+    mine = create(client, user_id, "mine")
+    assert (
+        client.post("/api/auth/logout", headers={"Origin": "http://localhost:8080"}).status_code
+        == 204
+    )
+
+    assert use(client, token) == 401
+
+    assert verify(client, mine["key"]).status_code == 200

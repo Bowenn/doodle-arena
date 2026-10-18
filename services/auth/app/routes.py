@@ -147,6 +147,7 @@ def refresh_access_token(
         extra = {"reason": result.outcome, "user_id": str(result.user_id or "")}
         if result.outcome == "reuse_detected":
             extra["family_id"] = str(result.family_id)
+            extra["api_keys_revoked"] = str(result.api_keys_revoked)
             log.warning("refresh token reuse detected; family revoked", extra=extra)
             ctx.metrics.refresh("reuse_detected")
         else:
