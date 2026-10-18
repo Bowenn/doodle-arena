@@ -38,7 +38,8 @@ CREATE TABLE idempotency_keys (
     claim_token   UUID NOT NULL,
     locked_until  TIMESTAMPTZ NOT NULL,
     response_code INT,
-    response_body JSONB,
+    -- The exact JSON text sent, so a replay is byte for byte the first answer (JSONB would reformat it).
+    response_body TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at  TIMESTAMPTZ,
     PRIMARY KEY (user_id, key),

@@ -9,8 +9,16 @@ public record ErrorBody(Detail error) {
 	}
 
 	public static ErrorBody of(String code, String message, HttpServletRequest request) {
+		return of(code, message, requestId(request));
+	}
+
+	public static ErrorBody of(String code, String message, String requestId) {
+		return new ErrorBody(new Detail(code, message, requestId));
+	}
+
+	public static String requestId(HttpServletRequest request) {
 		String requestId = request.getHeader("X-Request-Id");
-		return new ErrorBody(new Detail(code, message, (requestId != null) ? requestId : ""));
+		return (requestId != null) ? requestId : "";
 	}
 
 }
