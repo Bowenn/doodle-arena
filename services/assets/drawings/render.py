@@ -56,11 +56,12 @@ def render(replay: Replay) -> Rendered:
 
     for stroke in replay.visible():
         color = _hex(stroke.color)
-        line_width = max(1.0, stroke.width * sx)
+        # Pillow lines take whole-pixel widths; the discs use the same width, or they bulge.
+        line_width = max(1, round(stroke.width * sx))
         radius = line_width / 2
         pts = [(x * sx, y * sy) for x, y, _ in stroke.points]
         if len(pts) > 1:
-            draw.line(pts, fill=color, width=max(1, round(line_width)))
+            draw.line(pts, fill=color, width=line_width)
         # Round caps and joins: a disc at every point, like lineCap/lineJoin = "round".
         for x, y in pts:
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
