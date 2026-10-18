@@ -29,8 +29,10 @@ import com.doodlearena.marketplace.stripe.StripeProperties.CoinPack;
  * Starts a coin-pack purchase (design doc, section 7.7) in two steps of an idempotent request (ADR
  * 0012): {@link #createSession} calls Stripe with no transaction open, so a slow Stripe holds no
  * database connection; {@link #record} then stores what was sold, in the transaction that completes
- * the key. Stripe gets an idempotency key derived from ours, so a retried request that reaches
- * Stripe twice still gets the same session.
+ * the key. Stripe gets an idempotency key derived from our claim, so the Stripe client's own
+ * network retry can't create a second session, while every fresh claim of our key (after a
+ * release or a takeover) asks Stripe afresh: Stripe replays a saved response, a 500 included, for
+ * 24 hours.
  */
 @Service
 public class CheckoutService {
@@ -120,8 +122,9 @@ public class CheckoutService {
 
 	/**
 	 * Records the session the webhook will credit. Runs inside the transaction that completes the
-	 * key: if the claim was taken over during the Stripe call, this insert rolls back, and the
-	 * request that holds the key records the same session (Stripe returned it for the same key).
+	 * key: if the claim was taken over during the Stripe call, this insert rolls back with it, and
+	 * the session is never recorded. Its URL never reached the browser, so it can't be paid, and
+	 * Stripe expires it after 24 hours.
 	 */
 	public Checkout record(String userId, CoinPack pack, Checkout checkout) {
 		this.db.sql("""
@@ -137,11 +140,16 @@ public class CheckoutService {
 		return checkout;
 	}
 
-	/** One Stripe idempotency key per user and our key; hashed so it says nothing about either. */
-	private static String stripeKey(Claim claim) {
+	/**
+	 * One Stripe idempotency key per claim of our key (user, key and claim token), hashed so it says
+	 * nothing about them. Per claim, not per key: Stripe replays a saved 500 for 24 hours, so a key
+	 * derived from ours alone would fail every retry of that checkout for a day.
+	 */
+	static String stripeKey(Claim claim) {
 		try {
 			MessageDigest digest = MessageDigest.getInstance("SHA-256");
-			byte[] hash = digest.digest((claim.userId() + "\n" + claim.key()).getBytes(StandardCharsets.UTF_8));
+			byte[] hash = digest
+				.digest((claim.userId() + "\n" + claim.key() + "\n" + claim.token()).getBytes(StandardCharsets.UTF_8));
 			return "checkout-" + HexFormat.of().formatHex(hash);
 		}
 		catch (NoSuchAlgorithmException ex) {
