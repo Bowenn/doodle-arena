@@ -28,7 +28,7 @@ export function Gallery({ meId, matchId = null, onOpen, onBack }: Props) {
         {!matchId &&
           (['all', 'mine'] as const).map((t) => (
             <button key={t} type="button" aria-pressed={tab === t} onClick={() => setTab(t)}>
-              {t === 'all' ? 'All drawings' : 'My drawings'}
+              {t === 'all' ? 'All drawings' : 'Drawn by me'}
             </button>
           ))}
       </div>

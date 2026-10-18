@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
 import { fetchMe, loginUrl, logout, type Me } from './auth.ts'
+import { Developer } from './developer/Developer.tsx'
 import { DrawingPage } from './gallery/DrawingPage.tsx'
 import { Gallery } from './gallery/Gallery.tsx'
 import { Leaderboard } from './Leaderboard.tsx'
 import { Lobby } from './Lobby.tsx'
+import { Market } from './market/Market.tsx'
+import { MyDrawings } from './market/MyDrawings.tsx'
+import { Wallet } from './market/Wallet.tsx'
 import { Moderate } from './Moderate.tsx'
 import { Room } from './room/Room.tsx'
 
@@ -17,6 +21,16 @@ type View =
 function roomFromPath(path: string): string | null {
   return /^\/rooms\/([a-z0-9]{1,64})$/.exec(path)?.[1] ?? null
 }
+
+/** The top bar's links, in order. */
+const NAV: [path: string, label: string][] = [
+  ['/', 'Lobby'],
+  ['/gallery', 'Gallery'],
+  ['/market', 'Market'],
+  ['/my-drawings', 'My drawings'],
+  ['/wallet', 'Wallet'],
+  ['/developer', 'Developer'],
+]
 
 /** The drawing id in a /drawings/<uuid> path. */
 function drawingFromPath(path: string): string | null {
@@ -81,6 +95,21 @@ export default function App() {
           >
             Doodle Arena
           </a>
+          <nav className="nav">
+            {NAV.map(([to, label]) => (
+              <a
+                key={to}
+                href={to}
+                aria-current={path === to ? 'page' : undefined}
+                onClick={(e) => {
+                  e.preventDefault()
+                  go(to)
+                }}
+              >
+                {label}
+              </a>
+            ))}
+          </nav>
           <span className="user">
             {me.avatar_url && (
               <img src={me.avatar_url} alt="" width={28} height={28} referrerPolicy="no-referrer" />
@@ -100,7 +129,13 @@ export default function App() {
             onMatchDrawings={(matchId) => go(`/gallery?match_id=${encodeURIComponent(matchId)}`)}
           />
         ) : drawingId ? (
-          <DrawingPage key={drawingId} drawingId={drawingId} meId={me.id} onBack={() => go('/gallery')} />
+          <DrawingPage
+            key={drawingId}
+            drawingId={drawingId}
+            meId={me.id}
+            onBack={() => go('/gallery')}
+            onWallet={() => go('/wallet')}
+          />
         ) : path === '/gallery' ? (
           <Gallery
             key={search}
@@ -109,6 +144,18 @@ export default function App() {
             onOpen={(id) => go(`/drawings/${id}`)}
             onBack={() => go('/')}
           />
+        ) : path === '/market' ? (
+          <Market meId={me.id} onOpen={(id) => go(`/drawings/${id}`)} onWallet={() => go('/wallet')} />
+        ) : path === '/my-drawings' ? (
+          <MyDrawings onOpen={(id) => go(`/drawings/${id}`)} />
+        ) : path === '/wallet' ? (
+          <Wallet
+            key={search}
+            checkout={new URLSearchParams(search).get('checkout')}
+            onClearCheckout={() => go('/wallet')}
+          />
+        ) : path === '/developer' ? (
+          <Developer />
         ) : path === '/moderate' ? (
           <Moderate onBack={() => go('/')} />
         ) : path === '/leaderboard' ? (

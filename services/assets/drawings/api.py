@@ -100,11 +100,29 @@ def _uuid(value: str | None) -> uuid.UUID | None:
         return None
 
 
+MAX_IDS = 50
+
+
+def lookup_drawings(request: HttpRequest, claims: Claims, raw: str) -> HttpResponse:
+    """?ids=<up to 50 comma-separated ids>: those drawings the caller may see, in the order
+    asked (the marketplace's pages show listings and owned drawings, which carry only ids)."""
+    parts = [p for p in raw.split(",") if p]
+    parsed = [_uuid(p) for p in parts]
+    ids = [i for i in parsed if i is not None]
+    if not parts or len(parts) > MAX_IDS or len(ids) != len(parts):
+        return error(request, 400, "INVALID_REQUEST", f"ids must be 1 to {MAX_IDS} drawing ids")
+    found = {d.id: d for d in visible(claims).filter(id__in=ids)}
+    ordered = [found[i] for i in dict.fromkeys(ids) if i in found]
+    return JsonResponse({"drawings": [represent(d) for d in ordered], "next_cursor": None})
+
+
 @authenticated
 def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
     """GET /api/assets/drawings?author_id=&match_id=&limit=&cursor=: approved drawings, newest
     first. With author_id, that author's drawings; with match_id, that match's. Either way the
-    caller's own drawings are included in any state."""
+    caller's own drawings are included in any state. With ids=, a lookup instead (above)."""
+    if "ids" in request.GET:
+        return lookup_drawings(request, claims, request.GET["ids"])
     try:
         limit = int(request.GET.get("limit", DEFAULT_LIMIT))
     except ValueError:

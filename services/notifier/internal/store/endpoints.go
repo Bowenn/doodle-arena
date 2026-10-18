@@ -24,7 +24,7 @@ var (
 type Endpoint struct {
 	ID               uuid.UUID
 	OwnerID          string
-	APIKeyID         uuid.UUID
+	APIKeyID         *uuid.UUID // nil when registered with a session (the web app)
 	URL              string
 	EventTypes       []string
 	SecretCiphertext []byte

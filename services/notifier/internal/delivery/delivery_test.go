@@ -99,7 +99,7 @@ func (f fixture) register(t *testing.T, url string) (store.Endpoint, string, sto
 	secret, _ := webhook.NewSecret()
 	id := uuid.New()
 	ct, nonce, _ := f.box.Seal([]byte(secret), []byte(id.String()))
-	e, err := f.st.CreateEndpoint(ctx, store.Endpoint{ID: id, OwnerID: "u_dev", APIKeyID: uuid.New(), URL: url,
+	e, err := f.st.CreateEndpoint(ctx, store.Endpoint{ID: id, OwnerID: "u_dev", APIKeyID: ptr(uuid.New()), URL: url,
 		EventTypes: []string{webhook.TypeSaleCompleted}, SecretCiphertext: ct, SecretNonce: nonce})
 	if err != nil {
 		t.Fatal(err)
@@ -265,3 +265,5 @@ func TestDeadDeliveryReachesTheDeadLetterQueue(t *testing.T) {
 		t.Fatalf("DeliveryDead = %v (key %s)", dd, r.Key)
 	}
 }
+
+func ptr[T any](v T) *T { return &v }

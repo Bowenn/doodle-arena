@@ -150,4 +150,19 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Drawing gallery' })).toBeTruthy()
     expect(window.location.pathname).toBe('/gallery')
   })
+
+  it.each([
+    ['Wallet', 'Wallet', '/wallet'],
+    ['Market', 'Market', '/market'],
+    ['My drawings', 'My drawings', '/my-drawings'],
+    ['Developer', 'Developer settings', '/developer'],
+  ])('opens %s from the top bar', async (link, heading, path) => {
+    signedIn()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('link', { name: link }))
+    expect(await screen.findByRole('heading', { name: heading })).toBeTruthy()
+    expect(window.location.pathname).toBe(path)
+    expect(screen.getByRole('link', { name: link }).getAttribute('aria-current')).toBe('page')
+  })
 })

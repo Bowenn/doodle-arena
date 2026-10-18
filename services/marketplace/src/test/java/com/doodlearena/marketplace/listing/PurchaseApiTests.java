@@ -33,6 +33,7 @@ import com.doodlearena.marketplace.support.TestTokens;
 import com.doodlearena.proto.doodle.events.v1.SaleEvent;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -79,8 +80,10 @@ class PurchaseApiTests extends ApiTestSupport {
 		this.mvc.perform(get("/api/market/drawings/" + drawing + "/ownership-history").header("Authorization", bearer(buyer)))
 			.andExpect(jsonPath("$.owner_id").value(buyer.ownerId()))
 			.andExpect(jsonPath("$.version").value(2))
+			.andExpect(jsonPath("$.events[0].price").value(nullValue()))
 			.andExpect(jsonPath("$.events[1].kind").value("SALE"))
-			.andExpect(jsonPath("$.events[1].from_owner").value(seller.ownerId()));
+			.andExpect(jsonPath("$.events[1].from_owner").value(seller.ownerId()))
+			.andExpect(jsonPath("$.events[1].price").value(60));
 		this.mvc.perform(get("/api/market/listings/" + listing).header("Authorization", bearer(buyer)))
 			.andExpect(jsonPath("$.status").value("SOLD"))
 			.andExpect(jsonPath("$.buyer_id").value(buyer.ownerId()));

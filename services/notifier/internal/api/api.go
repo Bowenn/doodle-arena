@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
+	"github.com/Bowenn/gap-project_private/services/notifier/internal/authn"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
@@ -31,10 +32,16 @@ type KeyVerifier interface {
 	Verify(ctx context.Context, key string) (apikeys.Identity, error)
 }
 
+// TokenVerifier checks an access token (ADR 0001); *authn.Verifier is the real one.
+type TokenVerifier interface {
+	Verify(ctx context.Context, token string) (authn.Claims, error)
+}
+
 // API holds the handlers' dependencies.
 type API struct {
 	Store  *store.Store
 	Keys   KeyVerifier
+	Tokens TokenVerifier
 	Box    *secretbox.Box
 	Policy *ssrf.Policy
 	Log    *slog.Logger
@@ -52,15 +59,26 @@ func (a *API) Register(mux *http.ServeMux) {
 
 type handler func(w http.ResponseWriter, r *http.Request, who apikeys.Identity)
 
-// auth requires Authorization: Bearer da_... with the webhooks scope.
+// auth requires Authorization: Bearer with an API key that has the webhooks scope (scripts and
+// servers), or the web app's access token (its settings page): a session acts as its user with
+// every scope of this API.
 func (a *API) auth(next handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		scheme, key, _ := strings.Cut(r.Header.Get("Authorization"), " ")
-		if !strings.EqualFold(scheme, "bearer") || !strings.HasPrefix(key, "da_") {
-			writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "an API key is required: Authorization: Bearer da_...")
+		scheme, credential, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+		if !strings.EqualFold(scheme, "bearer") || credential == "" {
+			writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "an API key or access token is required: Authorization: Bearer ...")
 			return
 		}
-		who, err := a.Keys.Verify(r.Context(), key)
+		if !strings.HasPrefix(credential, "da_") {
+			claims, err := a.Tokens.Verify(r.Context(), credential)
+			if err != nil {
+				writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "invalid or expired access token")
+				return
+			}
+			next(w, r, apikeys.Identity{UserID: claims.UserID, Scopes: []string{Scope}})
+			return
+		}
+		who, err := a.Keys.Verify(r.Context(), credential)
 		switch {
 		case errors.Is(err, apikeys.ErrInvalid):
 			writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "unknown or revoked API key")
