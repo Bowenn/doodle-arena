@@ -53,6 +53,8 @@ jobs:
         run: make smoke
       - name: make telemetry-check (trace, logs and metrics reach Grafana)
         run: make telemetry-check
+      - name: make pipeline-check (a round becomes an approved, stored, published drawing)
+        run: make pipeline-check
       - name: Disk usage after the run
         if: always()
         run: df -h /
