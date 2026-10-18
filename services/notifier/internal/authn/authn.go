@@ -17,6 +17,9 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // Audience is the single audience of every access token (ADR 0001).
@@ -97,58 +100,127 @@ func (s StaticKeys) Key(_ context.Context, kid string) (*rsa.PublicKey, error) {
 	return nil, fmt.Errorf("unknown signing key %q", kid)
 }
 
-// JWKS fetches auth's key set and caches it. An unknown key id (auth rotated its key) triggers
-// a refetch, at most once per MinRefresh, so forged key ids can't make the notifier hammer auth.
+// KeysMaxAge is how long a fetched key set is used before it is refreshed, so a key that auth
+// removes from its JWKS (rotated out, or withdrawn after a leak) stops being accepted within
+// this time.
+const KeysMaxAge = 10 * time.Minute
+
+// KeysMaxStale is how long the last good key set stays in use while refreshes fail. Past it,
+// every token is refused until a fetch succeeds, so blocking the fetch can't keep a withdrawn
+// key trusted. Only auth issues access tokens, and they last 15 minutes, so an auth outage
+// this long leaves few valid tokens to refuse.
+const KeysMaxStale = time.Hour
+
+// errTooSoon means the key set was fetched too recently to fetch it again.
+var errTooSoon = errors.New("JWKS fetched too recently to fetch again")
+
+// JWKS fetches auth's key set and caches it for KeysMaxAge. An unknown key id (auth rotated its
+// key) triggers a refetch too. Fetches happen at most once per MinRefresh, so forged key ids
+// can't make this service hammer auth.
 type JWKS struct {
 	url        string
 	client     *http.Client
 	minRefresh time.Duration
+	now        func() time.Time // replaced in tests
+	fetches    metric.Int64Counter
 
 	mu        sync.RWMutex
 	keys      map[string]*rsa.PublicKey
+	fetchedAt time.Time // of the last successful fetch
+
 	fetchMu   sync.Mutex // one fetch at a time
 	nextFetch time.Time  // guarded by fetchMu
 }
 
 // NewJWKS returns a key source that reads the JWKS document at url.
-func NewJWKS(url string, client *http.Client, minRefresh time.Duration) *JWKS {
-	return &JWKS{url: url, client: client, minRefresh: minRefresh}
+func NewJWKS(url string, client *http.Client, minRefresh time.Duration) (*JWKS, error) {
+	fetches, err := otel.Meter("authn").Int64Counter("authn.jwks.fetches",
+		metric.WithDescription("JWKS fetches by reason (max_age, unknown_kid) and result (success, failed)"),
+		metric.WithUnit("{fetch}"))
+	if err != nil {
+		return nil, fmt.Errorf("authn.jwks.fetches: %w", err)
+	}
+	return &JWKS{url: url, client: client, minRefresh: minRefresh, now: time.Now, fetches: fetches}, nil
 }
 
 // Key implements KeySource.
 func (j *JWKS) Key(ctx context.Context, kid string) (*rsa.PublicKey, error) {
-	if k := j.cached(kid); k != nil {
+	k, fetchedAt := j.cached(kid)
+	age := j.now().Sub(fetchedAt)
+	if k != nil && age < KeysMaxAge {
 		return k, nil
 	}
-	j.fetchMu.Lock()
+	usable := k != nil && age < KeysMaxStale
+	if usable {
+		// Stale: one request refreshes the set while the others keep using it, rather than all
+		// of them waiting for a fetch that can take until its timeout when auth is unreachable.
+		if !j.fetchMu.TryLock() {
+			return k, nil
+		}
+	} else {
+		j.fetchMu.Lock()
+	}
 	defer j.fetchMu.Unlock()
-	// Another request may have fetched the key while this one waited.
-	if k := j.cached(kid); k != nil {
+	// Another request may have refreshed the set while this one waited, and the new set may
+	// have dropped the key, so decide again from what is cached now.
+	k, fetchedAt = j.cached(kid)
+	age = j.now().Sub(fetchedAt)
+	if k != nil && age < KeysMaxAge {
 		return k, nil
 	}
-	if time.Now().Before(j.nextFetch) {
-		return nil, fmt.Errorf("unknown signing key %q", kid)
+	usable = k != nil && age < KeysMaxStale
+	reason := "unknown_kid"
+	if k != nil {
+		reason = "max_age"
 	}
-	keys, err := j.fetch(ctx)
-	if err != nil {
-		// Retry soon: auth may still be starting.
-		j.nextFetch = time.Now().Add(time.Second)
-		return nil, fmt.Errorf("fetch JWKS: %w", err)
+	keys, err := j.refresh(ctx, reason)
+	switch {
+	case err != nil && usable:
+		return k, nil // the last good set, until KeysMaxStale
+	case err != nil && k != nil:
+		return nil, fmt.Errorf("signing key %q: key set not refreshed for %s: %w", kid, KeysMaxStale, err)
+	case err != nil:
+		return nil, fmt.Errorf("unknown signing key %q: %w", kid, err)
 	}
-	j.nextFetch = time.Now().Add(j.minRefresh)
-	j.mu.Lock()
-	j.keys = keys
-	j.mu.Unlock()
 	if k := keys[kid]; k != nil {
 		return k, nil
 	}
 	return nil, fmt.Errorf("unknown signing key %q", kid)
 }
 
-func (j *JWKS) cached(kid string) *rsa.PublicKey {
+// refresh fetches the key set and caches it, unless the last fetch was too recent: MinRefresh
+// after a success, a second after a failure. The caller holds fetchMu.
+func (j *JWKS) refresh(ctx context.Context, reason string) (map[string]*rsa.PublicKey, error) {
+	now := j.now()
+	if now.Before(j.nextFetch) {
+		return nil, errTooSoon
+	}
+	// The new set serves every request, so the caller leaving doesn't cancel the fetch.
+	keys, err := j.fetch(context.WithoutCancel(ctx))
+	if err != nil {
+		j.count(ctx, reason, "failed")
+		// Retry soon: auth may still be starting.
+		j.nextFetch = now.Add(time.Second)
+		return nil, fmt.Errorf("fetch JWKS: %w", err)
+	}
+	j.count(ctx, reason, "success")
+	j.nextFetch = now.Add(j.minRefresh)
+	j.mu.Lock()
+	j.keys, j.fetchedAt = keys, now
+	j.mu.Unlock()
+	return keys, nil
+}
+
+func (j *JWKS) count(ctx context.Context, reason, result string) {
+	j.fetches.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("reason", reason), attribute.String("result", result)))
+}
+
+// cached returns the cached key for kid (nil if there is none) and when the set was fetched.
+func (j *JWKS) cached(kid string) (*rsa.PublicKey, time.Time) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	return j.keys[kid]
+	return j.keys[kid], j.fetchedAt
 }
 
 func (j *JWKS) fetch(ctx context.Context) (map[string]*rsa.PublicKey, error) {

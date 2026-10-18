@@ -136,8 +136,12 @@ func run(cfg config, logger *slog.Logger) error {
 		return err
 	}
 
-	verifier := authn.NewVerifier(cfg.jwtIssuer, authn.NewJWKS(cfg.jwksURL,
-		&http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}, 30*time.Second))
+	jwks, err := authn.NewJWKS(cfg.jwksURL,
+		&http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	verifier := authn.NewVerifier(cfg.jwtIssuer, jwks)
 	srv := &http.Server{
 		Addr: ":" + cfg.port,
 		Handler: server.NewHandler(
