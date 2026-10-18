@@ -18,6 +18,12 @@ repositories {
 	mavenCentral()
 }
 
+// Spring Boot's BOM manages protobuf and gRPC too, at older versions than the generated code in
+// proto/gen/java needs (protobuf refuses a runtime older than its gencode). Keep these equal to
+// proto/gen/java/build.gradle.kts.
+extra["protobuf-java.version"] = "4.36.2"
+extra["grpc-java.version"] = "1.85.0"
+
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-webmvc")
 	// Ledger SQL is written by hand through JdbcClient, not JPA (rule: .claude/rules/java.md).
