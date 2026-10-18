@@ -45,12 +45,13 @@ def create_key(ctx: Ctx, claims: Claims, body: CreateKey, response: Response) ->
     unknown = set(body.scopes) - api_keys.SCOPES
     if unknown:
         raise ApiError(400, "INVALID_SCOPE", f"unknown scopes: {', '.join(sorted(unknown))}")
-    with ctx.engine.begin() as conn:
-        if api_keys.active_count(conn, claims.user_id) >= api_keys.MAX_ACTIVE_KEYS:
-            raise ApiError(
-                409, "TOO_MANY_API_KEYS", f"at most {api_keys.MAX_ACTIVE_KEYS} active keys"
-            )
-        key, full = api_keys.create(conn, claims.user_id, body.name, body.scopes)
+    try:
+        with ctx.engine.begin() as conn:
+            key, full = api_keys.create_within_cap(conn, claims.user_id, body.name, body.scopes)
+    except api_keys.TooManyKeys:
+        raise ApiError(
+            409, "TOO_MANY_API_KEYS", f"at most {api_keys.MAX_ACTIVE_KEYS} active keys"
+        ) from None
     # The key appears in this response only; it must not be cached anywhere.
     response.headers["Cache-Control"] = "no-store"
     log.info("api key created", extra={"user_id": claims.user_id, "key_prefix": key.prefix})

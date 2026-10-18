@@ -83,6 +83,23 @@ def active_count(conn: Connection, user_id: str) -> int:
     return int(conn.execute(stmt).scalar_one())
 
 
+class TooManyKeys(Exception):
+    """The user already has MAX_ACTIVE_KEYS active keys."""
+
+
+def create_within_cap(
+    conn: Connection, user_id: str, name: str, scopes: list[str]
+) -> tuple[ApiKey, str]:
+    """Like create, unless the user is at the cap. A per-user advisory lock, held to the end of
+    the caller's transaction, makes count-then-insert atomic: without it, concurrent requests
+    all see 9 keys and all insert."""
+    lock_id = func.hashtextextended("api_keys:" + user_id, 0)
+    conn.execute(select(func.pg_advisory_xact_lock(lock_id)))
+    if active_count(conn, user_id) >= MAX_ACTIVE_KEYS:
+        raise TooManyKeys
+    return create(conn, user_id, name, scopes)
+
+
 def create(conn: Connection, user_id: str, name: str, scopes: list[str]) -> tuple[ApiKey, str]:
     """Stores a new key and returns it with the full key text, which is never stored."""
     key, prefix, secret = new_key()
