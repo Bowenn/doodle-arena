@@ -28,7 +28,9 @@ for _name in ("gunicorn.error", "gunicorn.access"):
 def post_fork(server: Any, worker: Any) -> None:
     # Per worker: export threads started in the master would not survive the fork. Runs before
     # the worker loads the WSGI app, so the Django middleware is in place for every request.
-    worker.shutdown_telemetry = telemetry.setup_telemetry()
+    # worker.age numbers the workers this master has started (1, 2, ...; a replacement gets the
+    # next one), so each process exports under its own instance id.
+    worker.shutdown_telemetry = telemetry.setup_telemetry(process=f"w{worker.age}")
 
 
 def worker_exit(server: Any, worker: Any) -> None:

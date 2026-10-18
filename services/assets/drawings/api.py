@@ -48,7 +48,7 @@ def authenticated(view: View) -> View:
         except InvalidTokenError as e:
             log.info("api request refused: invalid token", extra={"reason": str(e)})
             return error(request, 401, "UNAUTHENTICATED", "the access token is not valid")
-        trace.get_current_span().set_attribute("enduser.id", claims.user_id)
+        trace.get_current_span().set_attribute("user.id", claims.user_id)
         response = view(request, claims, *args, **kwargs)
         # Presigned URLs expire, and authors see drawings others don't: per user, briefly.
         response["Cache-Control"] = "private, max-age=60"

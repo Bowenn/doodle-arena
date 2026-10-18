@@ -65,7 +65,7 @@ MAX_MODERATION_ATTEMPTS = 4
 def step(name: str, drawing: Drawing) -> Iterator[None]:
     start = time.monotonic()
     with tracer.start_as_current_span(
-        f"drawing.{name}", attributes={"drawing.id": str(drawing.id), "pipeline.step": name}
+        f"assets.drawing.{name}", attributes={"drawing.id": str(drawing.id), "pipeline.step": name}
     ):
         try:
             yield
@@ -91,7 +91,7 @@ def prepare(drawing_id: uuid.UUID) -> str:
     }
 
     with tracer.start_as_current_span(
-        "drawing.prepare", attributes={"drawing.id": str(drawing.id)}
+        "assets.drawing.prepare", attributes={"drawing.id": str(drawing.id)}
     ):
         try:
             replay = _fetch(drawing) if not drawing.replay_id else None
