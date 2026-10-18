@@ -40,6 +40,10 @@ public class MarketMetrics {
 		.setDescription("Purchase attempts, by outcome")
 		.build();
 
+	private final LongCounter matchesReceived = this.meter.counterBuilder("market.matches.received")
+		.setDescription("Records read from game.matches.v1, by outcome")
+		.build();
+
 	public Meter meter() {
 		return this.meter;
 	}
@@ -47,6 +51,11 @@ public class MarketMetrics {
 	/** One record from assets.drawings.v1: minted, duplicate, rejected, skipped or failed. */
 	public void drawingReceived(String result) {
 		this.drawingsReceived.add(1, Attributes.of(RESULT, result));
+	}
+
+	/** One record from game.matches.v1: paid, duplicate, ineligible, skipped or failed. */
+	public void matchReceived(String result) {
+		this.matchesReceived.add(1, Attributes.of(RESULT, result));
 	}
 
 	/** success, conflict (the listing was sold or cancelled) or insufficient_funds. */
