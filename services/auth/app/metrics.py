@@ -12,6 +12,7 @@ from app import SERVICE_NAME
 
 LoginResult = Literal["success", "failed"]
 RefreshResult = Literal["rotated", "reuse_detected", "expired", "invalid"]
+ApiKeyResult = Literal["valid", "invalid", "revoked"]
 
 
 class AuthMetrics:
@@ -25,8 +26,17 @@ class AuthMetrics:
             "auth.refreshes", unit="{refresh}", description="Refresh-token uses, by result"
         )
 
+        self._api_key_verifications = meter.create_counter(
+            "auth.api_keys.verifications",
+            unit="{verification}",
+            description="API key checks from other services, by result",
+        )
+
     def login(self, result: LoginResult) -> None:
         self._logins.add(1, {"result": result})
 
     def refresh(self, result: RefreshResult) -> None:
         self._refreshes.add(1, {"result": result})
+
+    def api_key_verification(self, result: ApiKeyResult) -> None:
+        self._api_key_verifications.add(1, {"result": result})

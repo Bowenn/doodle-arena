@@ -1,4 +1,8 @@
-"""Entry point: `python -m app`. Uvicorn handles SIGTERM by finishing in-flight requests."""
+"""Entry point: `python -m app`. One uvicorn server listens on two sockets: the public port
+(8080) and the internal port (9091, /internal/api-keys/verify, see app.api_key_routes). Uvicorn
+handles SIGTERM by finishing in-flight requests."""
+
+import socket
 
 import uvicorn
 
@@ -8,23 +12,29 @@ from app.main import create_app
 from app.settings import Settings
 
 
+def listen(port: int) -> socket.socket:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("0.0.0.0", port))
+    return s
+
+
 def main() -> None:
     settings = Settings()
     app = create_app(settings)
-    # Before uvicorn.run, which applies log_config: the OTLP log handler needs the provider.
+    # Before uvicorn starts, which applies log_config: the OTLP log handler needs the provider.
     shutdown_telemetry = telemetry.setup_telemetry(app, settings)
+    config = uvicorn.Config(
+        app,
+        log_config=logging_config(
+            SERVICE_NAME, settings.service_version, settings.log_level, telemetry.enabled()
+        ),
+        # Request telemetry comes from OpenTelemetry, not access logs.
+        access_log=False,
+        timeout_graceful_shutdown=10,
+    )
     try:
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=settings.port,
-            log_config=logging_config(
-                SERVICE_NAME, settings.service_version, settings.log_level, telemetry.enabled()
-            ),
-            # Request telemetry comes from OpenTelemetry, not access logs.
-            access_log=False,
-            timeout_graceful_shutdown=10,
-        )
+        uvicorn.Server(config).run(sockets=[listen(settings.port), listen(settings.internal_port)])
     finally:
         shutdown_telemetry()  # flushes the last spans, metrics and logs
 

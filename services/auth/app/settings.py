@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     """Configuration read from environment variables (for example SERVICE_VERSION)."""
 
     port: int = 8080
+    # Internal endpoints (/internal/api-keys/verify) answer only on this port, which the gateway
+    # never routes and compose never publishes (ADR 0001).
+    internal_port: int = 9091
     service_version: str = "dev"
     service_instance_id: str = socket.gethostname()
     log_level: str = "info"
