@@ -11,6 +11,13 @@ import com.doodlearena.proto.doodle.events.v1.PlayerResult;
 /** A validated {@code MatchFinished}: the match and each player's placement. */
 public record RewardRequest(String matchId, String roomId, List<Placement> placements) {
 
+	/**
+	 * A room holds at most 8 players (design doc, section 6.3), so a match with more results is not
+	 * from a game server. Kafka doesn't authenticate producers yet, so this also bounds what one
+	 * forged event could pay.
+	 */
+	public static final int MAX_PLAYERS = 8;
+
 	public RewardRequest {
 		placements = List.copyOf(placements);
 	}
@@ -25,6 +32,9 @@ public record RewardRequest(String matchId, String roomId, List<Placement> place
 	public static RewardRequest from(MatchFinished event) {
 		if (event.getMatchId().isBlank()) {
 			throw new InvalidMatchEventException("no match_id");
+		}
+		if (event.getResultsCount() > MAX_PLAYERS) {
+			throw new InvalidMatchEventException("more results than a room holds");
 		}
 		Set<String> seen = new HashSet<>();
 		List<Placement> placements = new ArrayList<>();

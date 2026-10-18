@@ -151,6 +151,16 @@ class RewardServiceTests {
 		assertThatThrownBy(() -> RewardRequest.from(valid.toBuilder()
 			.setResults(1, valid.getResults(1).toBuilder().setPlacement(0))
 			.build())).isInstanceOf(InvalidMatchEventException.class);
+		// More players than a room holds: not from a game server.
+		List<AccountRef> crowd = players(RewardRequest.MAX_PLAYERS + 1);
+		int[] placements = new int[crowd.size()];
+		for (int i = 0; i < placements.length; i++) {
+			placements[i] = i + 1;
+		}
+		assertThatThrownBy(() -> RewardRequest.from(match("m_" + UUID.randomUUID(), crowd, placements)))
+			.isInstanceOf(InvalidMatchEventException.class);
+		assertThat(RewardRequest.from(match("m_" + UUID.randomUUID(), crowd.subList(0, RewardRequest.MAX_PLAYERS),
+				placements)).placements()).hasSize(RewardRequest.MAX_PLAYERS);
 	}
 
 	private List<AccountRef> players(int n) {
