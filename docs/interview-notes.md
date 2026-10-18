@@ -298,6 +298,14 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Keyset pagination needs a total order.** My drawings sorts by acquisition time, which isn't unique, so the cursor is `(updated_at, drawing_id)` and the query compares the pair; a test puts two drawings in the same microsecond across a page boundary. Postgres and Java order UUIDs differently (unsigned bytes versus signed longs), so the test asks Postgres which comes first.
 - **Shown once means shown once.** API keys and webhook secrets appear only in the create response (`Cache-Control: no-store` for keys), and the page drops them from memory when the player presses Done; the lists show only a prefix. The live check found the other side of that: a receiver without the secret refuses the webhook, and the notifier keeps retrying until it gets one or gives up.
 
+### Fix: a maximum age for the cached JWKS
+
+- **A cache without a maximum age makes a revocation impossible.** The Go verifiers refetched auth's JWKS only on an unknown `kid`, so a key that auth withdrew, even after a leak, stayed trusted until every lobby and notifier restarted. Now the set is refreshed after 10 minutes, which bounds how long a withdrawn key works; refetching on an unknown `kid` stays, so a rotation still works at once.
+- **Fail open for a while, then fail closed.** If auth can't be reached, the last good set keeps working, because a JWKS outage shouldn't log everyone out. But only for an hour: past that every token is refused, otherwise an attacker who can block the fetch keeps a stolen key alive forever. An hour costs almost nothing, since access tokens last 15 minutes and only auth issues new ones.
+- **Stale-while-revalidate without a goroutine.** When the set goes stale, the request that gets the fetch lock (`TryLock`) refreshes it, and every other request keeps using the cached keys instead of queueing behind a fetch that can take until its 3-second timeout. A test holds the fetch open and checks 20 concurrent requests still finish, and mutation checks showed each new test fails when its rule is removed.
+- **Fake clocks make time rules testable.** The cache reads time through an injected `now`, so tests step through "9 minutes: still trusted, 10: refreshed, 59: still served while auth is down, 60: refused" in milliseconds and without sleeps.
+- **The bug was copied once already.** The notifier copied the lobby's verifier, bug included. Fixing two identical copies was the small change; extracting a shared Go module is the real fix for drift, and it is its own decision.
+
 ## Stage 5: Production readiness
 
 ## Stage 6: Scale and depth
