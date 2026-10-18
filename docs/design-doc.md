@@ -434,8 +434,10 @@ Locally, use the Stripe CLI (`stripe listen --forward-to ...`) to forward webhoo
 
 ### 7.9 Round rewards
 
-1. `MatchFinished` reaches the marketplace.
-2. It computes coins by placement (default: 30 for first, 20 for second, 10 for third, 5 for everyone else) with the idempotency key `reward:<match_id>:<user_id>`. That debits `rewards_issuance` and credits the player.
+1. `MatchFinished` reaches the marketplace (consumer group `marketplace` on `game.matches.v1`, with the same commit, skip and retry rules as `assets.drawings.v1`).
+2. It computes coins by placement (`app.rewards`; default: 30 for first, 20 for second, 10 for third, 5 for everyone else). Players with equal scores share a placement, so they get the same amount. A match with fewer than two players pays nothing.
+3. One ledger transaction per match, with the idempotency key `reward:<match_id>`, debits `rewards_issuance` by the total and credits every player. A match is paid all or nothing, the system account's balance row is locked once per match (every reward and Stripe credit locks that one row), and a redelivered `MatchFinished` finds the transaction and pays nothing more. A result that breaks the contract (a blank or repeated player, placement 0, more players than a room holds) fails the whole match, with an error log and a count. Kafka doesn't authenticate producers yet, so the 8-player limit also bounds what a forged event could pay.
+4. The same transaction writes one `CoinsCredited` per player (reason `REWARD`, `reference` the match id) to the outbox.
 
 ### 7.10 Outgoing webhooks
 
@@ -638,13 +640,14 @@ Releases:
 | D34 | The marketplace consumes with Spring for Apache Kafka; records that can never succeed (unreadable, unknown, against the contract, refused by Postgres as data) are logged, counted and skipped, and everything else is retried on the same offset with no limit | An approved drawing is never skipped because of an outage; a bad record never blocks a partition |
 | D35 | Idempotency keys are claimed in their own transaction with a 30-second lease and completed in the work's transaction by an update fenced with the claim's token; successes and business outcomes are stored and replayed byte for byte (ADR 0012) | A crashed request's key frees itself, the work happens at most once even when a retry overlaps the original, and the same key always gets the same answer |
 | D36 | The marketplace's outbox relay runs inside the marketplace process every 500 ms with `FOR UPDATE SKIP LOCKED` and an idempotent producer | One deployable; several instances share the outbox safely; a Kafka outage only delays events |
+| D37 | Match rewards are one ledger transaction per match (`reward:<match_id>`) that also writes a `CoinsCredited` per player; only matches with two or more players pay | All or nothing per match, one lock on the system account per match instead of one per player, and dedupe on the natural key |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 15. Open questions
 
 - ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
-- Coin pack prices and the reward amounts (defaults are in section 7).
+- Coin pack prices (task 4.5). Reward amounts are set (section 7.9) and configurable; anti-farming (daily caps, bot-only matches) waits for the Stage 6 analytics.
 - Before task 4.6: royalties for co-drawn drawings. Today, when one of two co-authors sells for the first time, the other gets nothing, and only `drawer_ids[0]` ever becomes the owner. (The buyer who is also an author no longer needs care: the ledger merges postings to one account before locking, since task 4.1.)
 - `docs/keyword-coverage.md` mentions two things this doc doesn't design yet: Redis cache-aside for listings and wallet reads (which Redis key prefix does the marketplace own, and should balances be cached at all, given they need strong consistency?), and a MongoDB replica set.
 
