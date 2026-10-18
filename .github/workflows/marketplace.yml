@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - services/marketplace/**
+      - proto/doodle/**
+      - proto/gen/java/**
       - .github/workflows/marketplace.yml
       - .github/workflows/_java.yml
       - scripts/test.sh
@@ -15,6 +17,8 @@ on:
     branches: [master]
     paths:
       - services/marketplace/**
+      - proto/doodle/**
+      - proto/gen/java/**
       - .github/workflows/marketplace.yml
       - .github/workflows/_java.yml
       - scripts/test.sh
@@ -41,4 +45,6 @@ jobs:
     uses: ./.github/workflows/_docker.yml
     with:
       service: marketplace
-      context: services/marketplace
+      # The repository root, for the generated contracts in proto/gen/java.
+      context: .
+      file: services/marketplace/Dockerfile

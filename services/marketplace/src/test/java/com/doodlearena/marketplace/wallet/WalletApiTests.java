@@ -13,20 +13,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import com.doodlearena.marketplace.ledger.AccountRef;
 import com.doodlearena.marketplace.ledger.LedgerService;
 import com.doodlearena.marketplace.ledger.TransactionType;
+import com.doodlearena.marketplace.support.ApiTestSupport;
 import com.doodlearena.marketplace.support.LedgerFixtures;
-import com.doodlearena.marketplace.support.PostgresTestConfiguration;
 import com.doodlearena.marketplace.support.TestTokens;
 
 import static com.doodlearena.marketplace.ledger.Posting.credit;
@@ -39,16 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** Token verification (ADR 0001) and the wallet endpoints, through the real filter chain. */
-@SpringBootTest
-@AutoConfigureMockMvc
-@Import({ PostgresTestConfiguration.class, LedgerFixtures.class })
-class WalletApiTests {
-
-	@DynamicPropertySource
-	static void jwks(DynamicPropertyRegistry registry) {
-		registry.add("app.jwt.jwks-url", TestTokens::jwksUrl);
-		registry.add("app.jwt.issuer", () -> TestTokens.ISSUER);
-	}
+class WalletApiTests extends ApiTestSupport {
 
 	@Autowired
 	private MockMvc mvc;

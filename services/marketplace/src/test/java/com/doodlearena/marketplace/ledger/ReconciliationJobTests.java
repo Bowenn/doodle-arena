@@ -23,8 +23,11 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.doodlearena.marketplace.ownership.MintRequest;
+import com.doodlearena.marketplace.ownership.MintService;
 import com.doodlearena.marketplace.support.LedgerFixtures;
 import com.doodlearena.marketplace.support.PostgresTestConfiguration;
+import com.doodlearena.marketplace.support.TestEvents;
 import com.doodlearena.marketplace.telemetry.MarketMetrics;
 
 import static com.doodlearena.marketplace.ledger.Posting.credit;
@@ -57,6 +60,9 @@ class ReconciliationJobTests {
 
 	@Autowired
 	private MarketMetrics metrics;
+
+	@Autowired
+	private MintService mints;
 
 	@Test
 	void detectsWhatGetsPastTheDatabase() {
@@ -95,6 +101,41 @@ class ReconciliationJobTests {
 		// A user account without a balance row.
 		this.db.sql("INSERT INTO accounts (owner_type, owner_id) VALUES ('user', ?)").param("u_" + UUID.randomUUID()).update();
 		assertThat(this.job.reconcile().mismatchedAccounts()).isEqualTo(3);
+	}
+
+	@Test
+	void detectsOwnershipThatDisagreesWithItsProvenance() {
+		UUID unsold = mint("u_ada");
+		UUID saleNotApplied = mint("u_bob");
+		UUID ownerEdited = mint("u_cyd");
+		UUID authorsLost = mint("u_dee");
+		assertThat(this.job.reconcile().ownershipViolationIds()).isEmpty();
+
+		new TransactionTemplate(this.transactions).executeWithoutResult((status) -> {
+			this.db.sql("SET LOCAL session_replication_role = replica").update();
+			// A sale logged in the history but not applied to the ownership row.
+			this.db.sql("""
+					INSERT INTO ownership_events (drawing_id, kind, from_owner, to_owner, sale_id)
+					VALUES (?, 'SALE', 'u_bob', 'u_eve', ?)""").params(saleNotApplied, UUID.randomUUID()).update();
+			// History of a drawing that has no ownership row (the foreign key is bypassed here).
+			this.db.sql("INSERT INTO ownership_events (drawing_id, kind, to_owner) VALUES (?, 'MINT', 'u_fay')")
+				.param(UUID.randomUUID())
+				.update();
+		});
+		this.db.sql("UPDATE ownership SET owner_id = 'u_mallory' WHERE drawing_id = ?").param(ownerEdited).update();
+		this.db.sql("DELETE FROM drawing_authors WHERE drawing_id = ?").param(authorsLost).update();
+
+		ReconciliationResult result = this.job.reconcile();
+		assertThat(result.ownershipViolationIds()).contains(saleNotApplied, ownerEdited, authorsLost)
+			.doesNotContain(unsold)
+			.hasSize(4);
+		assertThat(result.clean()).isFalse();
+	}
+
+	private UUID mint(String owner) {
+		UUID drawing = UUID.randomUUID();
+		this.mints.mint(MintRequest.from(TestEvents.approved(drawing, owner)));
+		return drawing;
 	}
 
 	@Test
