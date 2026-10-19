@@ -1,6 +1,7 @@
 """CredentialsRevoked (ADR 0015): written to the outbox in the transaction that detects the theft,
 published by the relay to Kafka at least once."""
 
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -58,13 +59,49 @@ def test_replaying_the_stolen_token_again_changes_nothing_more(
     assert use(client, stolen) == 200
     assert use(client, stolen) == 401  # detected: keys revoked, one event
 
-    login(client, google)  # the user signs in again and makes a new key
+    # The user signs in again and makes a new key. A token must be issued after the revocation's
+    # second (iat has whole seconds; ADR 0015 errs on the safe side), as a real sign-in would be.
+    time.sleep(1.1)
+    login(client, google)
     key = create(client, user_id(db), "after")["key"]
     for _ in range(3):
         assert use(client, stolen) == 401
 
     assert len(events(db)) == 1
     assert verify(client, key).status_code == 200
+
+
+def test_a_token_issued_before_the_theft_cannot_mint_api_keys(
+    client: TestClient, google: FakeGoogle, db: Engine
+) -> None:
+    """The thief's access token stays a valid JWT for 15 minutes; without this check it could
+    make a fresh key, whose created_at would pass the notifier's watermark."""
+    issuer = client.app.state.ctx.issuer  # type: ignore[attr-defined]
+    stolen = login(client, google)
+    uid = user_id(db)
+    thief_token, _ = issuer.issue(uid, ["player"], datetime.now(UTC) - timedelta(seconds=5))
+    assert use(client, stolen) == 200
+    assert use(client, stolen) == 401  # theft detected
+
+    for method, path in [("POST", ""), ("GET", ""), ("DELETE", "/" + str(uuid.uuid4()))]:
+        r = client.request(
+            method,
+            "/api/auth/api-keys" + path,
+            json={"name": "thief", "scopes": ["webhooks"]} if method == "POST" else None,
+            headers={"Authorization": f"Bearer {thief_token}"},
+        )
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", (
+            method,
+            r.text,
+        )
+
+    fresh, _ = issuer.issue(uid, ["player"], datetime.now(UTC) + timedelta(seconds=2))
+    r = client.post(
+        "/api/auth/api-keys",
+        json={"name": "after", "scopes": ["webhooks"]},
+        headers={"Authorization": f"Bearer {fresh}"},
+    )
+    assert r.status_code == 201
 
 
 def test_a_logged_out_token_coming_back_writes_nothing(

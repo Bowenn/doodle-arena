@@ -28,6 +28,9 @@ users = Table(
     Column("display_name", Text, nullable=False),
     Column("avatar_url", Text),
     Column("roles", ARRAY(Text), nullable=False, server_default=text("'{player}'")),
+    # When auth last revoked the user's credentials (a stolen session, ADR 0015): access tokens
+    # issued at or before it can't manage API keys, though they still verify until they expire.
+    Column("credentials_revoked_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("last_login_at", DateTime(timezone=True)),

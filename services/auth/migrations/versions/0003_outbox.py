@@ -1,4 +1,4 @@
-"""outbox, and refresh_tokens.reuse_handled_at
+"""outbox, refresh_tokens.reuse_handled_at and users.credentials_revoked_at
 
 Revision ID: 0003
 Revises: 0002
@@ -42,8 +42,12 @@ def upgrade() -> None:
     # publishes the event. Otherwise anyone holding an old token could replay it again and
     # again, revoking the user's new keys and disabling their webhooks each time.
     op.add_column("refresh_tokens", sa.Column("reuse_handled_at", sa.DateTime(timezone=True)))
+    # The revocation watermark: a thief's access token stays a valid JWT for up to 15 minutes,
+    # and mustn't be able to mint a fresh API key in that time.
+    op.add_column("users", sa.Column("credentials_revoked_at", sa.DateTime(timezone=True)))
 
 
 def downgrade() -> None:
+    op.drop_column("users", "credentials_revoked_at")
     op.drop_column("refresh_tokens", "reuse_handled_at")
     op.drop_table("outbox")

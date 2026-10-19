@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import Connection, insert, select, update
 
 from app import api_keys, outbox
-from app.db import refresh_tokens
+from app.db import refresh_tokens, users
 
 
 def hash_token(token: str) -> bytes:
@@ -81,6 +81,10 @@ def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> Rotat
             # its access tokens to create API keys. (A token revoked by logout coming back is more
             # likely a stale cookie, so it ends the family but leaves the keys alone.)
             keys_revoked = api_keys.revoke_all(conn, str(row.user_id), now)
+            # Tokens issued until now may be the thief's: they can't mint new keys either.
+            conn.execute(
+                update(users).where(users.c.id == row.user_id).values(credentials_revoked_at=now)
+            )
             # And anything else those credentials set up: the notifier disables the user's
             # webhook endpoints when this event arrives (ADR 0015). Same transaction, so the
             # revocation and its event commit together.

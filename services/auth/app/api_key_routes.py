@@ -6,9 +6,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app import api_keys
 from app.context import AuthContext, get_context
+from app.db import users
 from app.errors import ApiError
 from app.routes import current_claims
 from app.tokens import AccessClaims
@@ -17,7 +19,29 @@ log = logging.getLogger("auth")
 router = APIRouter(prefix="/api/auth/api-keys")
 internal_router = APIRouter(prefix="/internal/api-keys")
 Ctx = Annotated[AuthContext, Depends(get_context)]
-Claims = Annotated[AccessClaims, Depends(current_claims)]
+
+
+def fresh_claims(
+    ctx: Annotated[AuthContext, Depends(get_context)],
+    claims: Annotated[AccessClaims, Depends(current_claims)],
+) -> AccessClaims:
+    """The caller's access token, unless it was issued at or before its user's credential
+    revocation (ADR 0015): a thief's token still verifies for up to 15 minutes, and mustn't
+    mint, list or revoke keys meanwhile."""
+    try:
+        user_id = uuid.UUID(claims.user_id)
+    except ValueError:
+        return claims  # no users row (a drill token): nothing was ever revoked
+    with ctx.engine.connect() as conn:
+        revoked_at = conn.execute(
+            select(users.c.credentials_revoked_at).where(users.c.id == user_id)
+        ).scalar_one_or_none()
+    if revoked_at is not None and (claims.issued_at is None or claims.issued_at <= revoked_at):
+        raise ApiError(401, "TOKEN_REVOKED", "this session was revoked: sign in again")
+    return claims
+
+
+Claims = Annotated[AccessClaims, Depends(fresh_claims)]
 
 
 class CreateKey(BaseModel):

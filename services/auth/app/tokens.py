@@ -9,7 +9,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +74,9 @@ def jwks(public_keys: dict[str, RSAPublicKey]) -> dict[str, Any]:
 class AccessClaims:
     user_id: str
     roles: list[str]
+    # When the token was issued: a token issued at or before its user's credential revocation
+    # can't manage API keys (ADR 0015).
+    issued_at: datetime | None = None
 
 
 class TokenIssuer:
@@ -127,4 +130,8 @@ class TokenVerifier:
         roles = claims.get("roles")
         if not isinstance(roles, list) or not all(isinstance(r, str) for r in roles):
             raise InvalidTokenError("roles claim must be a list of strings")
-        return AccessClaims(user_id=claims["sub"], roles=roles)
+        return AccessClaims(
+            user_id=claims["sub"],
+            roles=roles,
+            issued_at=datetime.fromtimestamp(claims["iat"], UTC),
+        )
