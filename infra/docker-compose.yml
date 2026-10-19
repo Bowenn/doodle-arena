@@ -695,6 +695,20 @@ services:
 
   # ------------------------------------------------------------- observability
 
+  kafka-metrics:
+    # Broker-side consumer-group lag for every consumer (the ConsumerLagGrowing alert), pushed to
+    # otel-lgtm over OTLP. Version matches the collector bundled in otel-lgtm.
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/kafka-metrics/config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      otel-lgtm:
+        condition: service_healthy
+
   otel-lgtm:
     # Collector, Prometheus, Tempo, Loki and Grafana in one container (development only).
     image: grafana/otel-lgtm:0.36.0
