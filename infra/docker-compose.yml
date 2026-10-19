@@ -703,6 +703,8 @@ services:
     image: otel/opentelemetry-collector-contrib:0.162.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      DEPLOYMENT_ENVIRONMENT: local
     volumes:
       - ./observability/kafka-metrics/config.yaml:/etc/otelcol/config.yaml:ro
     depends_on:
