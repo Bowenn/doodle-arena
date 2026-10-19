@@ -114,6 +114,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `notifier.deliveries` | Counter | `result` = success, retry (failed, will try again), dead (failed for the last time) | notifier |
 | `notifier.delivery.duration` | Histogram (ms) | – (from sending to the answer or the failure) | notifier |
 | `notifier.dlq.size` | Gauge | – (deliveries that went DEAD in the last 24 hours, test pings aside; for dashboards: a dead delivery is usually a developer's server being down, so no alert pages on it) | notifier |
+| `notifier.queue.oldest_age` | Gauge (s) | – (how long the oldest due delivery of a live, enabled endpoint has waited for a worker; 0 when none is due. It grows when the notifier falls behind, not when a developer's server fails) | notifier |
 | `notifier.events` | Counter | `result` = queued, no_subscribers, duplicate (queued before: a redelivery; or a revocation not newer than the watermark), revoked (a `CredentialsRevoked` applied), skipped (unreadable) | notifier |
 | `auth.api_keys.verifications` | Counter | `result` = valid, invalid, revoked | auth |
 | `auth.events.published` | Counter | `result` = success (confirmed by Kafka), failed (left to retry) | auth (relay) |
@@ -170,7 +171,7 @@ Starting rules (tune the thresholds after the first load test):
 | DrawingsFailing | `assets.pipeline.results{result=failed}` above 0 for 10 minutes (stroke logs missing or unreadable: an S3 outage longer than 7 days, or a game-server bug) | warning |
 | JobsBacklog | `assets.jobs.oldest_age` above 300 s for 5 minutes, or the series missing for 5 minutes (no worker) | warning |
 | WebhooksFailing | `notifier.deliveries{result!=success}` above half of all attempts for 15 minutes, across many endpoints (our sender or network is broken, not one developer's server) | warning |
-| WebhookQueueStuck | The oldest due delivery waits more than 5 minutes (workers stopped or Postgres slow; needs a `notifier.queue.oldest_age` gauge, added with the alerts in task 5.1) | warning |
+| WebhookQueueStuck | `notifier.queue.oldest_age` above 300 s for 5 minutes (workers stopped or Postgres slow) | warning |
 | StripeSignatureFailures | More than 5 invalid signatures in 10 minutes (a wrong secret or forged requests) | warning |
 | RefreshTokenReuse | `auth.refreshes{result=reuse_detected}` above its usual rate for 10 minutes (stolen tokens, or a client that refreshes concurrently) | warning |
 | GameServerDown | `lobby.servers.healthy` below the expected count for 1 minute | critical |

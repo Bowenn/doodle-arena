@@ -263,3 +263,15 @@ func (s *Store) DeadSince(ctx context.Context, t time.Time) (int64, error) {
 	err := s.Pool.QueryRow(ctx, "SELECT count(*) FROM deliveries WHERE status = 'DEAD' AND finished_at > $1 AND event_type <> 'ping'", t).Scan(&n)
 	return n, err
 }
+
+// OldestDueAge is how long the oldest due delivery has waited for a worker, in seconds: PENDING,
+// due, and for a live, enabled endpoint (the deliveries Claim would take). 0 when none is due.
+// The notifier.queue.oldest_age gauge: it grows when the workers stop or fall behind.
+func (s *Store) OldestDueAge(ctx context.Context) (float64, error) {
+	var age float64
+	err := s.Pool.QueryRow(ctx, `
+		SELECT COALESCE(EXTRACT(EPOCH FROM now() - min(d.next_attempt_at)), 0)::float8
+		FROM deliveries d JOIN endpoints e ON e.id = d.endpoint_id
+		WHERE d.status = 'PENDING' AND d.next_attempt_at <= now() AND e.deleted_at IS NULL AND e.disabled_at IS NULL`).Scan(&age)
+	return age, err
+}
