@@ -47,9 +47,10 @@ _replays: Collection[dict[str, Any]] | None = None
 
 
 def _client(endpoint: str) -> Any:
+    """An S3 client for endpoint; an empty endpoint is AWS's own (boto3 refuses "")."""
     return boto3.client(
         "s3",
-        endpoint_url=endpoint,
+        endpoint_url=endpoint or None,
         region_name=settings.S3_REGION,
         aws_access_key_id=settings.S3_ACCESS_KEY or None,
         aws_secret_access_key=settings.S3_SECRET_KEY or None,
@@ -57,7 +58,7 @@ def _client(endpoint: str) -> Any:
             connect_timeout=3,
             read_timeout=10,
             retries={"max_attempts": 2, "mode": "standard"},
-            s3={"addressing_style": "path"},  # SeaweedFS has no virtual-host buckets
+            s3={"addressing_style": "path" if settings.S3_PATH_STYLE else "virtual"},
             signature_version="s3v4",
         ),
     )

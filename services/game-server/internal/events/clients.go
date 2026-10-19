@@ -1,10 +1,13 @@
 package events
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -36,23 +39,36 @@ func NewKafkaClient(brokers []string) (*kgo.Client, error) {
 type S3Config struct {
 	Endpoint  string // empty: AWS's own endpoint
 	Region    string
-	AccessKey string
+	PathStyle bool   // SeaweedFS needs path-style addressing; S3 prefers virtual-hosted
+	AccessKey string // empty (with SecretKey): the default chain, such as an ECS task role
 	SecretKey string
 }
 
-// NewS3Client returns a traced S3 client with path-style addressing (SeaweedFS needs it).
-func NewS3Client(cfg S3Config) *s3.Client {
+// NewS3Client returns a traced S3 client. Without static keys it takes credentials from the
+// SDK's default chain: in ECS, the task role (ADR 0003), so no key is ever configured there.
+func NewS3Client(ctx context.Context, cfg S3Config) (*s3.Client, error) {
 	opts := s3.Options{
 		Region:       cfg.Region,
-		UsePathStyle: true,
-		Credentials:  credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, ""),
+		UsePathStyle: cfg.PathStyle,
 		// Only send checksums S3 requires; some S3-compatible stores reject the newer
 		// default checksum headers.
 		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
+	}
+	switch {
+	case cfg.AccessKey != "" && cfg.SecretKey != "":
+		opts.Credentials = credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")
+	case cfg.AccessKey != "" || cfg.SecretKey != "":
+		return nil, errors.New("set both S3_ACCESS_KEY and S3_SECRET_KEY, or neither (to use the task role)")
+	default:
+		awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(cfg.Region))
+		if err != nil {
+			return nil, fmt.Errorf("aws credentials: %w", err)
+		}
+		opts.Credentials = awsCfg.Credentials
 	}
 	if cfg.Endpoint != "" {
 		opts.BaseEndpoint = aws.String(cfg.Endpoint)
 	}
 	otelaws.AppendMiddlewares(&opts.APIOptions)
-	return s3.New(opts)
+	return s3.New(opts), nil
 }

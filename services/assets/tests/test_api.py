@@ -259,3 +259,20 @@ def test_presigned_urls_are_reused_then_signed_again(monkeypatch: pytest.MonkeyP
     later = time.monotonic() + storage.PRESIGN_REUSE_SECONDS + 1
     monkeypatch.setattr("drawings.storage.time.monotonic", lambda: later)
     assert storage.presigned_url("k") == "url-3"  # still at least 5 minutes of validity each
+
+
+def test_an_empty_endpoint_signs_for_s3_itself(settings: Any) -> None:
+    """In AWS (ADR 0003) the endpoint is empty and addressing virtual-hosted: URLs point at S3."""
+    settings.S3_PUBLIC_ENDPOINT = ""
+    settings.S3_REGION = "us-west-2"
+    settings.S3_PATH_STYLE = False
+    settings.S3_ACCESS_KEY = "AKIDEXAMPLE"
+    settings.S3_SECRET_KEY = "example"
+    settings.DRAWINGS_BUCKET = "doodle-drawings"
+    storage.reset_clients_for_tests()
+    try:
+        url = storage.presigned_url("sha256/abc.png")
+    finally:
+        storage.reset_clients_for_tests()
+
+    assert url.startswith("https://doodle-drawings.s3.us-west-2.amazonaws.com/sha256/abc.png?")

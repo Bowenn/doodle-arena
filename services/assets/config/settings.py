@@ -33,12 +33,15 @@ class Env(BaseSettings):
     # Kafka: assets consumes game.rounds.v1 (design doc 6.2).
     kafka_brokers: str = "kafka:9092"
     # Object storage: SeaweedFS locally, S3 in AWS. The stroke logs are the game server's bucket
-    # (read only here); drawings is assets' own.
+    # (read only here); drawings is assets' own. An empty endpoint means AWS's own (ADR 0003),
+    # with credentials from the default chain (the ECS task role) when no keys are set.
     s3_endpoint: str = "http://seaweedfs:8333"
     # Where browsers fetch images: presigned URLs are signed for this address, which must reach
-    # the same store (SeaweedFS's published port locally; the S3 endpoint in AWS).
+    # the same store (SeaweedFS's published port locally; S3 itself in AWS).
     s3_public_endpoint: str = ""
     s3_region: str = "us-east-1"
+    # SeaweedFS has no virtual-host buckets; S3 prefers them.
+    s3_path_style: bool = True
     s3_access_key: str = ""
     s3_secret_key: str = ""
     round_logs_bucket: str = "round-logs"
@@ -168,6 +171,7 @@ SERVICE_INSTANCE_ID = env.service_instance_id
 S3_ENDPOINT = env.s3_endpoint
 S3_PUBLIC_ENDPOINT = env.s3_public_endpoint or env.s3_endpoint
 S3_REGION = env.s3_region
+S3_PATH_STYLE = env.s3_path_style
 S3_ACCESS_KEY = env.s3_access_key
 S3_SECRET_KEY = env.s3_secret_key
 ROUND_LOGS_BUCKET = env.round_logs_bucket
