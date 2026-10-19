@@ -52,3 +52,19 @@ func TestReceiverVerifiesAndObeysItsMode(t *testing.T) {
 		t.Fatalf("hook = %+v", h)
 	}
 }
+
+func TestReceiverKeepsUnsignedRequestsOnHooksWithoutASecret(t *testing.T) {
+	srv := httptest.NewServer((&receiver{hooks: map[string]*hook{}}).routes())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/hooks/alerts", "application/json", strings.NewReader(`{"content":"[FIRING] LedgerImbalance"}`))
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("unsigned POST: %v %v", resp, err)
+	}
+
+	resp, _ = http.Get(srv.URL + "/admin/alerts")
+	var h hook
+	_ = json.NewDecoder(resp.Body).Decode(&h)
+	if len(h.Received) != 1 || h.Received[0].Verified || !strings.Contains(h.Received[0].Body, "LedgerImbalance") {
+		t.Fatalf("hook = %+v", h)
+	}
+}
