@@ -46,14 +46,6 @@ from app.tokens import SigningKey, TokenIssuer  # noqa: E402
 
 GW = os.environ.get("GATEWAY", "http://localhost:8080")
 WS, ORIGIN = GW.replace("http", "ws", 1), GW
-COMPOSE = [
-    "docker",
-    "compose",
-    "-f",
-    str(ROOT / "infra/docker-compose.yml"),
-    "--env-file",
-    str(ROOT / ".env"),
-]
 issuer = TokenIssuer(
     SigningKey.load(
         os.environ.get("DRILL_JWT_PEM", ""),
@@ -292,7 +284,7 @@ async def main(mode, players):
     print(f"recovery (slowest bot): {worst:.1f} s" if ok else "FAILED")
     if mode == "pause":
         logs = subprocess.run(
-            [*COMPOSE, "logs", "--no-log-prefix", "--since", "30s", owner],
+            ["docker", "logs", "--since", "30s", f"doodle-arena-{owner}-1"],
             capture_output=True,
             text=True,
         ).stdout
@@ -303,7 +295,11 @@ async def main(mode, players):
         print(f"zombie {owner}: {fenced} fencing log lines")
         ok &= fenced > 0
     if mode == "kill":
-        subprocess.run([*COMPOSE, "start", owner], capture_output=True)
+        # docker start, not compose: compose would need the main checkout's .env (a worktree has
+        # none), and failing quietly here left the stack with one game server.
+        subprocess.run(
+            ["docker", "start", f"doodle-arena-{owner}-1"], check=True, capture_output=True
+        )
     sys.exit(0 if ok else 1)
 
 
