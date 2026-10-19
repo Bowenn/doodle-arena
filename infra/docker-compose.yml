@@ -222,7 +222,9 @@ services:
   # One-shot job: applies the auth database migrations, then exits. auth starts only after it
   # succeeds, so replicas never race on a migration.
   auth-migrate:
-    build: ../services/auth
+    build:
+      context: ..
+      dockerfile: services/auth/Dockerfile
     command: ["alembic", "upgrade", "head"]
     environment:
       <<: [*app-env, *auth-db-env]
@@ -233,7 +235,9 @@ services:
 
   auth:
     <<: *app
-    build: ../services/auth
+    build:
+      context: ..
+      dockerfile: services/auth/Dockerfile
     environment:
       <<: [*app-env, *auth-db-env]
       SERVICE_INSTANCE_ID: auth-1
@@ -254,6 +258,35 @@ services:
       auth-migrate:
         condition: service_completed_successfully
     healthcheck: *py-healthcheck
+
+  # The outbox relay (ADR 0015): publishes auth's events (CredentialsRevoked on auth.users.v1)
+  # to Kafka. Same image as auth; no key mount, no port.
+  auth-relay:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: services/auth/Dockerfile
+    command: ["python", "-m", "app.relay"]
+    environment:
+      <<: [*app-env, *auth-db-env]
+      SERVICE_INSTANCE_ID: auth-relay-1
+      OTEL_SERVICE_NAME: auth
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=auth-relay-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
+      auth-migrate:
+        condition: service_completed_successfully
+      kafka-topics:
+        condition: service_completed_successfully
+    healthcheck:
+      # The relay loop touches this file on every pass, even while Kafka is down.
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/relay-alive') > 30)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   ai:
     <<: *app

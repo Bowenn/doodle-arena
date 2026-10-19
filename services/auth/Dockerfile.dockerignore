@@ -1,0 +1,10 @@
+# The build context is the repository root; send only what the auth build needs.
+*
+!proto/gen/python
+!services/auth
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+services/auth/tests
