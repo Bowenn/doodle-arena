@@ -1,4 +1,4 @@
-"""outbox
+"""outbox, and refresh_tokens.reuse_handled_at
 
 Revision ID: 0003
 Revises: 0002
@@ -37,6 +37,13 @@ def upgrade() -> None:
         postgresql_where=sa.text("published_at IS NULL"),
     )
 
+    # The theft response runs once per family: a replayed token sets this on the whole family
+    # (WHERE reuse_handled_at IS NULL), and only the replay that set it revokes the keys and
+    # publishes the event. Otherwise anyone holding an old token could replay it again and
+    # again, revoking the user's new keys and disabling their webhooks each time.
+    op.add_column("refresh_tokens", sa.Column("reuse_handled_at", sa.DateTime(timezone=True)))
+
 
 def downgrade() -> None:
+    op.drop_column("refresh_tokens", "reuse_handled_at")
     op.drop_table("outbox")

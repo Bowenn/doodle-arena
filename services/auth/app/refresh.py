@@ -76,7 +76,7 @@ def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> Rotat
     if row.used_at is not None or row.revoked_at is not None:
         revoke_family(conn, row.family_id, now, "reuse_detected")
         keys_revoked = 0
-        if row.used_at is not None:
+        if row.used_at is not None and _first_reuse(conn, row.family_id, now):
             # A rotated token came back: someone else had this session, and may have used one of
             # its access tokens to create API keys. (A token revoked by logout coming back is more
             # likely a stale cookie, so it ends the family but leaves the keys alone.)
@@ -97,6 +97,19 @@ def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> Rotat
     conn.execute(update(refresh_tokens).where(refresh_tokens.c.id == row.id).values(used_at=now))
     successor = _insert(conn, row.family_id, row.user_id, now, ttl)
     return RotateResult("rotated", successor, row.user_id, row.family_id)
+
+
+def _first_reuse(conn: Connection, family_id: uuid.UUID, now: datetime) -> bool:
+    """Marks the family's theft as handled; True only for the first replay. Once per family, so
+    a thief replaying an old token can't revoke the user's new API keys and disable their
+    webhooks again and again. Concurrent replays serialize on the rows: the second one finds
+    them marked and updates none."""
+    result = conn.execute(
+        update(refresh_tokens)
+        .where(refresh_tokens.c.family_id == family_id, refresh_tokens.c.reuse_handled_at.is_(None))
+        .values(reuse_handled_at=now)
+    )
+    return result.rowcount > 0
 
 
 def revoke_family(conn: Connection, family_id: uuid.UUID, now: datetime, reason: str) -> None:

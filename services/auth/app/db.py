@@ -47,6 +47,10 @@ refresh_tokens = Table(
     Column("used_at", DateTime(timezone=True)),
     Column("revoked_at", DateTime(timezone=True)),
     Column("revoked_reason", Text),
+    # Set on every token of a family the first time a rotated token of it comes back, so the
+    # theft response (revoke API keys, CredentialsRevoked) runs once per family, however often a
+    # thief replays it.
+    Column("reuse_handled_at", DateTime(timezone=True)),
     Index("refresh_tokens_family_id_idx", "family_id"),
     Index("refresh_tokens_user_id_idx", "user_id"),
 )

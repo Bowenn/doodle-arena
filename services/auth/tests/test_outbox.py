@@ -12,6 +12,7 @@ from sqlalchemy import Engine, text
 
 from app import outbox, relay
 from tests.fake_google import FakeGoogle
+from tests.test_api_keys import create, verify
 from tests.test_refresh import ORIGIN, current_cookie, login, use
 
 
@@ -46,6 +47,24 @@ def test_a_replayed_rotated_token_writes_credentials_revoked(
     uuid.UUID(revoked.meta.event_id)
     at = revoked.revoked_at.ToDatetime(tzinfo=UTC)
     assert before - timedelta(seconds=1) <= at <= datetime.now(UTC)
+
+
+def test_replaying_the_stolen_token_again_changes_nothing_more(
+    client: TestClient, google: FakeGoogle, db: Engine
+) -> None:
+    """The theft response runs once per family: otherwise anyone holding an old token could
+    keep revoking the user's new API keys and disabling their webhooks."""
+    stolen = login(client, google)
+    assert use(client, stolen) == 200
+    assert use(client, stolen) == 401  # detected: keys revoked, one event
+
+    login(client, google)  # the user signs in again and makes a new key
+    key = create(client, user_id(db), "after")["key"]
+    for _ in range(3):
+        assert use(client, stolen) == 401
+
+    assert len(events(db)) == 1
+    assert verify(client, key).status_code == 200
 
 
 def test_a_logged_out_token_coming_back_writes_nothing(
