@@ -1,6 +1,7 @@
 """CredentialsRevoked (ADR 0015): written to the outbox in the transaction that detects the theft,
 published by the relay to Kafka at least once."""
 
+import threading
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -11,7 +12,7 @@ from doodle.events.v1 import users_pb2
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from app import outbox, relay
+from app import api_keys, outbox, relay
 from tests.fake_google import FakeGoogle
 from tests.test_api_keys import create, verify
 from tests.test_refresh import ORIGIN, current_cookie, login, use
@@ -102,6 +103,45 @@ def test_a_token_issued_before_the_theft_cannot_mint_api_keys(
         headers={"Authorization": f"Bearer {fresh}"},
     )
     assert r.status_code == 201
+
+
+def test_a_key_minted_while_the_theft_is_handled_is_refused(db: Engine) -> None:
+    """The theft response and key creation share the user's lock: a key request that passed the
+    first check, then waited while the revocation committed, is refused when it gets the lock."""
+    uid = uuid.uuid4()
+    with db.begin() as conn:
+        conn.execute(
+            text("INSERT INTO users (id, google_sub, display_name) VALUES (:id, :sub, 'Race')"),
+            {"id": uid, "sub": "race-" + uid.hex},
+        )
+    issued = datetime.now(UTC) - timedelta(minutes=1)  # the thief's token
+
+    holder = db.connect()
+    holder_tx = holder.begin()
+    api_keys.lock_user(holder, str(uid))  # the theft response, mid-transaction
+    result: list[BaseException | None] = []
+
+    def mint() -> None:
+        try:
+            with db.begin() as conn:
+                api_keys.create_within_cap(conn, str(uid), "thief", ["webhooks"], issued)
+            result.append(None)
+        except BaseException as e:
+            result.append(e)
+
+    worker = threading.Thread(target=mint)
+    worker.start()
+    time.sleep(0.3)  # the key request is now waiting for the lock
+    holder.execute(
+        text("UPDATE users SET credentials_revoked_at = now() WHERE id = :id"), {"id": uid}
+    )
+    holder_tx.commit()
+    holder.close()
+    worker.join(10)
+
+    assert len(result) == 1 and isinstance(result[0], api_keys.CredentialsRevoked)
+    with db.connect() as conn:
+        assert api_keys.active_count(conn, str(uid)) == 0
 
 
 def test_a_logged_out_token_coming_back_writes_nothing(

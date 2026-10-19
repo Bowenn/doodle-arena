@@ -14,7 +14,7 @@ from typing import Literal
 
 from sqlalchemy import Connection, func, insert, select, update
 
-from app.db import api_keys
+from app.db import api_keys, users
 
 PREFIX_LENGTH = 12
 MAX_ACTIVE_KEYS = 10
@@ -90,17 +90,46 @@ class TooManyKeys(Exception):
     """The user already has MAX_ACTIVE_KEYS active keys."""
 
 
-def create_within_cap(
-    conn: Connection, user_id: str, name: str, scopes: list[str]
-) -> tuple[ApiKey, str]:
-    """Like create, unless the user is at the cap. A per-user advisory lock, held to the end of
-    the caller's transaction, makes count-then-insert atomic: without it, concurrent requests
-    all see 9 keys and all insert."""
+class CredentialsRevoked(Exception):
+    """The caller's token was issued at or before the user's credential revocation."""
+
+
+def lock_user(conn: Connection, user_id: str) -> None:
+    """Serializes changes to one user's keys (creation, and the theft response that revokes
+    them all) until the caller's transaction ends."""
     lock_id = func.hashtextextended("api_keys:" + user_id, 0)
     conn.execute(select(func.pg_advisory_xact_lock(lock_id)))
+
+
+def create_within_cap(
+    conn: Connection,
+    user_id: str,
+    name: str,
+    scopes: list[str],
+    issued_at: datetime | None = None,
+) -> tuple[ApiKey, str]:
+    """Like create, unless the user is at the cap or the caller's token (issued at issued_at)
+    predates the user's credential revocation. Both checks run under lock_user, which the theft
+    response takes too: without it, concurrent requests all see 9 keys and all insert, and a
+    key could be minted with a stolen token just after the revocation committed (ADR 0015)."""
+    lock_user(conn, user_id)
+    check_not_revoked(conn, user_id, issued_at)
     if active_count(conn, user_id) >= MAX_ACTIVE_KEYS:
         raise TooManyKeys
     return create(conn, user_id, name, scopes)
+
+
+def check_not_revoked(conn: Connection, user_id: str, issued_at: datetime | None) -> None:
+    """Raises CredentialsRevoked for a token issued at or before the user's revocation."""
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return  # no users row (a drill token): nothing was ever revoked
+    revoked_at = conn.execute(
+        select(users.c.credentials_revoked_at).where(users.c.id == uid)
+    ).scalar_one_or_none()
+    if revoked_at is not None and (issued_at is None or issued_at <= revoked_at):
+        raise CredentialsRevoked
 
 
 def create(conn: Connection, user_id: str, name: str, scopes: list[str]) -> tuple[ApiKey, str]:

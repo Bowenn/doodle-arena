@@ -80,6 +80,9 @@ def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> Rotat
             # A rotated token came back: someone else had this session, and may have used one of
             # its access tokens to create API keys. (A token revoked by logout coming back is more
             # likely a stale cookie, so it ends the family but leaves the keys alone.)
+            # Under the lock key creation takes, so a key minted with a stolen token either
+            # commits first (and is revoked here) or sees the watermark and is refused.
+            api_keys.lock_user(conn, str(row.user_id))
             keys_revoked = api_keys.revoke_all(conn, str(row.user_id), now)
             # Tokens issued until now may be the thief's: they can't mint new keys either.
             conn.execute(

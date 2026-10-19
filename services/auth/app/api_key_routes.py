@@ -6,11 +6,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
 from app import api_keys
 from app.context import AuthContext, get_context
-from app.db import users
 from app.errors import ApiError
 from app.routes import current_claims
 from app.tokens import AccessClaims
@@ -27,17 +25,14 @@ def fresh_claims(
 ) -> AccessClaims:
     """The caller's access token, unless it was issued at or before its user's credential
     revocation (ADR 0015): a thief's token still verifies for up to 15 minutes, and mustn't
-    mint, list or revoke keys meanwhile."""
-    try:
-        user_id = uuid.UUID(claims.user_id)
-    except ValueError:
-        return claims  # no users row (a drill token): nothing was ever revoked
+    mint, list or revoke keys meanwhile. Creation checks again under the user's lock."""
     with ctx.engine.connect() as conn:
-        revoked_at = conn.execute(
-            select(users.c.credentials_revoked_at).where(users.c.id == user_id)
-        ).scalar_one_or_none()
-    if revoked_at is not None and (claims.issued_at is None or claims.issued_at <= revoked_at):
-        raise ApiError(401, "TOKEN_REVOKED", "this session was revoked: sign in again")
+        try:
+            api_keys.check_not_revoked(conn, claims.user_id, claims.issued_at)
+        except api_keys.CredentialsRevoked:
+            raise ApiError(
+                401, "TOKEN_REVOKED", "this session was revoked: sign in again"
+            ) from None
     return claims
 
 
@@ -71,7 +66,12 @@ def create_key(ctx: Ctx, claims: Claims, body: CreateKey, response: Response) ->
         raise ApiError(400, "INVALID_SCOPE", f"unknown scopes: {', '.join(sorted(unknown))}")
     try:
         with ctx.engine.begin() as conn:
-            key, full = api_keys.create_within_cap(conn, claims.user_id, body.name, body.scopes)
+            key, full = api_keys.create_within_cap(
+                conn, claims.user_id, body.name, body.scopes, claims.issued_at
+            )
+    except api_keys.CredentialsRevoked:
+        # The revocation committed after fresh_claims looked: refused under the lock.
+        raise ApiError(401, "TOKEN_REVOKED", "this session was revoked: sign in again") from None
     except api_keys.TooManyKeys:
         raise ApiError(
             409, "TOO_MANY_API_KEYS", f"at most {api_keys.MAX_ACTIVE_KEYS} active keys"
