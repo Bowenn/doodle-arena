@@ -68,6 +68,20 @@ api_keys = Table(
 )
 
 
+# The transactional outbox (ADR 0015), published by the auth-relay process (app.relay).
+outbox = Table(
+    "outbox",
+    metadata,
+    Column("event_id", Uuid, primary_key=True),
+    Column("topic", Text, nullable=False),
+    Column("key", Text, nullable=False),
+    Column("payload", LargeBinary, nullable=False),
+    Column("traceparent", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("published_at", DateTime(timezone=True)),
+)
+
+
 def make_engine(url: str) -> Engine:
     # pool_pre_ping survives Postgres restarts in the local stack.
     return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)

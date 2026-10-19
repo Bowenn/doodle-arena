@@ -28,6 +28,7 @@ from opentelemetry.sdk.resources import OTELResourceDetector, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span
+from sqlalchemy import Engine
 
 from app import SERVICE_NAME
 from app.context import AuthContext
@@ -94,7 +95,30 @@ def setup_telemetry(app: FastAPI, settings: Settings) -> Callable[[], None]:
     stops the exporters; call it on shutdown."""
     if not enabled():
         return lambda: None
+    shutdown = _install_providers(settings)
+    ctx: AuthContext = app.state.ctx
+    FastAPIInstrumentor.instrument_app(
+        app, excluded_urls=EXCLUDED_URLS, server_request_hook=server_request_hook
+    )
+    # SQLAlchemy spans carry the statement and pool; psycopg spans the driver round trip.
+    SQLAlchemyInstrumentor().instrument(engine=ctx.engine)
+    PsycopgInstrumentor().instrument()
+    # Patches httpx's transports, so the Google client created in create_app is covered too.
+    HTTPXClientInstrumentor().instrument()
+    return shutdown
 
+
+def setup_process_telemetry(settings: Settings, engine: Engine) -> Callable[[], None]:
+    """The same providers for a process without the web app (the outbox relay)."""
+    if not enabled():
+        return lambda: None
+    shutdown = _install_providers(settings)
+    SQLAlchemyInstrumentor().instrument(engine=engine)
+    PsycopgInstrumentor().instrument()
+    return shutdown
+
+
+def _install_providers(settings: Settings) -> Callable[[], None]:
     res = resource(settings)
     # Exporters read the endpoint, headers and timeouts from OTEL_EXPORTER_OTLP_*; the metric
     # reader reads OTEL_METRIC_EXPORT_INTERVAL. Shutdown is explicit, not atexit.
@@ -113,16 +137,6 @@ def setup_telemetry(app: FastAPI, settings: Settings) -> Callable[[], None]:
     # Host-wide system.* metrics are left out: they describe the machine, not the service.
     SystemMetricsInstrumentor(config=PROCESS_METRICS).instrument()
     set_logger_provider(logger_provider)
-
-    ctx: AuthContext = app.state.ctx
-    FastAPIInstrumentor.instrument_app(
-        app, excluded_urls=EXCLUDED_URLS, server_request_hook=server_request_hook
-    )
-    # SQLAlchemy spans carry the statement and pool; psycopg spans the driver round trip.
-    SQLAlchemyInstrumentor().instrument(engine=ctx.engine)
-    PsycopgInstrumentor().instrument()
-    # Patches httpx's transports, so the Google client created in create_app is covered too.
-    HTTPXClientInstrumentor().instrument()
 
     def shutdown() -> None:
         tracer_provider.shutdown()
