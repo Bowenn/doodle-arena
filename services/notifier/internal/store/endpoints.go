@@ -18,6 +18,8 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrTooManyEndpoints: the owner already has MaxEndpointsPerOwner.
 	ErrTooManyEndpoints = errors.New("too many endpoints")
+	// ErrEndpointActive: the endpoint isn't disabled, so there is nothing to enable.
+	ErrEndpointActive = errors.New("endpoint is active")
 )
 
 // Endpoint is a developer's webhook URL and what it subscribes to.
@@ -30,13 +32,18 @@ type Endpoint struct {
 	SecretCiphertext []byte
 	SecretNonce      []byte
 	CreatedAt        time.Time
+	// Set while the endpoint is disabled (credentials_revoked: auth revoked its owner's
+	// credentials, ADR 0015); it receives nothing until enabled again.
+	DisabledAt     *time.Time
+	DisabledReason *string
 }
 
-const endpointColumns = "id, owner_id, api_key_id, url, event_types, secret_ciphertext, secret_nonce, created_at"
+const endpointColumns = "id, owner_id, api_key_id, url, event_types, secret_ciphertext, secret_nonce, created_at, disabled_at, disabled_reason"
 
 func scanEndpoint(row pgx.Row) (Endpoint, error) {
 	var e Endpoint
-	err := row.Scan(&e.ID, &e.OwnerID, &e.APIKeyID, &e.URL, &e.EventTypes, &e.SecretCiphertext, &e.SecretNonce, &e.CreatedAt)
+	err := row.Scan(&e.ID, &e.OwnerID, &e.APIKeyID, &e.URL, &e.EventTypes, &e.SecretCiphertext, &e.SecretNonce, &e.CreatedAt,
+		&e.DisabledAt, &e.DisabledReason)
 	return e, err
 }
 
@@ -113,10 +120,11 @@ func (s *Store) DeleteEndpoint(ctx context.Context, ownerID string, id uuid.UUID
 	return tx.Commit(ctx)
 }
 
-// Subscribers returns the live endpoints of any of these owners that subscribe to eventType.
+// Subscribers returns the live, enabled endpoints of any of these owners that subscribe to
+// eventType.
 func (s *Store) Subscribers(ctx context.Context, ownerIDs []string, eventType string) ([]Endpoint, error) {
 	rows, err := s.Pool.Query(ctx, "SELECT "+endpointColumns+` FROM endpoints
-		WHERE owner_id = ANY($1) AND $2 = ANY(event_types) AND deleted_at IS NULL`, ownerIDs, eventType)
+		WHERE owner_id = ANY($1) AND $2 = ANY(event_types) AND deleted_at IS NULL AND disabled_at IS NULL`, ownerIDs, eventType)
 	if err != nil {
 		return nil, fmt.Errorf("subscribers: %w", err)
 	}

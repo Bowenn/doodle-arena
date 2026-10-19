@@ -35,6 +35,9 @@ var ErrInvalidToken = errors.New("invalid access token")
 // Claims is what the notifier needs from a verified access token.
 type Claims struct {
 	UserID string
+	// IssuedAt is the token's iat. The notifier refuses tokens issued at or before its user's
+	// credential revocation (ADR 0015).
+	IssuedAt time.Time
 	// Name is the display name (may be empty with tokens issued before the claim existed).
 	Name  string
 	Roles []string
@@ -86,7 +89,10 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {
 	if c.Roles == nil {
 		return Claims{}, fmt.Errorf("%w: roles is required", ErrInvalidToken)
 	}
-	return Claims{UserID: c.Subject, Name: c.Name, Roles: c.Roles}, nil
+	if c.IssuedAt == nil {
+		return Claims{}, fmt.Errorf("%w: iat is required", ErrInvalidToken)
+	}
+	return Claims{UserID: c.Subject, IssuedAt: c.IssuedAt.Time, Name: c.Name, Roles: c.Roles}, nil
 }
 
 // StaticKeys is a fixed key set, for tests.
