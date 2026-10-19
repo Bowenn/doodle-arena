@@ -13,8 +13,8 @@ worktree, like mint_tokens.py). What it does:
    test receiver.
 3. Rotates the refresh token once (the real user), then replays the old one (the thief): auth
    detects the theft. Times how long until the notifier shows the endpoint disabled.
-4. Checks that the old access token gets 401 from the notifier, and that a match reward now
-   reaches nobody.
+4. Checks that the old access token gets 401 from the notifier and can't mint a new API key in
+   auth, and that a match reward now reaches nobody.
 5. With a token issued after the revocation, enables the endpoint (new secret) and checks that
    the next reward arrives, signed with the new secret.
 """
@@ -146,6 +146,18 @@ def main() -> None:
 
     old = status(f"{GW}/api/notifier/endpoints", stolen_access)
     print(f"the thief's access token (still valid as a JWT) on the notifier: {old}")
+    req = urllib.request.Request(
+        f"{GW}/api/auth/api-keys",
+        data=json.dumps({"name": "thief", "scopes": ["webhooks"]}).encode(),
+        method="POST",
+        headers={"Authorization": f"Bearer {stolen_access}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            mint = resp.status
+    except urllib.error.HTTPError as e:
+        mint = e.code
+    print(f"the thief's access token minting a new API key in auth: {mint}")
 
     match = publish_match([user, "u_theft_other_" + uuid.uuid4().hex[:6]])
     time.sleep(5)
@@ -166,7 +178,7 @@ def main() -> None:
         f"after enabling with a new secret: received {after[0]['event_type']}, verified: {after[0]['verified']}"
     )
 
-    ok = old == 401 and not got and not deliveries["deliveries"] and after[0]["verified"]
+    ok = old == 401 and mint == 401 and not got and not deliveries["deliveries"] and after[0]["verified"]
     print("PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 
