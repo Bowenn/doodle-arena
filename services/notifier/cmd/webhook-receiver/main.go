@@ -1,6 +1,8 @@
 // Command webhook-receiver is a test endpoint for webhook drills (task 4.7): it verifies every
 // delivery's Doodle-Signature with the notifier's own Verify, records what it got, and answers
-// 200 or 500 as told. Local only; it keeps everything in memory.
+// 200 or 500 as told. A hook without a secret takes unsigned requests and keeps their bodies:
+// Grafana's alert notifications land on /hooks/alerts when no Discord webhook is configured
+// (task 5.1). Local only; it keeps everything in memory.
 //
 //	POST /hooks/{name}          a webhook endpoint
 //	PUT  /admin/{name}/secret   the endpoint's signing secret (the body, as text)
@@ -32,6 +34,7 @@ type received struct {
 	Verified   bool      `json:"verified"`
 	Status     int       `json:"status"`
 	At         time.Time `json:"at"`
+	Body       string    `json:"body,omitempty"` // unsigned hooks only
 }
 
 type hook struct {
@@ -65,13 +68,18 @@ func (rv *receiver) routes() *http.ServeMux {
 		if h.Mode == "fail" {
 			status = http.StatusInternalServerError
 		}
-		verified := h.Secret != "" && webhook.Verify(h.Secret, r.Header.Get("Doodle-Signature"), string(body), time.Now()) == nil
-		h.Received = append(h.Received, received{
+		unsigned := h.Secret == ""
+		verified := !unsigned && webhook.Verify(h.Secret, r.Header.Get("Doodle-Signature"), string(body), time.Now()) == nil
+		got := received{
 			EventID: r.Header.Get("Doodle-Event-Id"), EventType: r.Header.Get("Doodle-Event-Type"),
 			DeliveryID: r.Header.Get("Doodle-Delivery-Id"), Verified: verified, Status: status, At: time.Now(),
-		})
+		}
+		if unsigned {
+			got.Body = string(body)
+		}
+		h.Received = append(h.Received, got)
 		rv.mu.Unlock()
-		if !verified {
+		if !verified && !unsigned {
 			status = http.StatusUnauthorized // a real receiver refuses an unverified webhook
 		}
 		w.WriteHeader(status)

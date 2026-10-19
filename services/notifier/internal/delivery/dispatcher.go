@@ -93,6 +93,24 @@ func NewDispatcher(st *store.Store, box *secretbox.Box, policy *ssrf.Policy, cfg
 	if err != nil {
 		return nil, err
 	}
+	// The queue's own health, for the WebhookQueueStuck alert: unlike the dead-letter count, it
+	// grows only when the notifier itself falls behind, not when a developer's server is down.
+	_, err = m.Float64ObservableGauge("notifier.queue.oldest_age",
+		metric.WithDescription("Seconds the oldest due delivery has waited for a worker (0 when none is due)"),
+		metric.WithUnit("s"),
+		metric.WithFloat64Callback(func(ctx context.Context, o metric.Float64Observer) error {
+			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			age, err := st.OldestDueAge(ctx)
+			if err != nil {
+				return nil // no value rather than a wrong one
+			}
+			o.Observe(age)
+			return nil
+		}))
+	if err != nil {
+		return nil, fmt.Errorf("notifier.queue.oldest_age: %w", err)
+	}
 	transport := &http.Transport{
 		Proxy:                 nil,
 		DialContext:           policy.DialContext,

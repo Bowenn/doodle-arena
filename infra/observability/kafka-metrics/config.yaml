@@ -1,0 +1,38 @@
+# Consumer-group lag for every Kafka consumer, whatever its language (observability.md, section 3):
+# the Go, Python and Java clients each report lag differently or not at all, so the lag is read
+# from the broker's side. A collector of its own rather than a change to otel-lgtm's bundled
+# config, so upgrading that image never means re-syncing a copy of its file.
+receivers:
+  kafka_metrics:
+    brokers: [kafka:9092]
+    cluster_alias: doodle-arena
+    scrapers: [consumers, topics]
+    collection_interval: 30s
+
+processors:
+  resource:
+    attributes:
+      - {key: service.name, value: kafka-metrics, action: upsert}
+      - {key: deployment.environment, value: local, action: upsert}
+  # The receiver reports lag and offsets with unit "1", which Prometheus names *_ratio; they
+  # count messages.
+  transform:
+    metric_statements:
+      - context: metric
+        statements:
+          - set(metric.unit, "{message}") where IsMatch(metric.name, "^kafka\\.(consumer_group\\.(lag|offset)|partition\\.(current|oldest)_offset)")
+  batch:
+
+exporters:
+  otlp_http:
+    endpoint: http://otel-lgtm:4318
+
+service:
+  telemetry:
+    logs:
+      encoding: json
+  pipelines:
+    metrics:
+      receivers: [kafka_metrics]
+      processors: [resource, transform, batch]
+      exporters: [otlp_http]

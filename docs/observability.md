@@ -114,6 +114,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `notifier.deliveries` | Counter | `result` = success, retry (failed, will try again), dead (failed for the last time) | notifier |
 | `notifier.delivery.duration` | Histogram (ms) | – (from sending to the answer or the failure) | notifier |
 | `notifier.dlq.size` | Gauge | – (deliveries that went DEAD in the last 24 hours, test pings aside; for dashboards: a dead delivery is usually a developer's server being down, so no alert pages on it) | notifier |
+| `notifier.queue.oldest_age` | Gauge (s) | – (how long the oldest due delivery of a live, enabled endpoint has waited for a worker; 0 when none is due. It grows when the notifier falls behind, not when a developer's server fails) | notifier |
 | `notifier.events` | Counter | `result` = queued, no_subscribers, duplicate (queued before: a redelivery; or a revocation not newer than the watermark), revoked (a `CredentialsRevoked` applied), skipped (unreadable) | notifier |
 | `auth.api_keys.verifications` | Counter | `result` = valid, invalid, revoked | auth |
 | `auth.events.published` | Counter | `result` = success (confirmed by Kafka), failed (left to retry) | auth (relay) |
@@ -123,15 +124,17 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram | `page` | web |
 | `web.ws.rtt` | Histogram (ms) | – | web |
 
-Kafka consumer lag per consumer group comes from the collector's Kafka metrics receiver (or a Kafka exporter).
+Kafka consumer lag per consumer group comes from the broker, not the clients (task 5.1): a `kafka-metrics` container (`otel/opentelemetry-collector-contrib`, the same version as the collector inside otel-lgtm) runs the `kafka_metrics` receiver every 30 s and pushes OTLP to otel-lgtm. It reports `kafka.consumer_group.lag_sum` per `group` and `topic` (Prometheus: `kafka_consumer_group_lag_sum`), for every consumer whatever its language. A collector of its own rather than an edit of otel-lgtm's bundled collector config, so upgrading that image never means re-syncing a copied file. Once Kafka requires SASL (ADR 0013, task 5.5), it needs a read-only Kafka user of its own.
 
-Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into Grafana:
+Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into Grafana's "Doodle Arena" folder (task 5.1). They're read-only in the UI: change the JSON, and Grafana picks it up within 30 seconds.
 
-1. Service overview: RED metrics for every service.
-2. Game server: connections, rooms, broadcast latency, reconnects, takeovers.
-3. Marketplace: purchases and conflicts, lock waits, Stripe webhooks, outbox lag, the two invariants.
-4. Async pipeline: Kafka lag, Celery job age, webhook deliveries and the dead-letter queue.
-5. Load test: the panels used while k6 runs, so screenshots can go in the README.
+1. Service overview (`da-overview`): firing alerts, recent error and warning logs from Loki, request rate, server-error share and p95 latency per service (HTTP and gRPC servers together), auth sign-ins and refreshes, and the lobby.
+2. Game server (`da-game-server`): connections, rooms, broadcast latency, guesses, reconnects, takeovers, and the event outbox.
+3. Marketplace (`da-marketplace`): the three invariant gauges and the outbox lag as stats, purchases and conflicts, lock waits, idempotent replays, Stripe webhooks, rewards and minting.
+4. Async pipeline (`da-async-pipeline`): Kafka consumer lag, the outbox lags, Celery job age, the drawing pipeline and moderation, webhook deliveries, the queue age and the dead-letter queue.
+5. Load test (task 5.3): the panels used while k6 runs, so screenshots can go in the README.
+
+The gateway (Nginx) exports traces but no metrics, so the overview shows the services behind it, not the gateway itself.
 
 ## 4. Tracing
 
@@ -162,19 +165,28 @@ Starting rules (tune the thresholds after the first load test):
 | OutboxStuck | `game.outbox.pending > 0` for 10 minutes (Kafka or S3 down, or an entry that can't be published; rewards and drawings are waiting) | warning |
 | OwnershipViolation | `market.ownership.violations > 0` | critical |
 | SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
-| HighErrorRate | Server errors above 1% of requests for 5 minutes, per service | warning |
-| ConsumerLagGrowing | Kafka lag growing for 10 minutes for any consumer group | warning |
+| HighErrorRate | Server errors (HTTP 5xx; gRPC `UNKNOWN`, `DEADLINE_EXCEEDED`, `INTERNAL`, `UNAVAILABLE`, `DATA_LOSS`) above 1% of requests for 5 minutes, per service, when the service had at least 20 requests in those 5 minutes | warning |
+| ConsumerLagGrowing | A consumer group's lag (`kafka_consumer_group_lag_sum`) above 0 and higher than 10 minutes earlier, for 5 minutes | warning |
 | AuthOutboxStuck | `auth.outbox.lag` above 60 s for 5 minutes (Kafka down, or `auth-relay` stopped: a credential revocation isn't reaching the notifier, so a thief's webhooks keep running) | critical |
 | MarketOutboxStuck | `market.outbox.lag` above 60 s for 5 minutes (Kafka down, or the relay failing; sales and listings aren't reaching the notifier) | warning |
 | DrawingEventsStuck | `assets.outbox.lag` above 60 s for 5 minutes (Kafka down, or the relay stopped; the marketplace isn't minting approved drawings) | warning |
 | DrawingsFailing | `assets.pipeline.results{result=failed}` above 0 for 10 minutes (stroke logs missing or unreadable: an S3 outage longer than 7 days, or a game-server bug) | warning |
 | JobsBacklog | `assets.jobs.oldest_age` above 300 s for 5 minutes, or the series missing for 5 minutes (no worker) | warning |
-| WebhooksFailing | `notifier.deliveries{result!=success}` above half of all attempts for 15 minutes, across many endpoints (our sender or network is broken, not one developer's server) | warning |
-| WebhookQueueStuck | The oldest due delivery waits more than 5 minutes (workers stopped or Postgres slow; needs a `notifier.queue.oldest_age` gauge, added with the alerts in task 5.1) | warning |
+| WebhooksFailing | `notifier.deliveries{result!=success}` above half of all attempts for 15 minutes, with at least 50 failed attempts in 15 minutes (our sender or network is broken, not one developer's server; one dead endpoint makes 8 attempts over hours) | warning |
+| WebhookQueueStuck | `notifier.queue.oldest_age` above 300 s for 5 minutes (workers stopped or Postgres slow) | warning |
 | StripeSignatureFailures | More than 5 invalid signatures in 10 minutes (a wrong secret or forged requests) | warning |
-| RefreshTokenReuse | `auth.refreshes{result=reuse_detected}` above its usual rate for 10 minutes (stolen tokens, or a client that refreshes concurrently) | warning |
-| GameServerDown | `lobby.servers.healthy` below the expected count for 1 minute | critical |
-| AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`) | critical |
+| RefreshTokenReuse | More than 3 `auth.refreshes{result=reuse_detected}` in 10 minutes (stolen tokens, or a client that refreshes concurrently) | warning |
+| GameServerDown | `lobby.servers.healthy` below the expected count (2, the local stack's game servers) for 1 minute | critical |
+| AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`; task 5.2, not a Grafana rule) | critical |
+
+### How the alerts are built (task 5.1)
+
+- **Grafana-managed rules as code.** `infra/observability/grafana/alerting/` holds the rules (`rules.yaml`), the contact point and its message template (`contact-points.yaml`) and the notification policy (`policies.yaml`). Compose mounts them, with the dashboard provider, next to otel-lgtm's own provisioning files. Grafana rather than Prometheus rules, because the bundled Prometheus has no Alertmanager and Grafana is what sends to Discord. Provisioned rules can't be edited in the UI; change the file and restart otel-lgtm.
+- **One rule per alert in the table**, evaluated every minute. Labels: `severity` and `service` (HighErrorRate carries the failing `service_name`, ConsumerLagGrowing the `group`). Annotations: a `summary` with the measured value, the `runbook_url`, and the dashboard panel that shows the same query, so the notification links to both.
+- **No data is OK; missing data has its own rules.** A rule whose query returns nothing is Normal, because an idle service or an empty queue is not an incident. Where silence is the incident, a rule asks for it explicitly: ReconciliationStale and JobsBacklog count the series (`count(last_over_time(...[1m])) or vector(0)`). A query error is an alert of its own (`DatasourceError`), so a broken Prometheus doesn't look like a quiet one.
+- **Ratios drop quiet series in the query.** An error share over no traffic is 0/0, which is NaN, and Grafana's math expressions treat NaN as firing. HighErrorRate and WebhooksFailing therefore filter by volume inside the PromQL (`... and requests >= 20`) instead of combining two queries in a math step.
+- **Notifications.** One Discord contact point, from `DISCORD_ALERT_WEBHOOK_URL` in `.env` (a secret: anyone holding the URL can post to the channel). Without it, compose points the contact point at the `webhook-receiver` test service (`/hooks/alerts`), which keeps unsigned bodies, so CI and drills can prove a notification was sent. The policy groups by alert and service, waits 30 s before the first message of a group, and repeats a firing alert every hour (critical) or every 4 hours (warning).
+- **Checks.** `make lint s=observability` checks offline that every alert in the table has exactly one rule, every rule an existing runbook and dashboard panel, and every metric a panel or rule reads is listed in section 3 (CI: `observability.yml`). `make alerts-check` checks live that Grafana loaded every dashboard, rule and the contact point, that every panel query runs, and that every rule evaluates without an error (CI's stack job). `scripts/drills/alerts.py` makes LedgerImbalance and HighErrorRate fire for real and clear again (evidence log in `docs/roadmap.md`).
 
 The two invariant alerts come from the marketplace's reconciliation job, which checks the ledger and ownership every minute and exports the results as gauges. `market.ledger.imbalance` is the sum of every ledger entry, in coins; `market.ledger.mismatched_accounts` counts accounts whose balance isn't the sum of their entries, user balances below zero, and accounts without a balance row. When no run has succeeded for 3 minutes, all three gauges (with `market.ownership.violations` below) stop reporting, so a dead job shows as a missing series (ReconciliationStale) instead of a reassuring 0. `market.ownership.violations` counts drawings whose ownership row and provenance disagree (design doc, section 8). After a redeploy, the old container's last value stays visible for Prometheus's 5-minute lookback as a second series with its own `host_name`; an alert in the first minutes after a deploy should be checked against the new container's series.
 
@@ -203,5 +215,5 @@ Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.dupli
 
 - Stage 1: the stack runs, every service exports traces, metrics and logs over OTLP, and logs carry `trace_id` and `span_id` (task 1.5).
 - Stages 2–4: a task isn't done until its metrics from section 3 exist.
-- Stage 5: dashboards, alert rules, runbooks, the Discord contact point and the AWS budget alarm.
+- Stage 5: dashboards, alert rules, runbooks and the Discord contact point (task 5.1), the AWS budget alarm (task 5.2).
 - Stage 6: SLOs, tail sampling, deploy markers. The kill test doubles as a fire drill: the right alert must fire, and its runbook must fix the problem.

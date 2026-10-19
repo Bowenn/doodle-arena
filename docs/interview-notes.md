@@ -337,4 +337,12 @@ Read this before interviews, and practice with the interview drill prompt in `do
 
 ## Stage 5: Production readiness
 
+### Task 5.1: Dashboards and alerts
+
+- **Alerts are code, reviewed like code.** The 17 rules, the Discord contact point, the routing policy and four dashboards are files in `infra/observability/`, provisioned into Grafana on every machine and in CI. A lint ties them together: every alert in the spec has exactly one rule, every rule a runbook and a dashboard panel, and every metric a panel queries is in the metric catalog. So renaming a metric fails the build instead of leaving a dashboard silently empty.
+- **Alert on symptoms and broken invariants, and make silence loud.** LedgerImbalance pages when the ledger doesn't sum to zero or a balance drifts from its entries. A dead reconciliation job reports nothing rather than a reassuring 0, so ReconciliationStale asks for the missing series explicitly. The drill gives a drill account 1 coin its ledger doesn't explain: the alert fired in 90 s, the notification went out 30 s later, and it resolved 90 s after the fix, without touching the append-only ledger.
+- **0/0 is a trap.** An error-rate rule over a quiet service divides zero by zero. Grafana's math step treats the resulting NaN as firing, so on the first load three idle services were "pending" with no errors at all. The fix filters by volume inside the PromQL (at least 20 requests in 5 minutes) so idle services have no series. A rule should be tested against an idle system, not only a broken one.
+- **Measure lag where every client agrees: the broker.** Go, Python and Java consumers each report lag differently or not at all, so a separate `kafka-metrics` collector reads consumer-group offsets from Kafka for all seven groups. **Rejected:** editing otel-lgtm's bundled collector config (a vendor file to re-sync on every upgrade); a third-party Kafka exporter image (we prefer official images).
+- **Test the paging path without the secret.** The Discord webhook URL is a secret, so CI doesn't have it. Without it, the contact point falls back to the existing `webhook-receiver` test service, which now keeps unsigned bodies, and the drill checks that the FIRING message arrived. The weak spot: a wrong Discord URL in production is only noticed by a human, so the setup doc ends with running the drill and looking at the channel.
+
 ## Stage 6: Scale and depth

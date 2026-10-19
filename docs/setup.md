@@ -42,6 +42,7 @@ Images are pinned to exact tags in `infra/docker-compose.yml`. Versions were che
 | Kafka (KRaft) | `apache/kafka:4.2.2` | Container, or MSK 4.2 on Express brokers (MSK provisioned brokers stop at 4.1). Avoid 4.3+ features such as share groups |
 | Object storage | `chrislusf/seaweedfs:4.48` | S3 |
 | Telemetry | `grafana/otel-lgtm:0.36.0` | See ADR 0003 |
+| Kafka lag collector | `otel/opentelemetry-collector-contrib:0.162.0` (the collector version inside otel-lgtm 0.36.0) | The same container, or the collector of the AWS telemetry setup (ADR 0003) |
 | Gateway | `nginx:1.30.6-otel` (the variant with the OpenTelemetry and njs modules) | Container behind a load balancer |
 | Service build images | `golang:1.27.2-trixie`, `eclipse-temurin:25.0.4.1_1-jdk`, `python:3.14.8-slim-trixie`, `node:24.22.0-trixie-slim` (the web app) | Same images in CI |
 | Service runtime images | Go: `gcr.io/distroless/static-debian13:nonroot`, pinned by digest (distroless has no version tags); Java: `eclipse-temurin:25.0.4.1_1-jre`; Python: the build image | Same images on ECS or EC2 |
@@ -64,6 +65,15 @@ Put secrets in `.env`, which is gitignored. `.env.example` lists the variable na
 | AWS account with a budget alarm set first | AWS console | Stage 5 | AWS CLI profile; never commit keys |
 
 The stack is one origin, `http://localhost:8080`. Cookies are not `Secure` locally (`COOKIE_SECURE=false`, because Safari won't send `Secure` cookies to plain-http localhost); they are in AWS. `make up` adds any variable that appears in `.env.example` to an existing `.env` without changing values already there.
+
+### Discord (task 5.1)
+
+Grafana sends alerts to one Discord channel. Without a webhook the stack still runs, and alerts go to the `webhook-receiver` test service instead (`http://localhost:9000/admin/alerts` shows them).
+
+1. In Discord, create a channel for alerts (for example `#doodle-arena-alerts`), then Edit Channel, Integrations, Webhooks, New Webhook, and Copy Webhook URL.
+2. Put it into `.env` as `DISCORD_ALERT_WEBHOOK_URL`. It's a secret: anyone with the URL can post to the channel. Don't paste it into chat, an issue or a log; if it leaks, delete the webhook in Discord and make a new one.
+3. Recreate otel-lgtm so Grafana reads it: `docker compose -f infra/docker-compose.yml --env-file .env up -d otel-lgtm`.
+4. Check it: `python3 scripts/drills/alerts.py ledger` makes LedgerImbalance fire (and clear) within a few minutes; the channel gets a FIRING and a RESOLVED message.
 
 ### Stripe (task 4.5)
 

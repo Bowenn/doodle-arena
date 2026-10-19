@@ -55,6 +55,8 @@ jobs:
         run: make telemetry-check
       - name: make pipeline-check (a round becomes an approved, stored, published drawing)
         run: make pipeline-check
+      - name: make alerts-check (dashboards, alert rules and the contact point load and evaluate)
+        run: make alerts-check
       - name: Disk usage after the run
         if: always()
         run: df -h /
