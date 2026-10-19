@@ -25,7 +25,7 @@ processors:
 
 exporters:
   otlp_http:
-    endpoint: http://otel-lgtm:4318
+    endpoint: ${env:OTLP_ENDPOINT}
 
 service:
   telemetry:

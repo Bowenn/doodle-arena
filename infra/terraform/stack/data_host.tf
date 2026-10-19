@@ -80,10 +80,12 @@ resource "aws_instance" "data" {
     encrypted   = true
   }
 
-  # IMDSv2 only. Hop limit 2, so Grafana's container can reach the instance role.
+  # IMDSv2 only, hop limit 1: containers on Docker's bridge networks (the data stores) can't
+  # reach the instance role and its secrets. Only otel-lgtm, on the host network, can: Grafana's
+  # CloudWatch data source needs it (infra/aws/data-host/compose.yml).
   metadata_options {
     http_tokens                 = "required"
-    http_put_response_hop_limit = 2
+    http_put_response_hop_limit = 1
   }
 
   user_data = templatefile("${path.module}/data-host.sh.tftpl", {

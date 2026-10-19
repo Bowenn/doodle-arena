@@ -705,6 +705,7 @@ services:
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
       DEPLOYMENT_ENVIRONMENT: local
+      OTLP_ENDPOINT: http://otel-lgtm:4318
     volumes:
       - ./observability/kafka-metrics/config.yaml:/etc/otelcol/config.yaml:ro
     depends_on:

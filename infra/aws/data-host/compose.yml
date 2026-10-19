@@ -3,7 +3,8 @@
 # the init scripts and observability config it mounts into /opt/doodle, writes .env from SSM, and
 # runs `docker compose up -d`. Ports are published on the host; the data host's security group
 # decides which service reaches which port (ADR 0006). Grafana listens on 127.0.0.1 only: reach
-# it with an SSM port forward (docs/setup.md, "AWS").
+# it with an SSM port forward (docs/setup.md, "AWS"). Only otel-lgtm can reach the instance
+# role (host network, IMDS hop limit 1).
 
 name: doodle-data
 
@@ -117,6 +118,10 @@ services:
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
       DEPLOYMENT_ENVIRONMENT: aws
+      # otel-lgtm is on the host network (below), reached through the bridge's gateway.
+      OTLP_ENDPOINT: http://host.docker.internal:4318
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - ./observability/kafka-metrics/config.yaml:/etc/otelcol/config.yaml:ro
     depends_on:
@@ -125,10 +130,16 @@ services:
       otel-lgtm:
         condition: service_healthy
 
+  # On the host network, the only container that is: Grafana's CloudWatch data source needs the
+  # instance role, and the instance's IMDS hop limit of 1 keeps it from every bridged container.
+  # Its ports are the host's: the data host's security group admits only OTLP (4317, 4318) from
+  # the services, and Grafana listens on 127.0.0.1 for the SSM port forward.
   otel-lgtm:
     image: grafana/otel-lgtm:0.36.0
     restart: unless-stopped
+    network_mode: host
     environment:
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
       DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:?}
       # Not the image's anonymous Admin: anonymous visitors (through the SSM tunnel) only view;
       # changes need the admin password from SSM (/doodle-arena/stack/grafana-admin-password).
@@ -147,10 +158,6 @@ services:
       - ./observability/grafana/alerting/policies.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-policies.yaml:ro
       - ./observability/grafana/alerting/rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-rules.yaml:ro
       - ./grafana-cloudwatch.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/doodle-arena-cloudwatch.yaml:ro
-    ports:
-      - "127.0.0.1:3000:3000"
-      - "4317:4317"
-      - "4318:4318"
 
 volumes:
   postgres-data:
