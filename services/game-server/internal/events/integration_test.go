@@ -44,8 +44,11 @@ func TestPublishThroughKafkaAndSeaweedFS(t *testing.T) {
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { otel.SetTracerProvider(prevTP); otel.SetTextMapPropagator(prevProp) })
 
-	store := NewS3Client(S3Config{Endpoint: kafkatest.SeaweedFS(t, "testkey", "testsecret"), Region: "us-east-1",
-		AccessKey: "testkey", SecretKey: "testsecret"})
+	store, err := NewS3Client(t.Context(), S3Config{Endpoint: kafkatest.SeaweedFS(t, "testkey", "testsecret"), Region: "us-east-1",
+		PathStyle: true, AccessKey: "testkey", SecretKey: "testsecret"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	createBucket(t, store, "round-logs")
 
 	kafka, err := NewKafkaClient([]string{brokers})

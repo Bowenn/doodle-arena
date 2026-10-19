@@ -27,7 +27,9 @@ Things the humans prepare. Claude Code can install packages and write config, bu
 | Buf CLI | 1.74.x | Stage 1 | Protobuf lint, breaking-change check and code generation |
 | k6 | current | Stage 5 | Load tests |
 | Stripe CLI | current | Stage 4 | Forwards test webhooks to your machine |
-| AWS CLI and Terraform | current | Stage 5 | |
+| AWS CLI | 2.38.x | Stage 5 | Signs in through IAM Identity Center (`aws sso login --profile doodle-arena`); no access keys |
+| Terraform | 1.16.x (`required_version = "~> 1.16.0"`, AWS provider `~> 6.69`, lock files committed) | Stage 5 | `make lint s=terraform` also runs tflint 0.64 through `go run` |
+| Session Manager plugin for the AWS CLI | current (`brew install --cask session-manager-plugin`) | Stage 5 | The Grafana tunnel (`make aws-grafana`) and shells on the data host |
 | `grpcurl`, `kcat` | current | Optional | Debugging; `kcat` can also run as a container |
 
 ### Pinned container images
@@ -62,9 +64,57 @@ Put secrets in `.env`, which is gitignored. `.env.example` lists the variable na
 | Webhook secret encryption key (notifier, ADR 0014) | `make up` generates it in `.env` | Stage 4 | `NOTIFIER_SECRET_KEY` (random, 32+ characters; losing it makes registered endpoints' secrets unreadable) |
 | Stripe account in test mode (or a sandbox); test keys only | Stripe Dashboard | Stage 4 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (printed by `stripe listen`) |
 | Discord channel webhook for alerts | Discord channel settings, Integrations | Stage 5 | `DISCORD_ALERT_WEBHOOK_URL` |
-| AWS account with a budget alarm set first | AWS console | Stage 5 | AWS CLI profile; never commit keys |
+| AWS account with a budget alarm set first | AWS console; see "AWS (task 5.2)" below | Stage 5 | CLI profile `doodle-arena`; never access keys |
 
 The stack is one origin, `http://localhost:8080`. Cookies are not `Secure` locally (`COOKIE_SECURE=false`, because Safari won't send `Secure` cookies to plain-http localhost); they are in AWS. `make up` adds any variable that appears in `.env.example` to an existing `.env` without changing values already there.
+
+### AWS (task 5.2)
+
+The deployment follows ADR 0003 (Option B): ECS on Fargate for the services, one EC2 data host for the stores, created per session and destroyed after it.
+
+Set up once (2026-10-19):
+
+- **Account:** on the Paid plan; root has MFA and no access keys; billing alerts on (billing metrics exist only in us-east-1).
+- **Budget first:** `doodle-arena-monthly`, $35 a month, credits excluded (so it tracks real usage), email alerts at 50%, 80%, 100% and 100% forecasted. Created by hand before anything else and kept outside Terraform, so no destroy can remove it.
+- **Identity:** IAM Identity Center in us-west-2, MFA at sign-in, user `bowen` with `AdministratorAccess` (4-hour sessions). CLI profile `doodle-arena` (`aws configure sso`); sign in with `aws sso login --profile doodle-arena`. There is no IAM user and no access key anywhere.
+- **Region:** us-west-2 (Oregon).
+- **Domain:** `icanfly.click`, registered in Route 53 (auto-renew off); its hosted zone was created by the registration and stays between sessions ($0.50 a month).
+- **Bootstrap root:** `make aws-bootstrap` creates the Terraform state bucket, one ECR repository per image and empty SSM parameters for the third-party secrets. Run it once; its own state moves into the bucket it creates.
+- **Third-party secrets**, put by a human, never pasted into a chat or a file:
+
+  ```bash
+  aws ssm put-parameter --profile doodle-arena --overwrite --type SecureString --name /doodle-arena/google/client-id --value '...'
+  ```
+
+  for `/doodle-arena/google/client-id`, `/doodle-arena/google/client-secret`, `/doodle-arena/stripe/secret-key`, `/doodle-arena/stripe/webhook-secret` and `/doodle-arena/discord/alert-webhook-url`. For Google, add `https://icanfly.click/api/auth/google/callback` as an authorized redirect URI and `https://icanfly.click` as a JavaScript origin of the OAuth client. For Stripe (test mode), add a webhook endpoint `https://icanfly.click/api/market/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`, and put its signing secret. Tasks read these when they start: after a change, redeploy the service (`aws ecs update-service --cluster doodle-arena --service auth --force-new-deployment`; otel-lgtm reads the Discord URL when the data host boots).
+
+Each session (costs money from `aws-up` to `aws-down`; docs/roadmap.md has the measured cost per hour):
+
+```bash
+make aws-push
+```
+
+```bash
+DOMAIN=icanfly.click make aws-up
+```
+
+```bash
+make aws-grafana
+```
+
+```bash
+DOMAIN=icanfly.click make aws-check
+```
+
+```bash
+DOMAIN=icanfly.click make aws-down
+```
+
+- `make aws-push` builds every image for linux/arm64 and pushes it to ECR, tagged with the commit (the tree must be clean; a tag that is already in ECR is skipped).
+- `make aws-up` creates the stack with every service stopped, runs the auth and assets migrations as one-off tasks, then starts the services and waits until they are stable. It deploys the images of `IMAGE_TAG` (default: the current commit) and admits `TEAM_CIDRS` (default: this machine's public address). Only team addresses reach the load balancer until task 5.5 adds Kafka users and ACLs.
+- `make aws-grafana` (in a second terminal) forwards Grafana to `http://localhost:3000` through Session Manager. Anonymous visitors only view; the admin password is the SSM parameter `/doodle-arena/stack/grafana-admin-password`.
+- `make aws-check` runs `make smoke` through the load balancer, then `make telemetry-check` and `make alerts-check` through the tunnel.
+- `make aws-down` destroys the stack, data included. The bootstrap root, the domain and the budget stay.
 
 ### Discord (task 5.1)
 

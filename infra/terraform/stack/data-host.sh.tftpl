@@ -1,0 +1,34 @@
+#!/bin/bash
+# The data host's first boot (infra/terraform/stack/data_host.tf): Docker and Compose, the
+# bundle from S3, .env from SSM, then the containers. The log is in /var/log/cloud-init-output.log.
+set -euo pipefail
+
+dnf install -y docker unzip
+systemctl enable --now docker
+
+# Compose isn't packaged for Amazon Linux 2023: the release binary, checked against its digest.
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+  https://github.com/docker/compose/releases/download/v5.6.0/docker-compose-linux-aarch64
+echo "733ec76717ceb59052a9609b9dadfb523b2df8eab57a54212872d10a58078ea2  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum -c
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+mkdir -p /opt/doodle
+cd /opt/doodle
+aws s3 cp --region ${region} "s3://${bundle_bucket}/${bundle_key}" bundle.zip
+unzip -o -q bundle.zip
+chmod +x kafka/create-topics.sh postgres/init/*.sh
+
+# Secrets never touch the user data or a log: read with the instance role, written mode 600.
+umask 077
+{
+  echo "DATA_HOST_NAME=${data_host_name}"
+%{ for var, name in env ~}
+  echo "${var}=$(aws ssm get-parameter --region ${region} --with-decryption --name /doodle-arena/${name} --query Parameter.Value --output text)"
+%{ endfor ~}
+} > .env
+# Until a human puts the Discord webhook (docs/setup.md), alerts go nowhere instead of failing.
+sed -i 's|^DISCORD_ALERT_WEBHOOK_URL=unset$|DISCORD_ALERT_WEBHOOK_URL=http://127.0.0.1:9/discord-not-configured|' .env
+
+# Not --wait: mongo-users and kafka-topics are one-shot jobs that exit when done.
+docker compose up -d

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -50,6 +51,7 @@ type config struct {
 	maxRooms       int
 	redisAddr      string
 	ticketKeys     string   // comma-separated PEM files with the lobby's public keys
+	ticketKeysPEM  string   // or the keys themselves, as PEM text (AWS)
 	origins        []string // Origin hosts allowed to open a WebSocket
 	helloTimeout   time.Duration
 	kafkaBrokers   []string
@@ -77,11 +79,13 @@ func loadConfig() config {
 		maxRooms:       maxRooms,
 		redisAddr:      envOr("REDIS_ADDR", "localhost:6379"),
 		ticketKeys:     os.Getenv("TICKET_PUBLIC_KEY_PATH"),
+		ticketKeysPEM:  os.Getenv("TICKET_PUBLIC_KEY_PEM"),
 		origins:        strings.Split(envOr("WS_ALLOWED_ORIGINS", "localhost:8080"), ","),
 		helloTimeout:   ws.DefaultHelloTimeout,
 		kafkaBrokers:   strings.Split(envOr("KAFKA_BROKERS", "localhost:9094"), ","),
 		s3: events.S3Config{
 			Endpoint: os.Getenv("S3_ENDPOINT"), Region: envOr("S3_REGION", "us-east-1"),
+			PathStyle: envOr("S3_PATH_STYLE", "true") == "true",
 			AccessKey: os.Getenv("S3_ACCESS_KEY"), SecretKey: os.Getenv("S3_SECRET_KEY"),
 		},
 		roundLogs: envOr("ROUND_LOGS_BUCKET", "round-logs"),
@@ -129,9 +133,15 @@ func run(cfg config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	keys, err := ticket.LoadPublicKeys(cfg.ticketKeys)
+	var keys []ed25519.PublicKey
+	var err error
+	if cfg.ticketKeysPEM != "" {
+		keys, err = ticket.ParsePublicKeys([]byte(cfg.ticketKeysPEM))
+	} else {
+		keys, err = ticket.LoadPublicKeys(cfg.ticketKeys)
+	}
 	if err != nil {
-		return fmt.Errorf("join tickets (TICKET_PUBLIC_KEY_PATH, scripts/gen-ticket-key.sh): %w", err)
+		return fmt.Errorf("join tickets (TICKET_PUBLIC_KEY_PEM or TICKET_PUBLIC_KEY_PATH, scripts/gen-ticket-key.sh): %w", err)
 	}
 	rdb := redis.NewClient(&redis.Options{
 		Addr: cfg.redisAddr, DialTimeout: 2 * time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second,
@@ -150,8 +160,10 @@ func run(cfg config, logger *slog.Logger) error {
 	// only queue them. Each is already in its room's outbox in Redis (ADR 0009), and the
 	// publisher deletes it there once Kafka has it. It runs until the rooms have stopped (see
 	// the shutdown below); what it can't finish stays in the outbox for the next owner.
-	if cfg.s3.AccessKey == "" || cfg.s3.SecretKey == "" {
-		return errors.New("S3_ACCESS_KEY and S3_SECRET_KEY must be set (stroke logs go to the round-logs bucket)")
+	// Stroke logs go to the round-logs bucket: static keys locally, the task role in AWS.
+	s3Client, err := events.NewS3Client(ctx, cfg.s3)
+	if err != nil {
+		return err
 	}
 	kafka, err := events.NewKafkaClient(cfg.kafkaBrokers)
 	if err != nil {
@@ -161,7 +173,7 @@ func run(cfg config, logger *slog.Logger) error {
 	// Rooms are stored in Redis under a lease, so another server can take them over (ADR 0007).
 	store := roomstore.New(rdb)
 	publisher, err := events.New(events.Config{
-		Kafka: kafka, S3: events.NewS3Client(cfg.s3), Bucket: cfg.roundLogs, Log: logger, Meter: meter,
+		Kafka: kafka, S3: s3Client, Bucket: cfg.roundLogs, Log: logger, Meter: meter,
 		Outbox: store,
 	})
 	if err != nil {

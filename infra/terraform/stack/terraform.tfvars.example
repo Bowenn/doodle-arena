@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (git-ignored), or let scripts/aws/up.sh pass these.
+domain_name = "example.com"
+team_cidrs  = ["203.0.113.7/32"] # your public address: curl -s https://checkip.amazonaws.com
+image_tag   = "abc1234"

@@ -626,7 +626,7 @@ CI (GitHub Actions, `.github/workflows/`):
 
 AWS (Stage 5):
 
-- The shape of the deployment is open: see ADR 0003.
+- ADR 0003, Option B: ECS on Fargate (Graviton) for the services, one EC2 data host for Postgres, Redis, MongoDB, Kafka and otel-lgtm, an ALB with an ACM certificate on a Route 53 domain, private subnets with one NAT gateway, secrets in SSM Parameter Store. Created and destroyed per session (task 5.2).
 - Fixed parts: S3 for both buckets, CloudWatch for AWS resource metrics and logs, a billing alarm, Terraform in `infra/terraform/`, and secrets in SSM Parameter Store or Secrets Manager.
 
 Releases:
@@ -683,12 +683,12 @@ Releases:
 | D43 | Stage 4 review: webhook endpoints are disabled when auth revokes a user's credentials on token theft (an auth event, task 4.R2); the checkout calls Stripe outside any database transaction (task 4.R1); Redis cache-aside goes to the assets gallery (task 6.7b), not to listings or wallets; test pings never reach the dead-letter queue, and webhook alerts watch the notifier's own health rather than the DLQ size | A theft signal must cut off every channel the thief could have opened; a slow Stripe can't drain the connection pool; a cache where data rarely changes and reads dominate, never on balances that must be exact; a developer's broken server is not our incident |
 | D44 | Webhooks are revoked with the credentials (ADR 0015): auth publishes `CredentialsRevoked` on `auth.users.v1` through an outbox and an `auth-relay` process, once per refresh-token family; the notifier disables the user's endpoints, keeps a revocation watermark that refuses older sessions and keys, re-checks it under the owner's lock, and enabling an endpoint rotates its secret | A thief loses every webhook channel within a fraction of a second and can't open a new one with a still-valid token or a cached key; replaying an old token can't harass the user; the old secret may be known, so it's never trusted again |
 | D45 | Dashboards and alerts as code (task 5.1): Grafana-managed rules, contact point and dashboards provisioned from `infra/observability/` into otel-lgtm; consumer lag read from the broker by a separate `kafka-metrics` collector; one Discord contact point, falling back to the `webhook-receiver` test service; one runbook per alert family; a lint ties rules, runbooks, panels and metric names to `docs/observability.md` | Reviewed in PRs and identical on every machine and in CI; lag for every consumer whatever its language, without copying the vendor's collector config; CI and drills can prove a notification was sent without a secret; related alerts share a diagnosis; a renamed metric or a missing runbook fails the build instead of leaving a silent panel |
+| D46 | AWS deployment (task 5.2, ADR 0003 Option B): ECS on Fargate (Graviton) for the services and one EC2 data host for the stores; a Route 53 domain with ACM on an ALB, team addresses only until 5.5; private subnets with one NAT gateway; SSM Parameter Store for secrets; a bootstrap Terraform root that outlives sessions and a stack root created and destroyed per session; the data host's instance role reachable only by otel-lgtm | A real deployment story (rolling deploys, health checks, per-service security groups) at about $0.35–0.45 an hour; fsync-heavy stores on a real disk; https for Google sign-in and Secure cookies; one NAT gateway costs less than a public address per task; free secrets; a teardown never deletes state, images or the budget; a compromised data store can't read the other stores' passwords |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 15. Open questions
 
-- ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and reward amounts are set (sections 6.3 and 7.9) and configurable; anti-farming (daily caps, bot-only matches) waits for the Stage 6 analytics.
 - Co-drawn drawings have one owner: only `drawer_ids[0]` is minted as the owner. Their royalties are settled (section 8: every author who isn't party to a sale is paid); shared ownership isn't designed.
 - `docs/keyword-coverage.md` mentions a MongoDB replica set, which this doc doesn't design yet. (Cache-aside was settled in D43: the assets gallery, task 6.7b; balances aren't cached.)

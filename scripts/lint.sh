@@ -26,6 +26,18 @@ run_one() {
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm run lint) ;;
     # Dashboards, alert rules and runbooks against each other and docs/observability.md.
     observability) uv run --no-project --with pyyaml==6.0.3 python scripts/observability-lint.py ;;
+    # Formatting, both roots and the module validated offline (no AWS access), then tflint. A
+    # data directory of its own, so a root initialised against its S3 backend (scripts/aws/)
+    # doesn't make the check need credentials.
+    terraform)
+      (cd "$dir" && terraform fmt -check -recursive \
+        && for root in bootstrap stack modules/service; do
+          TF_DATA_DIR=.terraform-lint terraform -chdir="$root" init -backend=false -input=false >/dev/null \
+            && TF_DATA_DIR=.terraform-lint terraform -chdir="$root" validate -no-color || exit 1
+        done \
+        && go run github.com/terraform-linters/tflint@v0.64.0 --init >/dev/null \
+        && go run github.com/terraform-linters/tflint@v0.64.0 --recursive --config "$PWD/.tflint.hcl")
+      ;;
   esac
 }
 

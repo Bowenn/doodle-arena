@@ -1,9 +1,11 @@
 # Doodle Arena gateway: reverse proxy for every service (design doc, section 4.1).
 # The gateway only routes. Each service verifies JWTs itself (ADR 0001).
 #
-# A template: at start, the image's entrypoint renders it to /etc/nginx/nginx.conf with
-# SERVICE_VERSION and SERVICE_INSTANCE_ID from the environment (only SERVICE_* names
-# are substituted, so nginx's own $variables stay as they are).
+# A template: at start, the image's entrypoint renders it to /etc/nginx/nginx.conf with the
+# SERVICE_* variables from the environment (only SERVICE_* names are substituted, so nginx's
+# own $variables stay as they are). The Dockerfile's defaults are the local stack's; in AWS
+# (ADR 0003) the task sets the collector, the environment, the DNS resolver, the services'
+# domain and the load balancer's addresses.
 
 # OpenTelemetry tracing (ships in the official image's -otel variant).
 load_module modules/ngx_otel_module.so;
@@ -26,12 +28,12 @@ http {
     # this module speaks) to the collector. The span continues an incoming traceparent or
     # starts a trace, and the traceparent sent upstream makes services' spans its children.
     otel_exporter {
-        endpoint otel-lgtm:4317;
+        endpoint ${SERVICE_OTLP_ENDPOINT};
     }
     otel_service_name gateway;
     otel_resource_attr service.version ${SERVICE_VERSION};
     otel_resource_attr service.instance.id ${SERVICE_INSTANCE_ID};
-    otel_resource_attr deployment.environment local;
+    otel_resource_attr deployment.environment ${SERVICE_ENVIRONMENT};
     otel_trace on;
     otel_trace_context propagate;
 
@@ -45,17 +47,24 @@ http {
         '"status":$status,"duration_s":$request_time,"upstream":"$upstream_addr"}';
     access_log /dev/stdout json;
 
-    # Docker's embedded DNS. Resolving at request time lets the gateway start, and keep
-    # running, while a service is down or restarting.
-    resolver 127.0.0.11 valid=10s ipv6=off;
+    # Docker's embedded DNS locally, the VPC's resolver in AWS. Resolving at request time lets
+    # the gateway start, and keep running, while a service is down or restarting, and follows a
+    # service whose tasks were replaced (new addresses).
+    resolver ${SERVICE_RESOLVER} valid=10s ipv6=off;
+
+    # Behind a load balancer (AWS), the client's address is the last one the load balancer adds
+    # to X-Forwarded-For; only the load balancer's own addresses are trusted to set it, so a
+    # client can't pick its address for the rate limits below. Locally nothing is trusted.
+    set_real_ip_from ${SERVICE_TRUSTED_PROXIES};
+    real_ip_header X-Forwarded-For;
 
     # Defaults for every proxied location; long-lived WebSockets override the read timeout.
     proxy_connect_timeout 2s;
     proxy_read_timeout 30s;
 
     # Coarse per-IP rate limits (leaky bucket). Fine-grained limits, such as the per-player
-    # guess token bucket, live in the services (design doc D12). Behind a load balancer in AWS,
-    # the client address must come from X-Forwarded-For (real_ip) or every client shares one.
+    # guess token bucket, live in the services (design doc D12). $binary_remote_addr is the
+    # client's address, also behind the load balancer (real_ip above).
     limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
     limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/s;
     limit_req_status 429;
@@ -75,22 +84,22 @@ http {
     # any internal service (postgres, redis, ...).
     map $ws_server $ws_upstream {
         default        "";
-        game-server-1  game-server-1:8080;
-        game-server-2  game-server-2:8080;
+        game-server-1  game-server-1${SERVICE_DOMAIN}:8080;
+        game-server-2  game-server-2${SERVICE_DOMAIN}:8080;
     }
 
     # /healthz/<service> targets. Restricted to internal traffic in AWS (ADR 0003).
     map $health_service $health_url {
         default        "";
-        auth           http://auth:8080/healthz;
-        lobby          http://lobby:8080/healthz;
-        game-server-1  http://game-server-1:8080/healthz;
-        game-server-2  http://game-server-2:8080/healthz;
-        assets         http://assets:8080/healthz;
-        ai             http://ai:8080/healthz;
-        marketplace    http://marketplace:8080/healthz;
-        notifier       http://notifier:8080/healthz;
-        web            http://web:5173/;
+        auth           http://auth${SERVICE_DOMAIN}:8080/healthz;
+        lobby          http://lobby${SERVICE_DOMAIN}:8080/healthz;
+        game-server-1  http://game-server-1${SERVICE_DOMAIN}:8080/healthz;
+        game-server-2  http://game-server-2${SERVICE_DOMAIN}:8080/healthz;
+        assets         http://assets${SERVICE_DOMAIN}:8080/healthz;
+        ai             http://ai${SERVICE_DOMAIN}:8080/healthz;
+        marketplace    http://marketplace${SERVICE_DOMAIN}:8080/healthz;
+        notifier       http://notifier${SERVICE_DOMAIN}:8080/healthz;
+        web            http://web${SERVICE_DOMAIN}:${SERVICE_WEB_PORT}/;
     }
 
     server {
@@ -136,7 +145,7 @@ http {
         location /api/auth/ {
             limit_req zone=api burst=40 nodelay;
             include /etc/nginx/proxy_common.conf;
-            set $upstream auth:8080;
+            set $upstream auth${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
         }
 
@@ -151,7 +160,7 @@ http {
             limit_req zone=auth burst=10 nodelay;
             limit_req zone=api burst=40 nodelay;
             include /etc/nginx/proxy_common.conf;
-            set $upstream auth:8080;
+            set $upstream auth${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
         }
 
@@ -160,42 +169,42 @@ http {
             limit_req zone=auth burst=10 nodelay;
             limit_req zone=api burst=40 nodelay;
             include /etc/nginx/proxy_common.conf;
-            set $upstream auth:8080;
+            set $upstream auth${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
         }
 
         location /api/lobby/ {
             limit_req zone=api burst=40 nodelay;
             include /etc/nginx/proxy_common.conf;
-            set $upstream lobby:8080;
+            set $upstream lobby${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
         }
 
         location /api/assets/ {
             limit_req zone=api burst=40 nodelay;
             include /etc/nginx/proxy_common.conf;
-            set $upstream assets:8080;
+            set $upstream assets${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
         }
 
         location /admin/ {
             limit_req zone=api burst=40 nodelay;
             include /etc/nginx/proxy_common.conf;
-            set $upstream assets:8080;
+            set $upstream assets${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
         }
 
         location /api/market/ {
             limit_req zone=api burst=40 nodelay;
             include /etc/nginx/proxy_common.conf;
-            set $upstream marketplace:8080;
+            set $upstream marketplace${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
         }
 
         location /api/notifier/ {
             limit_req zone=api burst=40 nodelay;
             include /etc/nginx/proxy_common.conf;
-            set $upstream notifier:8080;
+            set $upstream notifier${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
         }
 
@@ -216,15 +225,15 @@ http {
             return 404;
         }
 
-        # Everything else is the web app (the Vite dev server locally, including its
-        # hot-reload WebSocket).
+        # Everything else is the web app: the Vite dev server locally, including its hot-reload
+        # WebSocket; the static production build in AWS.
         location / {
             # Dev-server assets aren't traced (dozens per page load); browser telemetry comes
             # with task 5.4.
             otel_trace off;
             include /etc/nginx/proxy_common.conf;
             include /etc/nginx/websocket.conf;
-            set $upstream web:5173;
+            set $upstream web${SERVICE_DOMAIN}:${SERVICE_WEB_PORT};
             proxy_pass http://$upstream;
         }
     }

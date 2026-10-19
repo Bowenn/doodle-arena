@@ -35,3 +35,16 @@ build/
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Terraform (infra/terraform/): providers and local state stay local; the lock file is committed.
+.terraform/
+.terraform-lint/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+backend.hcl
+crash.log
+
+# A module has no lock file of its own; the roots pin its providers.
+infra/terraform/modules/**/.terraform.lock.hcl

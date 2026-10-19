@@ -8,6 +8,7 @@ Rules evaluate once a minute, so it waits up to TIMEOUT seconds (default 150) fo
 evaluation. Standard library only.
 """
 
+import base64
 import json
 import os
 import re
@@ -24,11 +25,19 @@ TIMEOUT = int(os.environ.get("TIMEOUT", "150"))
 NEVER = "0001-01-01T00:00:00Z"
 
 
+# In AWS, anonymous visitors only view; the provisioning API needs the admin (scripts/aws/check.sh).
+AUTH = (
+    {"Authorization": "Basic " + base64.b64encode(f"{os.environ['GRAFANA_USER']}:{os.environ['GRAFANA_PASSWORD']}".encode()).decode()}
+    if os.environ.get("GRAFANA_USER")
+    else {}
+)
+
+
 def get(path: str, **params: str) -> dict:
     url = f"{GRAFANA}{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    with urllib.request.urlopen(url, timeout=10) as resp:
+    with urllib.request.urlopen(urllib.request.Request(url, headers=AUTH), timeout=10) as resp:
         return json.load(resp)
 
 

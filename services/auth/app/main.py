@@ -25,7 +25,8 @@ def build_context(
     http: httpx.Client | None = None,
     meter: Meter | None = None,
 ) -> AuthContext:
-    key = SigningKey.from_file(settings.jwt_private_key_path)  # fails fast without a key
+    # Fails fast without a key.
+    key = SigningKey.load(settings.jwt_private_key_pem, settings.jwt_private_key_path)
     google = None
     if settings.google_configured:
         if len(settings.oauth_state_secret) < 32:

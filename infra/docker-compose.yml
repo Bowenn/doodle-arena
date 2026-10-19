@@ -541,7 +541,9 @@ services:
   # ------------------------------------------------------------------- web app
 
   web:
-    build: ../web
+    build:
+      context: ../web
+      target: dev
     restart: unless-stopped
     environment:
       VITE_HMR_CLIENT_PORT: "8080"
@@ -701,6 +703,9 @@ services:
     image: otel/opentelemetry-collector-contrib:0.162.0
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      DEPLOYMENT_ENVIRONMENT: local
+      OTLP_ENDPOINT: http://otel-lgtm:4318
     volumes:
       - ./observability/kafka-metrics/config.yaml:/etc/otelcol/config.yaml:ro
     depends_on:

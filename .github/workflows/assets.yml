@@ -41,6 +41,8 @@ jobs:
     with:
       service: assets
       directory: services/assets
+      # Its tests start MongoDB 8.0, which refuses kernels 6.19 to 7.0.13 (ubuntu-24.04's now).
+      runner: ubuntu-22.04
 
   docker:
     uses: ./.github/workflows/_docker.yml

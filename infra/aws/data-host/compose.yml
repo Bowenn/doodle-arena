@@ -1,0 +1,167 @@
+# The data host in AWS (ADR 0003): the stateful containers of infra/docker-compose.yml on one
+# EC2 instance, for the ECS services in the VPC. The instance's user data unpacks this file with
+# the init scripts and observability config it mounts into /opt/doodle, writes .env from SSM, and
+# runs `docker compose up -d`. Ports are published on the host; the data host's security group
+# decides which service reaches which port (ADR 0006). Grafana listens on 127.0.0.1 only: reach
+# it with an SSM port forward (docs/setup.md, "AWS"). Only otel-lgtm can reach the instance
+# role (host network, IMDS hop limit 1).
+
+name: doodle-data
+
+services:
+  postgres:
+    image: postgres:18.6-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?}
+      ASSETS_DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
+      MARKETPLACE_DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD:?}
+      NOTIFIER_DB_PASSWORD: ${NOTIFIER_DB_PASSWORD:?}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:8.10.2-trixie
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mongo:
+    image: mongo:8.0.34
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?}
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --host \"$$(hostname -i)\" --eval 'db.adminCommand(\"ping\").ok'"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  mongo-users:
+    image: mongo:8.0.34
+    command: ["mongosh", "--quiet", "--nodb", "/create-users.js"]
+    environment:
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?}
+      MONGO_ASSETS_PASSWORD: ${MONGO_ASSETS_PASSWORD:?}
+    volumes:
+      - ./mongo/create-users.js:/create-users.js:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: "no"
+
+  kafka:
+    image: apache/kafka:4.2.2
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # Clients in the VPC reach the broker by the data host's name in the private zone.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://${DATA_HOST_NAME:?}:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  kafka-topics:
+    image: apache/kafka:4.2.2
+    entrypoint: ["/bin/bash", "/create-topics.sh"]
+    volumes:
+      - ./kafka/create-topics.sh:/create-topics.sh:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+
+  kafka-metrics:
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      DEPLOYMENT_ENVIRONMENT: aws
+      # otel-lgtm is on the host network (below), reached through the bridge's gateway.
+      OTLP_ENDPOINT: http://host.docker.internal:4318
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ./observability/kafka-metrics/config.yaml:/etc/otelcol/config.yaml:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      otel-lgtm:
+        condition: service_healthy
+
+  # On the host network, the only container that is: Grafana's CloudWatch data source needs the
+  # instance role, and the instance's IMDS hop limit of 1 keeps it from every bridged container.
+  # Its ports are the host's: the data host's security group admits only OTLP (4317, 4318) from
+  # the services, and Grafana listens on 127.0.0.1 for the SSM port forward.
+  otel-lgtm:
+    image: grafana/otel-lgtm:0.36.0
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:?}
+      # Not the image's anonymous Admin: anonymous visitors (through the SSM tunnel) only view;
+      # changes need the admin password from SSM (/doodle-arena/stack/grafana-admin-password).
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
+    healthcheck:
+      test: ["CMD", "/otel-lgtm/docker/healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    volumes:
+      - lgtm-data:/data
+      - ./observability/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/doodle-arena.yaml:ro
+      - ./observability/dashboards:/etc/doodle-arena/dashboards:ro
+      - ./observability/grafana/alerting/contact-points.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-contact-points.yaml:ro
+      - ./observability/grafana/alerting/policies.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-policies.yaml:ro
+      - ./observability/grafana/alerting/rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-rules.yaml:ro
+      - ./grafana-cloudwatch.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/doodle-arena-cloudwatch.yaml:ro
+
+volumes:
+  postgres-data:
+  redis-data:
+  mongo-data:
+  kafka-data:
+  lgtm-data:

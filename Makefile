@@ -3,10 +3,11 @@
 
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check alerts-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check alerts-check aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
 	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | alerts-check | proto"
+	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
 	@./scripts/dev-up.sh
@@ -41,3 +42,22 @@ alerts-check:
 
 proto:
 	@./scripts/proto.sh
+
+# AWS (ADR 0003, docs/setup.md "AWS"). Each session: aws-push, aws-up, aws-check, aws-down.
+aws-bootstrap:
+	@./scripts/aws/bootstrap.sh
+
+aws-push:
+	@./scripts/aws/push-images.sh
+
+aws-up:
+	@./scripts/aws/up.sh
+
+aws-down:
+	@./scripts/aws/down.sh
+
+aws-grafana:
+	@./scripts/aws/grafana.sh
+
+aws-check:
+	@./scripts/aws/check.sh

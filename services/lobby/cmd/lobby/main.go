@@ -45,6 +45,7 @@ type config struct {
 	jwksURL    string
 	jwtIssuer  string
 	ticketPath string
+	ticketPEM  string
 	kafka      []string
 }
 
@@ -61,6 +62,7 @@ func loadConfig() config {
 		jwksURL:    envOr("AUTH_JWKS_URL", "http://localhost:8081/api/auth/.well-known/jwks.json"),
 		jwtIssuer:  envOr("JWT_ISSUER", "http://localhost:8080/api/auth"),
 		ticketPath: os.Getenv("TICKET_PRIVATE_KEY_PATH"),
+		ticketPEM:  os.Getenv("TICKET_PRIVATE_KEY_PEM"),
 		kafka:      strings.Split(envOr("KAFKA_BROKERS", "localhost:9094"), ","),
 	}
 }
@@ -106,9 +108,15 @@ func run(cfg config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	signer, err := ticket.LoadSigner(cfg.ticketPath)
+	var signer *ticket.Signer
+	var err error
+	if cfg.ticketPEM != "" {
+		signer, err = ticket.ParseSigner([]byte(cfg.ticketPEM))
+	} else {
+		signer, err = ticket.LoadSigner(cfg.ticketPath)
+	}
 	if err != nil {
-		return fmt.Errorf("join tickets (TICKET_PRIVATE_KEY_PATH, scripts/gen-ticket-key.sh): %w", err)
+		return fmt.Errorf("join tickets (TICKET_PRIVATE_KEY_PEM or TICKET_PRIVATE_KEY_PATH, scripts/gen-ticket-key.sh): %w", err)
 	}
 
 	rdb := redis.NewClient(&redis.Options{

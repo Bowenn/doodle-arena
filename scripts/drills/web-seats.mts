@@ -34,8 +34,9 @@ import { LobbyError, type JoinTicket } from '../../web/src/lobby.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '../..')
-const GW = 'http://localhost:8080'
-const WS = 'ws://localhost:8080'
+// GATEWAY=https://icanfly.click plays in AWS (with DRILL_JWT_PEM, see mint_tokens.py).
+const GW = process.env.GATEWAY ?? 'http://localhost:8080'
+const WS = GW.replace(/^http/, 'ws')
 const NAMES = ['Ada', 'Bob', 'Cyd', 'Dee', 'Eve', 'Fay', 'Gus']
 const COLORS = ['#e53935', '#1e88e5', '#43a047', '#8e24aa', '#fb8c00', '#6d4c41', '#00897b']
 const GIVE_UP_MS = 10 * 60_000
