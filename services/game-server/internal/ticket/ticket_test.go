@@ -162,6 +162,24 @@ func TestLoadPublicKeysReadsSeveralFiles(t *testing.T) {
 	}
 }
 
+func TestParsePublicKeysReadsSeveralBlocks(t *testing.T) {
+	var text []byte
+	for range 2 {
+		der, err := x509.MarshalPKIXPublicKey(newKey(t).Public())
+		if err != nil {
+			t.Fatal(err)
+		}
+		text = append(text, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})...)
+	}
+	keys, err := ParsePublicKeys(text)
+	if err != nil || len(keys) != 2 {
+		t.Fatalf("keys = %d, err = %v", len(keys), err)
+	}
+	if _, err := ParsePublicKeys([]byte("no PEM here")); err == nil {
+		t.Fatal("accepted no keys")
+	}
+}
+
 func TestRedisRedeemerIsSingleUse(t *testing.T) {
 	rdb := redistest.New(t)
 	r := NewRedisRedeemer(rdb, "gs-1", clock(now))

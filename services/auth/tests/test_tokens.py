@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import jwt
@@ -172,6 +173,17 @@ def test_jwks_document_lists_the_signing_key(settings: Settings, key_file: str) 
     (jwk,) = doc["keys"]
     assert {jwk["kty"], jwk["alg"], jwk["use"], jwk["kid"]} == {"RSA", "RS256", "sig", key.kid}
     assert "d" not in jwk  # never the private exponent
+
+
+def test_signing_key_loads_from_pem_text_before_a_path(key_file: str) -> None:
+    from_file = SigningKey.from_file(key_file)
+    pem = Path(key_file).read_text()
+
+    assert SigningKey.load(pem, "").kid == from_file.kid
+    assert SigningKey.load(pem, "/no/such/file").kid == from_file.kid  # the text wins
+    assert SigningKey.load("", key_file).kid == from_file.kid
+    with pytest.raises(ValueError, match="JWT_PRIVATE_KEY_PATH"):
+        SigningKey.load("", "")
 
 
 def test_signing_key_must_be_rsa_2048_or_more() -> None:

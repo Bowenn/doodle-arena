@@ -57,6 +57,11 @@ class SigningKey:
             raise ValueError("JWT_PRIVATE_KEY_PATH is not set (run scripts/gen-jwt-key.sh)")
         return cls.from_pem(Path(path).read_bytes())
 
+    @classmethod
+    def load(cls, pem: str, path: str) -> SigningKey:
+        """The key from JWT_PRIVATE_KEY_PEM when set, else from the file at JWT_PRIVATE_KEY_PATH."""
+        return cls.from_pem(pem.encode()) if pem else cls.from_file(path)
+
 
 def jwks(public_keys: dict[str, RSAPublicKey]) -> dict[str, Any]:
     """The JSON Web Key Set for /.well-known/jwks.json. During a key rotation it holds the old

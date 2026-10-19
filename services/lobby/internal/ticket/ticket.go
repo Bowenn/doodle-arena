@@ -65,6 +65,12 @@ func LoadSigner(path string) (*Signer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read ticket key: %w", err)
 	}
+	return ParseSigner(data)
+}
+
+// ParseSigner reads the same key from PEM text: in AWS it arrives in an environment variable,
+// because ECS injects secrets only as variables (ADR 0003).
+func ParseSigner(data []byte) (*Signer, error) {
 	block, _ := pem.Decode(data)
 	if block == nil {
 		return nil, errors.New("ticket key: no PEM block")

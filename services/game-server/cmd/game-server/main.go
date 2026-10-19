@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -50,6 +51,7 @@ type config struct {
 	maxRooms       int
 	redisAddr      string
 	ticketKeys     string   // comma-separated PEM files with the lobby's public keys
+	ticketKeysPEM  string   // or the keys themselves, as PEM text (AWS)
 	origins        []string // Origin hosts allowed to open a WebSocket
 	helloTimeout   time.Duration
 	kafkaBrokers   []string
@@ -77,6 +79,7 @@ func loadConfig() config {
 		maxRooms:       maxRooms,
 		redisAddr:      envOr("REDIS_ADDR", "localhost:6379"),
 		ticketKeys:     os.Getenv("TICKET_PUBLIC_KEY_PATH"),
+		ticketKeysPEM:  os.Getenv("TICKET_PUBLIC_KEY_PEM"),
 		origins:        strings.Split(envOr("WS_ALLOWED_ORIGINS", "localhost:8080"), ","),
 		helloTimeout:   ws.DefaultHelloTimeout,
 		kafkaBrokers:   strings.Split(envOr("KAFKA_BROKERS", "localhost:9094"), ","),
@@ -129,9 +132,15 @@ func run(cfg config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	keys, err := ticket.LoadPublicKeys(cfg.ticketKeys)
+	var keys []ed25519.PublicKey
+	var err error
+	if cfg.ticketKeysPEM != "" {
+		keys, err = ticket.ParsePublicKeys([]byte(cfg.ticketKeysPEM))
+	} else {
+		keys, err = ticket.LoadPublicKeys(cfg.ticketKeys)
+	}
 	if err != nil {
-		return fmt.Errorf("join tickets (TICKET_PUBLIC_KEY_PATH, scripts/gen-ticket-key.sh): %w", err)
+		return fmt.Errorf("join tickets (TICKET_PUBLIC_KEY_PEM or TICKET_PUBLIC_KEY_PATH, scripts/gen-ticket-key.sh): %w", err)
 	}
 	rdb := redis.NewClient(&redis.Options{
 		Addr: cfg.redisAddr, DialTimeout: 2 * time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second,

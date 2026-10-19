@@ -190,3 +190,21 @@ func TestLoadSignerReadsPKCS8PEM(t *testing.T) {
 		t.Fatal("loaded a different key")
 	}
 }
+
+func TestParseSignerReadsPEMText(t *testing.T) {
+	key := newKey(t)
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := ParseSigner(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.KeyID() != Thumbprint(key.Public().(ed25519.PublicKey)) {
+		t.Fatal("parsed a different key")
+	}
+	if _, err := ParseSigner([]byte("not a key")); err == nil {
+		t.Fatal("accepted text without a PEM block")
+	}
+}

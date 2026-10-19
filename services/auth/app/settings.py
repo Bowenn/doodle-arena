@@ -21,8 +21,10 @@ class Settings(BaseSettings):
     db_user: str = "auth"
     db_password: str = ""
 
-    # Access tokens (ADR 0001). The key file is created by scripts/gen-jwt-key.sh.
+    # Access tokens (ADR 0001). The key file is created by scripts/gen-jwt-key.sh. In AWS the
+    # key arrives as PEM text instead, because ECS injects secrets only as variables (ADR 0003).
     jwt_private_key_path: str = ""
+    jwt_private_key_pem: str = ""
     jwt_issuer: str = "http://localhost:8080/api/auth"
     access_token_ttl_seconds: int = 900
 

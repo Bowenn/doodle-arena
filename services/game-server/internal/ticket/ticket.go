@@ -91,20 +91,43 @@ func LoadPublicKeys(paths string) ([]ed25519.PublicKey, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read ticket public key: %w", err)
 		}
-		for block, rest := pem.Decode(data); block != nil; block, rest = pem.Decode(rest) {
-			parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
-			if err != nil {
-				return nil, fmt.Errorf("ticket public key %s: %w", path, err)
-			}
-			k, ok := parsed.(ed25519.PublicKey)
-			if !ok {
-				return nil, fmt.Errorf("ticket public key %s: %T is not Ed25519", path, parsed)
-			}
-			keys = append(keys, k)
+		found, err := parsePublicKeys(data, path)
+		if err != nil {
+			return nil, err
 		}
+		keys = append(keys, found...)
 	}
 	if len(keys) == 0 {
 		return nil, errors.New("no ticket public keys (TICKET_PUBLIC_KEY_PATH)")
+	}
+	return keys, nil
+}
+
+// ParsePublicKeys reads one or more PEM public keys from text: in AWS they arrive in an
+// environment variable, because ECS injects secrets only as variables (ADR 0003).
+func ParsePublicKeys(data []byte) ([]ed25519.PublicKey, error) {
+	keys, err := parsePublicKeys(data, "TICKET_PUBLIC_KEY_PEM")
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, errors.New("no ticket public keys (TICKET_PUBLIC_KEY_PEM)")
+	}
+	return keys, nil
+}
+
+func parsePublicKeys(data []byte, source string) ([]ed25519.PublicKey, error) {
+	var keys []ed25519.PublicKey
+	for block, rest := pem.Decode(data); block != nil; block, rest = pem.Decode(rest) {
+		parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("ticket public key %s: %w", source, err)
+		}
+		k, ok := parsed.(ed25519.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("ticket public key %s: %T is not Ed25519", source, parsed)
+		}
+		keys = append(keys, k)
 	}
 	return keys, nil
 }
