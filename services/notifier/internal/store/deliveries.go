@@ -79,7 +79,7 @@ func (s *Store) InsertDeliveries(ctx context.Context, ds []Delivery) (int, error
 	return inserted, tx.Commit(ctx)
 }
 
-// Claim takes up to limit due deliveries of live endpoints and pushes their next_attempt_at
+// Claim takes up to limit due deliveries of live, enabled endpoints and pushes their next_attempt_at
 // forward by lease, so another worker skips them now and takes them again if this one dies
 // before recording the attempt. SKIP LOCKED lets several workers (and instances) claim side by
 // side without waiting on each other.
@@ -87,7 +87,7 @@ func (s *Store) Claim(ctx context.Context, limit int, lease time.Duration) ([]Cl
 	rows, err := s.Pool.Query(ctx, `
 		WITH due AS (
 			SELECT d.id FROM deliveries d JOIN endpoints e ON e.id = d.endpoint_id
-			WHERE d.status = 'PENDING' AND d.next_attempt_at <= now() AND e.deleted_at IS NULL
+			WHERE d.status = 'PENDING' AND d.next_attempt_at <= now() AND e.deleted_at IS NULL AND e.disabled_at IS NULL
 			ORDER BY d.next_attempt_at
 			LIMIT $1
 			FOR UPDATE OF d SKIP LOCKED

@@ -77,41 +77,47 @@ func NewConsumer(brokers []string, queue Queuer, log *slog.Logger, opts ...kgo.O
 // Run consumes until ctx is cancelled, then leaves the group. Records it handled are committed
 // even then; the rest are redelivered to the next consumer.
 func (c *Consumer) Run(ctx context.Context) {
-	defer c.client.CloseAllowingRebalance()
+	consume(ctx, c.client, c.log, c.handle)
+}
+
+// consume polls, hands each record to handle in order and commits the handled ones, until ctx is
+// cancelled or handle returns false (cancelled mid-record; that record stays uncommitted).
+func consume(ctx context.Context, client *kgo.Client, log *slog.Logger, handle func(context.Context, *kgo.Record) bool) {
+	defer client.CloseAllowingRebalance()
 	for {
-		fetches := c.client.PollFetches(ctx)
+		fetches := client.PollFetches(ctx)
 		if ctx.Err() != nil || fetches.IsClientClosed() {
 			return
 		}
 		fetches.EachError(func(topic string, partition int32, err error) {
-			c.log.WarnContext(ctx, "kafka fetch failed", "topic", topic, "partition", partition, "err", err)
+			log.WarnContext(ctx, "kafka fetch failed", "topic", topic, "partition", partition, "err", err)
 		})
 		var done []*kgo.Record
 		stopped := false
 		for it := fetches.RecordIter(); !it.Done(); {
 			r := it.Next()
-			if !c.handle(ctx, r) {
+			if !handle(ctx, r) {
 				stopped = true // cancelled while Postgres was failing; r stays uncommitted
 				break
 			}
 			done = append(done, r)
 		}
-		c.commit(done)
-		c.client.AllowRebalance()
+		commit(client, log, done)
+		client.AllowRebalance()
 		if stopped {
 			return
 		}
 	}
 }
 
-func (c *Consumer) commit(records []*kgo.Record) {
+func commit(client *kgo.Client, log *slog.Logger, records []*kgo.Record) {
 	if len(records) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
 	defer cancel()
-	if err := c.client.CommitRecords(ctx, records...); err != nil {
-		c.log.Warn("kafka commit failed, the records will be redelivered", "err", err)
+	if err := client.CommitRecords(ctx, records...); err != nil {
+		log.Warn("kafka commit failed, the records will be redelivered", "err", err)
 	}
 }
 

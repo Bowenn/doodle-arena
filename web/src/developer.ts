@@ -22,6 +22,10 @@ export type Endpoint = {
   url: string
   event_types: string[]
   created_at: string
+  /** disabled: it receives nothing until enabled (credentials_revoked: auth revoked the
+   * owner's sign-in after a stolen session was detected). */
+  status: 'active' | 'disabled'
+  disabled_reason: string | null
 }
 
 /** Only the register response carries the signing secret; it is never shown again. */
@@ -61,6 +65,11 @@ export async function listEndpoints(): Promise<Endpoint[]> {
 
 export function createEndpoint(url: string, eventTypes: string[]): Promise<CreatedEndpoint> {
   return call('POST', '/api/notifier/endpoints', { url, event_types: eventTypes })
+}
+
+/** Makes a disabled endpoint live again with a new signing secret, shown only in this answer. */
+export function enableEndpoint(id: string): Promise<CreatedEndpoint> {
+  return call('POST', `/api/notifier/endpoints/${encodeURIComponent(id)}/enable`)
 }
 
 export function deleteEndpoint(id: string): Promise<void> {

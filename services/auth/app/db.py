@@ -28,6 +28,9 @@ users = Table(
     Column("display_name", Text, nullable=False),
     Column("avatar_url", Text),
     Column("roles", ARRAY(Text), nullable=False, server_default=text("'{player}'")),
+    # When auth last revoked the user's credentials (a stolen session, ADR 0015): access tokens
+    # issued at or before it can't manage API keys, though they still verify until they expire.
+    Column("credentials_revoked_at", DateTime(timezone=True)),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     Column("last_login_at", DateTime(timezone=True)),
@@ -47,6 +50,10 @@ refresh_tokens = Table(
     Column("used_at", DateTime(timezone=True)),
     Column("revoked_at", DateTime(timezone=True)),
     Column("revoked_reason", Text),
+    # Set on every token of a family the first time a rotated token of it comes back, so the
+    # theft response (revoke API keys, CredentialsRevoked) runs once per family, however often a
+    # thief replays it.
+    Column("reuse_handled_at", DateTime(timezone=True)),
     Index("refresh_tokens_family_id_idx", "family_id"),
     Index("refresh_tokens_user_id_idx", "user_id"),
 )
@@ -65,6 +72,20 @@ api_keys = Table(
     Column("last_used_at", DateTime(timezone=True)),
     Column("revoked_at", DateTime(timezone=True)),
     Index("api_keys_user_id_idx", "user_id"),
+)
+
+
+# The transactional outbox (ADR 0015), published by the auth-relay process (app.relay).
+outbox = Table(
+    "outbox",
+    metadata,
+    Column("event_id", Uuid, primary_key=True),
+    Column("topic", Text, nullable=False),
+    Column("key", Text, nullable=False),
+    Column("payload", LargeBinary, nullable=False),
+    Column("traceparent", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("published_at", DateTime(timezone=True)),
 )
 
 

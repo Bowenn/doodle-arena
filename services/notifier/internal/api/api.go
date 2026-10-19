@@ -55,6 +55,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/notifier/endpoints/{id}", a.auth(a.deleteEndpoint))
 	mux.Handle("GET /api/notifier/endpoints/{id}/deliveries", a.auth(a.listDeliveries))
 	mux.Handle("POST /api/notifier/endpoints/{id}/test", a.auth(a.testEndpoint))
+	mux.Handle("POST /api/notifier/endpoints/{id}/enable", a.auth(a.enableEndpoint))
 }
 
 type handler func(w http.ResponseWriter, r *http.Request, who apikeys.Identity)
@@ -75,7 +76,7 @@ func (a *API) auth(next handler) http.Handler {
 				writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "invalid or expired access token")
 				return
 			}
-			next(w, r, apikeys.Identity{UserID: claims.UserID, Scopes: []string{Scope}})
+			a.checkRevoked(w, r, apikeys.Identity{UserID: claims.UserID, Scopes: []string{Scope}, IssuedAt: claims.IssuedAt}, next)
 			return
 		}
 		who, err := a.Keys.Verify(r.Context(), credential)
@@ -91,8 +92,29 @@ func (a *API) auth(next handler) http.Handler {
 			writeError(w, r, http.StatusForbidden, "FORBIDDEN", "this API key lacks the webhooks scope")
 			return
 		}
-		next(w, r, who)
+		a.checkRevoked(w, r, who, next)
 	})
+}
+
+// checkRevoked refuses a credential issued at or before its user's credential revocation (ADR
+// 0015): the thief's access token, which still verifies for up to 15 minutes, or a revoked API
+// key this process still has cached as valid. Endpoint changes check again under the owner's
+// lock (store.ErrCredentialsRevoked), so a revocation landing mid-request can't be missed.
+func (a *API) checkRevoked(w http.ResponseWriter, r *http.Request, who apikeys.Identity, next handler) {
+	revokedAt, revoked, err := a.Store.RevokedAt(r.Context(), who.UserID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if revoked && !who.IssuedAt.After(revokedAt) {
+		writeRevoked(w, r)
+		return
+	}
+	next(w, r, who)
+}
+
+func writeRevoked(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "this credential was revoked: sign in again")
 }
 
 type endpointView struct {
@@ -100,11 +122,19 @@ type endpointView struct {
 	URL        string   `json:"url"`
 	EventTypes []string `json:"event_types"`
 	CreatedAt  string   `json:"created_at"`
-	Secret     string   `json:"secret,omitempty"`
+	// active, or disabled (it receives nothing until enabled: disabled_reason says why).
+	Status         string  `json:"status"`
+	DisabledReason *string `json:"disabled_reason"`
+	Secret         string  `json:"secret,omitempty"`
 }
 
 func view(e store.Endpoint) endpointView {
-	return endpointView{ID: e.ID.String(), URL: e.URL, EventTypes: e.EventTypes, CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339Nano)}
+	status := "active"
+	if e.DisabledAt != nil {
+		status = "disabled"
+	}
+	return endpointView{ID: e.ID.String(), URL: e.URL, EventTypes: e.EventTypes, CreatedAt: e.CreatedAt.UTC().Format(time.RFC3339Nano),
+		Status: status, DisabledReason: e.DisabledReason}
 }
 
 func (a *API) createEndpoint(w http.ResponseWriter, r *http.Request, who apikeys.Identity) {
@@ -142,7 +172,11 @@ func (a *API) createEndpoint(w http.ResponseWriter, r *http.Request, who apikeys
 	e, err := a.Store.CreateEndpoint(r.Context(), store.Endpoint{
 		ID: id, OwnerID: who.UserID, APIKeyID: who.KeyID, URL: u.String(), EventTypes: types,
 		SecretCiphertext: ct, SecretNonce: nonce,
-	})
+	}, who.IssuedAt)
+	if errors.Is(err, store.ErrCredentialsRevoked) {
+		writeRevoked(w, r)
+		return
+	}
 	if errors.Is(err, store.ErrTooManyEndpoints) {
 		writeError(w, r, http.StatusConflict, "TOO_MANY_ENDPOINTS", "at most "+strconv.Itoa(store.MaxEndpointsPerOwner)+" endpoints per user")
 		return
@@ -185,6 +219,45 @@ func (a *API) deleteEndpoint(w http.ResponseWriter, r *http.Request, who apikeys
 	}
 	a.Log.InfoContext(r.Context(), "endpoint deleted", "endpoint_id", id, "user_id", who.UserID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// enableEndpoint makes a disabled endpoint live again with a new signing secret, shown once: the
+// old one may be known to whoever had the revoked credentials.
+func (a *API) enableEndpoint(w http.ResponseWriter, r *http.Request, who apikeys.Identity) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	secret, err := webhook.NewSecret()
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	ct, nonce, err := a.Box.Seal([]byte(secret), []byte(id.String()))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	e, err := a.Store.EnableEndpoint(r.Context(), who.UserID, id, ct, nonce, who.IssuedAt)
+	switch {
+	case errors.Is(err, store.ErrCredentialsRevoked):
+		writeRevoked(w, r)
+		return
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, r, http.StatusNotFound, "ENDPOINT_NOT_FOUND", "no such endpoint")
+		return
+	case errors.Is(err, store.ErrEndpointActive):
+		writeError(w, r, http.StatusConflict, "ENDPOINT_ACTIVE", "the endpoint isn't disabled")
+		return
+	case err != nil:
+		a.fail(w, r, err)
+		return
+	}
+	a.Log.InfoContext(r.Context(), "endpoint enabled with a new secret", "endpoint_id", e.ID, "user_id", who.UserID)
+	out := view(e)
+	out.Secret = secret // shown once; stored only encrypted
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
 }
 
 type attemptView struct {

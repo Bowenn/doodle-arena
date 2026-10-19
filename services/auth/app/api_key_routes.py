@@ -17,7 +17,26 @@ log = logging.getLogger("auth")
 router = APIRouter(prefix="/api/auth/api-keys")
 internal_router = APIRouter(prefix="/internal/api-keys")
 Ctx = Annotated[AuthContext, Depends(get_context)]
-Claims = Annotated[AccessClaims, Depends(current_claims)]
+
+
+def fresh_claims(
+    ctx: Annotated[AuthContext, Depends(get_context)],
+    claims: Annotated[AccessClaims, Depends(current_claims)],
+) -> AccessClaims:
+    """The caller's access token, unless it was issued at or before its user's credential
+    revocation (ADR 0015): a thief's token still verifies for up to 15 minutes, and mustn't
+    mint, list or revoke keys meanwhile. Creation checks again under the user's lock."""
+    with ctx.engine.connect() as conn:
+        try:
+            api_keys.check_not_revoked(conn, claims.user_id, claims.issued_at)
+        except api_keys.CredentialsRevoked:
+            raise ApiError(
+                401, "TOKEN_REVOKED", "this session was revoked: sign in again"
+            ) from None
+    return claims
+
+
+Claims = Annotated[AccessClaims, Depends(fresh_claims)]
 
 
 class CreateKey(BaseModel):
@@ -47,7 +66,12 @@ def create_key(ctx: Ctx, claims: Claims, body: CreateKey, response: Response) ->
         raise ApiError(400, "INVALID_SCOPE", f"unknown scopes: {', '.join(sorted(unknown))}")
     try:
         with ctx.engine.begin() as conn:
-            key, full = api_keys.create_within_cap(conn, claims.user_id, body.name, body.scopes)
+            key, full = api_keys.create_within_cap(
+                conn, claims.user_id, body.name, body.scopes, claims.issued_at
+            )
+    except api_keys.CredentialsRevoked:
+        # The revocation committed after fresh_claims looked: refused under the lock.
+        raise ApiError(401, "TOKEN_REVOKED", "this session was revoked: sign in again") from None
     except api_keys.TooManyKeys:
         raise ApiError(
             409, "TOO_MANY_API_KEYS", f"at most {api_keys.MAX_ACTIVE_KEYS} active keys"
@@ -103,4 +127,5 @@ def verify_key(ctx: Ctx, body: VerifyKey) -> dict[str, Any]:
         "key_id": str(verified.key_id),
         "user_id": verified.user_id,
         "scopes": verified.scopes,
+        "created_at": verified.created_at.isoformat(),
     }

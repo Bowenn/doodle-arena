@@ -1,10 +1,12 @@
-# Auth service (FastAPI): lint, test (Testcontainers Postgres), Docker build.
+# Auth service (FastAPI, and its outbox relay): lint, test (Testcontainers Postgres and Kafka),
+# Docker build from the repository root (for proto/gen/python).
 name: auth
 
 on:
   pull_request:
     paths:
       - services/auth/**
+      - proto/gen/python/**
       - fixtures/jwt/**
       - .github/workflows/auth.yml
       - .github/workflows/_python.yml
@@ -16,6 +18,7 @@ on:
     branches: [master]
     paths:
       - services/auth/**
+      - proto/gen/python/**
       - fixtures/jwt/**
       - .github/workflows/auth.yml
       - .github/workflows/_python.yml
@@ -44,4 +47,5 @@ jobs:
     uses: ./.github/workflows/_docker.yml
     with:
       service: auth
-      context: services/auth
+      context: .
+      file: services/auth/Dockerfile

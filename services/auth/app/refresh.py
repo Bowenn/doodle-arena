@@ -15,8 +15,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import Connection, insert, select, update
 
-from app import api_keys
-from app.db import refresh_tokens
+from app import api_keys, outbox
+from app.db import refresh_tokens, users
 
 
 def hash_token(token: str) -> bytes:
@@ -76,11 +76,22 @@ def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> Rotat
     if row.used_at is not None or row.revoked_at is not None:
         revoke_family(conn, row.family_id, now, "reuse_detected")
         keys_revoked = 0
-        if row.used_at is not None:
+        if row.used_at is not None and _first_reuse(conn, row.family_id, now):
             # A rotated token came back: someone else had this session, and may have used one of
             # its access tokens to create API keys. (A token revoked by logout coming back is more
             # likely a stale cookie, so it ends the family but leaves the keys alone.)
+            # Under the lock key creation takes, so a key minted with a stolen token either
+            # commits first (and is revoked here) or sees the watermark and is refused.
+            api_keys.lock_user(conn, str(row.user_id))
             keys_revoked = api_keys.revoke_all(conn, str(row.user_id), now)
+            # Tokens issued until now may be the thief's: they can't mint new keys either.
+            conn.execute(
+                update(users).where(users.c.id == row.user_id).values(credentials_revoked_at=now)
+            )
+            # And anything else those credentials set up: the notifier disables the user's
+            # webhook endpoints when this event arrives (ADR 0015). Same transaction, so the
+            # revocation and its event commit together.
+            outbox.credentials_revoked(conn, str(row.user_id), now)
         return RotateResult(
             "reuse_detected",
             user_id=row.user_id,
@@ -93,6 +104,19 @@ def rotate(conn: Connection, token: str, now: datetime, ttl: timedelta) -> Rotat
     conn.execute(update(refresh_tokens).where(refresh_tokens.c.id == row.id).values(used_at=now))
     successor = _insert(conn, row.family_id, row.user_id, now, ttl)
     return RotateResult("rotated", successor, row.user_id, row.family_id)
+
+
+def _first_reuse(conn: Connection, family_id: uuid.UUID, now: datetime) -> bool:
+    """Marks the family's theft as handled; True only for the first replay. Once per family, so
+    a thief replaying an old token can't revoke the user's new API keys and disable their
+    webhooks again and again. Concurrent replays serialize on the rows: the second one finds
+    them marked and updates none."""
+    result = conn.execute(
+        update(refresh_tokens)
+        .where(refresh_tokens.c.family_id == family_id, refresh_tokens.c.reuse_handled_at.is_(None))
+        .values(reuse_handled_at=now)
+    )
+    return result.rowcount > 0
 
 
 def revoke_family(conn: Connection, family_id: uuid.UUID, now: datetime, reason: str) -> None:

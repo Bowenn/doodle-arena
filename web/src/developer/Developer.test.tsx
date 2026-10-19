@@ -18,6 +18,8 @@ const EP: Endpoint = {
   url: 'https://example.com/hook',
   event_types: ['coins.credited'],
   created_at: '2026-10-18T10:00:00Z',
+  status: 'active',
+  disabled_reason: null,
 }
 const DEAD: Delivery = {
   id: 'd1',
@@ -130,5 +132,21 @@ describe('Developer', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await vi.waitFor(() => expect(screen.queryByText('https://example.com/hook')).toBeNull())
+  })
+
+  it('offers to enable an endpoint disabled by a credential revocation, with a new secret', async () => {
+    routes['GET /api/notifier/endpoints'] = () =>
+      json(200, { endpoints: [{ ...EP, status: 'disabled', disabled_reason: 'credentials_revoked' }] })
+    routes['POST /api/notifier/endpoints/e1/enable'] = () => json(200, { ...EP, secret: 'whsec_new' })
+    mockApi(routes)
+    render(<Developer />)
+
+    expect(await screen.findByText(/your sign-in was revoked/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Send test' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Enable with a new secret' }))
+
+    expect(await screen.findByText('whsec_new')).toBeTruthy()
+    expect(screen.queryByText(/your sign-in was revoked/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Send test' })).toBeTruthy()
   })
 })

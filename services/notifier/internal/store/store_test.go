@@ -30,7 +30,7 @@ func TestStore(t *testing.T) {
 	ctx := t.Context()
 
 	t.Run("endpoints belong to their owner", func(t *testing.T) {
-		e, err := s.CreateEndpoint(ctx, endpoint("u_ada", "sale.completed"))
+		e, err := s.CreateEndpoint(ctx, endpoint("u_ada", "sale.completed"), time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -51,7 +51,7 @@ func TestStore(t *testing.T) {
 		errs := make(chan error, 15)
 		for range 15 {
 			wg.Go(func() {
-				_, err := s.CreateEndpoint(ctx, endpoint("u_many", "sale.completed"))
+				_, err := s.CreateEndpoint(ctx, endpoint("u_many", "sale.completed"), time.Now())
 				errs <- err
 			})
 		}
@@ -72,10 +72,10 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("subscribers are the owners' live endpoints of that type", func(t *testing.T) {
-		sales, _ := s.CreateEndpoint(ctx, endpoint("u_sub1", "sale.completed"))
-		both, _ := s.CreateEndpoint(ctx, endpoint("u_sub2", "sale.completed", "coins.credited"))
-		_, _ = s.CreateEndpoint(ctx, endpoint("u_sub3", "sale.completed")) // not an owner here
-		deleted, _ := s.CreateEndpoint(ctx, endpoint("u_sub1", "sale.completed"))
+		sales, _ := s.CreateEndpoint(ctx, endpoint("u_sub1", "sale.completed"), time.Now())
+		both, _ := s.CreateEndpoint(ctx, endpoint("u_sub2", "sale.completed", "coins.credited"), time.Now())
+		_, _ = s.CreateEndpoint(ctx, endpoint("u_sub3", "sale.completed"), time.Now()) // not an owner here
+		deleted, _ := s.CreateEndpoint(ctx, endpoint("u_sub1", "sale.completed"), time.Now())
 		_ = s.DeleteEndpoint(ctx, "u_sub1", deleted.ID)
 
 		got, err := s.Subscribers(ctx, []string{"u_sub1", "u_sub2"}, "sale.completed")
@@ -96,7 +96,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("a redelivered event queues nothing new", func(t *testing.T) {
-		e, _ := s.CreateEndpoint(ctx, endpoint("u_dup", "sale.completed"))
+		e, _ := s.CreateEndpoint(ctx, endpoint("u_dup", "sale.completed"), time.Now())
 		n1, err := s.InsertDeliveries(ctx, []store.Delivery{delivery(e, "evt-1")})
 		if err != nil {
 			t.Fatal(err)
@@ -108,7 +108,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("claims skip each other and come back after the lease", func(t *testing.T) {
-		e, _ := s.CreateEndpoint(ctx, endpoint("u_claim", "sale.completed"))
+		e, _ := s.CreateEndpoint(ctx, endpoint("u_claim", "sale.completed"), time.Now())
 		_, _ = s.InsertDeliveries(ctx, []store.Delivery{delivery(e, "evt-c1"), delivery(e, "evt-c2"), delivery(e, "evt-c3")})
 
 		first, err := s.Claim(ctx, 2, time.Second)
@@ -140,7 +140,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("attempts move a delivery on and are logged", func(t *testing.T) {
-		e, _ := s.CreateEndpoint(ctx, endpoint("u_att", "sale.completed"))
+		e, _ := s.CreateEndpoint(ctx, endpoint("u_att", "sale.completed"), time.Now())
 		d := delivery(e, "evt-a")
 		_, _ = s.InsertDeliveries(ctx, []store.Delivery{d})
 
@@ -184,7 +184,7 @@ func TestStore(t *testing.T) {
 
 	t.Run("a dead test ping stays out of the dead-letter queue and its gauge", func(t *testing.T) {
 		before, _ := s.DeadSince(ctx, time.Now().Add(-time.Hour))
-		e, _ := s.CreateEndpoint(ctx, endpoint("u_ping", "sale.completed"))
+		e, _ := s.CreateEndpoint(ctx, endpoint("u_ping", "sale.completed"), time.Now())
 		d := delivery(e, "ping_1")
 		d.EventType = "ping"
 		_, _ = s.InsertDeliveries(ctx, []store.Delivery{d})
@@ -203,7 +203,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("deleting an endpoint cancels what is pending", func(t *testing.T) {
-		e, _ := s.CreateEndpoint(ctx, endpoint("u_del", "sale.completed"))
+		e, _ := s.CreateEndpoint(ctx, endpoint("u_del", "sale.completed"), time.Now())
 		_, _ = s.InsertDeliveries(ctx, []store.Delivery{delivery(e, "evt-d")})
 		if err := s.DeleteEndpoint(ctx, "u_del", e.ID); err != nil {
 			t.Fatal(err)
@@ -216,7 +216,7 @@ func TestStore(t *testing.T) {
 	})
 
 	t.Run("delivery log pages newest first", func(t *testing.T) {
-		e, _ := s.CreateEndpoint(ctx, endpoint("u_page", "sale.completed"))
+		e, _ := s.CreateEndpoint(ctx, endpoint("u_page", "sale.completed"), time.Now())
 		for i := range 5 {
 			_, _ = s.InsertDeliveries(ctx, []store.Delivery{delivery(e, fmt.Sprintf("evt-p%d", i))})
 		}

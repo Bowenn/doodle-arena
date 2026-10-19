@@ -100,7 +100,7 @@ func (f fixture) register(t *testing.T, url string) (store.Endpoint, string, sto
 	id := uuid.New()
 	ct, nonce, _ := f.box.Seal([]byte(secret), []byte(id.String()))
 	e, err := f.st.CreateEndpoint(ctx, store.Endpoint{ID: id, OwnerID: "u_dev", APIKeyID: ptr(uuid.New()), URL: url,
-		EventTypes: []string{webhook.TypeSaleCompleted}, SecretCiphertext: ct, SecretNonce: nonce})
+		EventTypes: []string{webhook.TypeSaleCompleted}, SecretCiphertext: ct, SecretNonce: nonce}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

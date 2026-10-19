@@ -143,6 +143,11 @@ func run(cfg config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Credential revocations from auth (ADR 0015): disables the user's endpoints.
+	revocations, err := events.NewRevocationConsumer(cfg.kafkaBrokers, st, logger)
+	if err != nil {
+		return fmt.Errorf("revocation consumer: %w", err)
+	}
 	dispatcher, err := delivery.NewDispatcher(st, box, policy, delivery.Defaults(), logger)
 	if err != nil {
 		return err
@@ -161,6 +166,7 @@ func run(cfg config, logger *slog.Logger) error {
 	}
 	var workers sync.WaitGroup
 	workers.Go(func() { consumer.Run(ctx) })
+	workers.Go(func() { revocations.Run(ctx) })
 	workers.Go(func() { dispatcher.Run(ctx) })
 	workers.Go(func() { deadLetters.Run(ctx) })
 	// The consumer leaves its group before the pool closes.

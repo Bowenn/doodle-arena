@@ -18,6 +18,11 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrTooManyEndpoints: the owner already has MaxEndpointsPerOwner.
 	ErrTooManyEndpoints = errors.New("too many endpoints")
+	// ErrEndpointActive: the endpoint isn't disabled, so there is nothing to enable.
+	ErrEndpointActive = errors.New("endpoint is active")
+	// ErrCredentialsRevoked: the caller's credential was issued at or before the owner's
+	// credential revocation (ADR 0015).
+	ErrCredentialsRevoked = errors.New("credentials revoked")
 )
 
 // Endpoint is a developer's webhook URL and what it subscribes to.
@@ -30,19 +35,26 @@ type Endpoint struct {
 	SecretCiphertext []byte
 	SecretNonce      []byte
 	CreatedAt        time.Time
+	// Set while the endpoint is disabled (credentials_revoked: auth revoked its owner's
+	// credentials, ADR 0015); it receives nothing until enabled again.
+	DisabledAt     *time.Time
+	DisabledReason *string
 }
 
-const endpointColumns = "id, owner_id, api_key_id, url, event_types, secret_ciphertext, secret_nonce, created_at"
+const endpointColumns = "id, owner_id, api_key_id, url, event_types, secret_ciphertext, secret_nonce, created_at, disabled_at, disabled_reason"
 
 func scanEndpoint(row pgx.Row) (Endpoint, error) {
 	var e Endpoint
-	err := row.Scan(&e.ID, &e.OwnerID, &e.APIKeyID, &e.URL, &e.EventTypes, &e.SecretCiphertext, &e.SecretNonce, &e.CreatedAt)
+	err := row.Scan(&e.ID, &e.OwnerID, &e.APIKeyID, &e.URL, &e.EventTypes, &e.SecretCiphertext, &e.SecretNonce, &e.CreatedAt,
+		&e.DisabledAt, &e.DisabledReason)
 	return e, err
 }
 
-// CreateEndpoint stores e, unless its owner already has MaxEndpointsPerOwner. The owner's rows
-// are locked while counting, so two concurrent registrations can't both slip under the cap.
-func (s *Store) CreateEndpoint(ctx context.Context, e Endpoint) (Endpoint, error) {
+// CreateEndpoint stores e, unless its owner already has MaxEndpointsPerOwner or the caller's
+// credential (issued at issuedAt) predates the owner's credential revocation. Both checks run
+// under the owner's advisory lock, which RevokeCredentials takes too: a registration either
+// commits before a revocation (which then disables it) or sees the revocation and is refused.
+func (s *Store) CreateEndpoint(ctx context.Context, e Endpoint, issuedAt time.Time) (Endpoint, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return Endpoint{}, fmt.Errorf("begin: %w", err)
@@ -50,8 +62,11 @@ func (s *Store) CreateEndpoint(ctx context.Context, e Endpoint) (Endpoint, error
 	defer tx.Rollback(ctx) //nolint:errcheck // a no-op after Commit
 	// An advisory lock per owner serializes registrations of one owner (a count can't lock rows
 	// that don't exist yet).
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", e.OwnerID); err != nil {
-		return Endpoint{}, fmt.Errorf("lock owner: %w", err)
+	if err := lockOwner(ctx, tx, e.OwnerID); err != nil {
+		return Endpoint{}, err
+	}
+	if err := checkNotRevoked(ctx, tx, e.OwnerID, issuedAt); err != nil {
+		return Endpoint{}, err
 	}
 	var n int
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM endpoints WHERE owner_id = $1 AND deleted_at IS NULL", e.OwnerID).Scan(&n); err != nil {
@@ -113,10 +128,11 @@ func (s *Store) DeleteEndpoint(ctx context.Context, ownerID string, id uuid.UUID
 	return tx.Commit(ctx)
 }
 
-// Subscribers returns the live endpoints of any of these owners that subscribe to eventType.
+// Subscribers returns the live, enabled endpoints of any of these owners that subscribe to
+// eventType.
 func (s *Store) Subscribers(ctx context.Context, ownerIDs []string, eventType string) ([]Endpoint, error) {
 	rows, err := s.Pool.Query(ctx, "SELECT "+endpointColumns+` FROM endpoints
-		WHERE owner_id = ANY($1) AND $2 = ANY(event_types) AND deleted_at IS NULL`, ownerIDs, eventType)
+		WHERE owner_id = ANY($1) AND $2 = ANY(event_types) AND deleted_at IS NULL AND disabled_at IS NULL`, ownerIDs, eventType)
 	if err != nil {
 		return nil, fmt.Errorf("subscribers: %w", err)
 	}

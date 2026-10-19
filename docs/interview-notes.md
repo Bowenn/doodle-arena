@@ -323,6 +323,18 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Test doubles must behave like the real thing where it matters.** stripe-mock can't be slow and doesn't replay keys, so the tests use a small stub that saves responses per key like Stripe and can hold requests. Each test was run against the old code to make sure it fails.
 - **Rejected:** a nested `REQUIRES_NEW` transaction, because the outer one still holds its connection; an async checkout through an outbox, because the browser needs the URL now; a semaphore around checkouts, because it limits the damage without fixing the cause.
 
+### Task 4.R2: Webhooks revoked with the credentials
+
+- **A theft response must cover every channel the thief could have opened.** Auth already revoked the session family and the API keys, but webhook endpoints, made with either, kept streaming the victim's sales and Stripe credits. Now the same transaction writes `CredentialsRevoked` to an outbox, a relay publishes it, and the notifier disables the user's endpoints about 0.14 s after the replay, measured in one trace across three services.
+- **Stateless tokens need a watermark to be revoked.** The thief's access token stays a valid JWT for 15 minutes. The notifier keeps the newest revocation time per user and refuses any credential issued at or before it: a session by `iat`, an API key by `created_at` (because its cache trusts a key for 30 seconds). The same idea would revoke JWTs anywhere, at the cost of a lookup per request.
+- **Three security reviews changed the design.**
+  - Every replay of the old token re-ran the theft response, so anyone holding it could keep revoking the user's new keys. Now it runs once per family, under a `reuse_handled_at` marker.
+  - A request could pass the watermark check, the revocation could land, and the request's insert could commit after it. Registration, enabling and revocation now share the owner's advisory lock, and the writers re-check under it.
+  - The thief's token could still mint a brand-new API key in auth, newer than the watermark. So auth keeps its own watermark for key management, re-checked under the user's key lock (the same check-then-act race again, one service over).
+  - Each fix has a test that fails without it. The lesson: a revocation is only as strong as the weakest path that can mint a new credential.
+- **Pick consumer offsets per topic's meaning.** The webhook consumer starts at the newest offset, so a new endpoint doesn't receive history. A revocation published before the notifier first subscribed must still count, so revocations get their own group reading from the earliest offset. That's safe because handling is idempotent: an event not newer than the watermark changes nothing, so a replay never re-disables an endpoint the owner enabled again.
+- **Rejected:** the notifier asking auth on every delivery (auth in the hot path, and an outage stalls webhooks); auth calling the notifier directly (a revocation lost while the notifier is down); deleting endpoints instead of disabling them (the owner loses the id and the delivery log).
+
 ## Stage 5: Production readiness
 
 ## Stage 6: Scale and depth

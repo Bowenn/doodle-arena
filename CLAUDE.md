@@ -55,7 +55,7 @@ Keep this list accurate:
 - `make telemetry-check`: one request with a known trace id must reach Tempo and Loki, and every service must export metrics (Grafana: `http://localhost:3000`).
 - `make pipeline-check`: one `RoundFinished` in, then an approved drawing, its image and its `DrawingApproved` out (CI's stack job runs it). Needs the AI stub to approve; in a worktree, set `ENV_FILE` to the main checkout's `.env`.
 - `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
-- `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows, `s=secrets` scans the git history with gitleaks), `make logs s=<service>` (`s=game-server` follows both instances, `s=assets` the web process, the consumer, the Celery worker, the outbox relay and beat), `make ps`.
+- `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows, `s=secrets` scans the git history with gitleaks), `make logs s=<service>` (`s=game-server` follows both instances, `s=assets` the web process, the consumer, the Celery worker, the outbox relay and beat, `s=auth` the web process and its outbox relay), `make ps`.
 - CI (`.github/workflows/`) runs the same `scripts/lint.sh` and `scripts/test.sh` per service, so `make lint s=<svc> && make test s=<svc>` predicts CI. Pin new actions to a full commit SHA with the version in a comment.
 - `make proto`: lint `proto/`, regenerate Go, Java and Python code into `proto/gen/`, and build it. `make test s=proto` checks without regenerating.
 - `scripts/fake-events.sh [-match-id <id>] [-dry-run]`: publish a fake `RoundFinished` and `MatchFinished` (and upload the stroke log). Read events back with `(cd tools/eventctl && go run . decode -topic <topic> -n <k>)`.
@@ -67,6 +67,7 @@ Keep this list accurate:
   - `uv run --project services/auth --with websockets python scripts/drills/failover.py kill|pause [n]`: kill or freeze the room's game server mid-round and measure the resume.
   - `uv run --project services/auth python scripts/drills/mint_tokens.py [--roles player,moderator] <name>...`: dev access tokens for drills (keep them in shell variables; never write them to a file).
   - `uv run --project services/auth --with confluent-kafka --with 'protobuf>=7.36.2,<8' python scripts/drills/webhooks.py`: an API key, a healthy and a failing webhook endpoint on the `webhook-receiver` test service (admin on `localhost:9000`), a fake `MatchFinished`; reports the verified delivery, the failing one's 8 attempts, DEAD and its `DeliveryDead` (a few minutes).
+  - `uv run --project services/auth --with confluent-kafka --with 'protobuf>=7.36.2,<8' python scripts/drills/credential_theft.py`: replays a rotated refresh token for a drill user and checks that the notifier disables their endpoint, refuses the old access token, and delivers again after Enable (needs `auth-relay`; in a worktree, also set `ENV_FILE` to the main checkout's `.env`).
   - `node scripts/drills/web-seats.mts [room_id] [--seats n]` (Node 24): extra players running the web app's own client; with no room id, a bot-only match that exits 0 when every seat agrees.
 - Planned: `make seed` (later). Don't use it before it exists.
 
