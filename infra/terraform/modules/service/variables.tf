@@ -74,14 +74,28 @@ variable "singleton" {
   default     = false
 }
 
+# Flags, not "is the id null": the ids are only known after apply, and count must be known
+# at plan time.
+variable "discoverable" {
+  description = "Register <name> in the namespace: other services call it by name."
+  type        = bool
+  default     = false
+}
+
 variable "namespace_id" {
-  description = "Cloud Map namespace to register <name> in, or null for a service nobody calls."
+  description = "Cloud Map namespace (when discoverable)."
   type        = string
   default     = null
 }
 
+variable "load_balanced" {
+  description = "Register the first port in the target group (the gateway only)."
+  type        = bool
+  default     = false
+}
+
 variable "target_group_arn" {
-  description = "Load balancer target group (the gateway only)."
+  description = "Load balancer target group (when load_balanced)."
   type        = string
   default     = null
 }

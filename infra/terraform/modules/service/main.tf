@@ -28,7 +28,7 @@ resource "aws_security_group" "this" {
 }
 
 resource "aws_service_discovery_service" "this" {
-  count = var.namespace_id == null ? 0 : 1
+  count = var.discoverable ? 1 : 0
   name  = var.name
 
   dns_config {
@@ -122,7 +122,7 @@ resource "aws_ecs_service" "this" {
   }
 
   dynamic "load_balancer" {
-    for_each = var.target_group_arn == null ? [] : [var.target_group_arn]
+    for_each = var.load_balanced ? [var.target_group_arn] : []
     content {
       target_group_arn = load_balancer.value
       container_name   = var.name

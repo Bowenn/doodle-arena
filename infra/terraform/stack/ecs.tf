@@ -214,8 +214,10 @@ module "svc" {
   stop_timeout        = try(local.services[each.key].stop_timeout, 30)
   singleton           = try(local.services[each.key].singleton, false)
   desired_count       = var.running ? 1 : 0
-  namespace_id        = try(local.services[each.key].discover, false) ? aws_service_discovery_private_dns_namespace.internal.id : null
-  target_group_arn    = try(local.services[each.key].target_group, false) ? aws_lb_target_group.gateway.arn : null
+  discoverable        = try(local.services[each.key].discover, false)
+  namespace_id        = aws_service_discovery_private_dns_namespace.internal.id
+  load_balanced       = try(local.services[each.key].target_group, false)
+  target_group_arn    = aws_lb_target_group.gateway.arn
 
   cluster_id         = aws_ecs_cluster.main.id
   vpc_id             = aws_vpc.main.id
