@@ -112,7 +112,7 @@ DOMAIN=icanfly.click make aws-down
 
 - `make aws-push` builds every image for linux/arm64 and pushes it to ECR, tagged with the commit (the tree must be clean; a tag that is already in ECR is skipped).
 - `make aws-up` creates the stack with every service stopped, runs the auth and assets migrations as one-off tasks, then starts the services and waits until they are stable. It deploys the images of `IMAGE_TAG` (default: the current commit) and admits `TEAM_CIDRS` (default: this machine's public address). Only team addresses reach the load balancer until task 5.5 adds Kafka users and ACLs.
-- `make aws-grafana` (in a second terminal) forwards Grafana to `http://localhost:3000` through Session Manager. Anonymous visitors only view; the admin password is the SSM parameter `/doodle-arena/stack/grafana-admin-password`.
+- `make aws-grafana` (in a second terminal) forwards Grafana to `http://localhost:3300`, and the collector's OTLP port to `localhost:14318` for k6, through Session Manager (other ports than the local stack's, so both can run). Anonymous visitors only view; the admin password is the SSM parameter `/doodle-arena/stack/grafana-admin-password`.
 - `make aws-check` runs `make smoke` through the load balancer, then `make telemetry-check` and `make alerts-check` through the tunnel.
 - `make aws-down` destroys the stack, data included. The bootstrap root, the domain and the budget stay.
 

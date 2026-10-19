@@ -6,13 +6,16 @@
 # It mints four access tokens per room with auth's own TokenIssuer (mint_tokens.py): the local
 # development key, or, for an https GATEWAY, the AWS stack's key read from SSM. The tokens go to
 # k6 in the environment, never into a file. k6's metrics go to the collector over OTLP when
-# OTLP_ENDPOINT answers (localhost:4318 locally; make aws-grafana forwards it in AWS).
+# OTLP_ENDPOINT answers (localhost:4318 locally; localhost:14318, which make aws-grafana forwards,
+# for AWS).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 profile="${1:-full}"
 export GATEWAY="${GATEWAY:-http://localhost:8080}"
-OTLP_ENDPOINT="${OTLP_ENDPOINT:-localhost:4318}"
+# Locally the stack's collector; for AWS, make aws-grafana forwards the data host's to 14318.
+if [[ "$GATEWAY" == https://* ]]; then default_otlp=localhost:14318; else default_otlp=localhost:4318; fi
+OTLP_ENDPOINT="${OTLP_ENDPOINT:-$default_otlp}"
 case "$profile" in
   smoke) rooms=2 ;;
   full) rooms=80 ;;

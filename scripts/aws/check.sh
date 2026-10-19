@@ -6,7 +6,7 @@
 source "$(dirname "$0")/common.sh"
 require_aws
 : "${DOMAIN:?set DOMAIN to the Route 53 domain}"
-export GATEWAY="https://$DOMAIN" GRAFANA="${GRAFANA:-http://localhost:3000}"
+export GATEWAY="https://$DOMAIN" GRAFANA="${GRAFANA:-http://localhost:3300}"
 if ! curl -fsS -o /dev/null "$GRAFANA/api/health"; then
   echo "Grafana isn't reachable at $GRAFANA: start the tunnel first (make aws-grafana)." >&2
   exit 1
