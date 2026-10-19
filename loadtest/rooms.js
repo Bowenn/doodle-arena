@@ -7,8 +7,9 @@
 // The script needs the players' access tokens in TOKENS (a JSON array, four per room, in
 // order), which scripts/loadtest.sh mints and passes in the environment: never in a file.
 //
-// What a room does: the host creates a private room, all four join and connect, and the host
-// starts a match. With four players every round has two drawers (task 2.6a): the first picks a
+// What a room does: the host creates a private room and connects first (whoever connects first
+// becomes the room's host, design doc 7.3), then the other three join, and the host starts a
+// match. With four players every round has two drawers (task 2.6a): the first picks a
 // word, both send a stroke batch every 50 ms. The virtual user holds all four sockets, so it
 // knows the word: after 10 to 30 s each guesser makes two wrong guesses, then the right one,
 // and the round ends early, as in a real game. After a match the host starts the next one.
@@ -114,7 +115,7 @@ export default function () {
     return ticket
   })
 
-  const state = { word: '', drawers: [], round: 0, guessed: {}, closing: false }
+  const state = { word: '', drawers: [], round: 0, host: players[0].id, closing: false }
   const sockets = []
   const timers = []
   let welcomed = 0
@@ -182,6 +183,9 @@ export default function () {
 
   function onEvent(s, ev) {
     switch (ev.type) {
+      case 'host_changed':
+        state.host = ev.data.user_id
+        break
       case 'choosing':
         state.drawers = ev.data.drawer_ids
         state.word = ''
@@ -211,7 +215,7 @@ export default function () {
         if (s.index === 0) {
           matches.add(1)
           // The next match, after a short pause (the host can start from match_end).
-          later(3000, () => !state.closing && send(s.ws, 'start', {}))
+          later(3000, startMatch)
         }
         break
     }
@@ -240,7 +244,13 @@ export default function () {
     }
   }
 
-  players.forEach((player, index) => {
+  function startMatch() {
+    const host = sockets.find((x) => x.player.id === state.host)
+    if (host && !state.closing) send(host.ws, 'start', {})
+  }
+
+  function connect(index) {
+    const player = players[index]
     const opened = Date.now()
     const ws = new WebSocket(WS_BASE + tickets[index].ws_url)
     const s = { ws, player, index, guessSent: 0, lastBatchSent: 0 }
@@ -252,8 +262,12 @@ export default function () {
       if (msg.type === 'welcome') {
         welcomeTime.add(Date.now() - opened)
         welcomed++
+        if (index === 0) {
+          state.host = msg.data.view.host_id || player.id
+          for (let i = 1; i < PLAYERS; i++) connect(i)
+        }
         // The host starts once everyone is in.
-        if (welcomed === PLAYERS) later(500, () => send(sockets[0].ws, 'start', {}))
+        if (welcomed === PLAYERS) later(500, startMatch)
       } else if (msg.type === 'event') {
         onEvent(s, msg.data)
       } else if (msg.type === 'pong') {
@@ -276,7 +290,9 @@ export default function () {
     }
     // The web app pings every 5 s; so does every bot.
     every(5000, () => !state.closing && send(ws, 'ping', { t: Date.now() }))
-  })
+  }
+
+  connect(0)
 
   later(ROOM_SECONDS * 1000, closeAll)
 }
