@@ -10,6 +10,13 @@ minted user other roles instead, for example a moderator for the Django admin:
 
 The key is secrets/jwt-private.pem, or DRILL_JWT_KEY when set (a worktree has no secrets/, so
 point it at the main checkout's key instead of copying it). The tokens last 90 minutes; never write them to a file.
+
+Against AWS (ADR 0003), the key is the stack's own, read from SSM into DRILL_JWT_PEM (never into a
+file), and GATEWAY names the issuer's origin:
+
+    DRILL_JWT_PEM="$(aws ssm get-parameter --with-decryption \
+        --name /doodle-arena/stack/jwt-private-key --query Parameter.Value --output text)" \
+        GATEWAY=https://icanfly.click uv run ... mint_tokens.py Ada
 """
 
 import json
@@ -22,12 +29,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "services" / "auth"))
 from app.tokens import SigningKey, TokenIssuer  # noqa: E402
 
-GW = "http://localhost:8080"
+GW = os.environ.get("GATEWAY", "http://localhost:8080")
 
 
 def main(names, roles):
     key = os.environ.get("DRILL_JWT_KEY") or str(ROOT / "secrets/jwt-private.pem")
-    issuer = TokenIssuer(SigningKey.from_file(key), GW + "/api/auth", timedelta(minutes=90))
+    signing_key = SigningKey.load(os.environ.get("DRILL_JWT_PEM", ""), key)
+    issuer = TokenIssuer(signing_key, GW + "/api/auth", timedelta(minutes=90))
     now = datetime.now(UTC)
     players = []
     for name in names:
