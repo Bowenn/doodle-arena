@@ -114,8 +114,11 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `notifier.deliveries` | Counter | `result` = success, retry (failed, will try again), dead (failed for the last time) | notifier |
 | `notifier.delivery.duration` | Histogram (ms) | – (from sending to the answer or the failure) | notifier |
 | `notifier.dlq.size` | Gauge | – (deliveries that went DEAD in the last 24 hours, test pings aside; for dashboards: a dead delivery is usually a developer's server being down, so no alert pages on it) | notifier |
-| `notifier.events` | Counter | `result` = queued, no_subscribers, duplicate (queued before: a redelivery), skipped (unreadable) | notifier |
+| `notifier.events` | Counter | `result` = queued, no_subscribers, duplicate (queued before: a redelivery; or a revocation not newer than the watermark), revoked (a `CredentialsRevoked` applied), skipped (unreadable) | notifier |
 | `auth.api_keys.verifications` | Counter | `result` = valid, invalid, revoked | auth |
+| `auth.events.published` | Counter | `result` = success (confirmed by Kafka), failed (left to retry) | auth (relay) |
+| `auth.outbox.lag` | Gauge (s) | – (age of the oldest outbox event Kafka hasn't confirmed; 0 when drained) | auth (relay) |
+| `notifier.endpoints.disabled` | Counter | – (endpoints disabled because auth revoked their owner's credentials) | notifier |
 | `authn.jwks.fetches` | Counter | `reason` = max_age (the cached set was 10 minutes old, or older), unknown_kid; `result` = success, failed (the last good set stays in use for up to an hour) | lobby, notifier, assets (web) |
 | `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram | `page` | web |
 | `web.ws.rtt` | Histogram (ms) | – | web |
@@ -161,6 +164,7 @@ Starting rules (tune the thresholds after the first load test):
 | SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
 | HighErrorRate | Server errors above 1% of requests for 5 minutes, per service | warning |
 | ConsumerLagGrowing | Kafka lag growing for 10 minutes for any consumer group | warning |
+| AuthOutboxStuck | `auth.outbox.lag` above 60 s for 5 minutes (Kafka down, or `auth-relay` stopped: a credential revocation isn't reaching the notifier, so a thief's webhooks keep running) | critical |
 | MarketOutboxStuck | `market.outbox.lag` above 60 s for 5 minutes (Kafka down, or the relay failing; sales and listings aren't reaching the notifier) | warning |
 | DrawingEventsStuck | `assets.outbox.lag` above 60 s for 5 minutes (Kafka down, or the relay stopped; the marketplace isn't minting approved drawings) | warning |
 | DrawingsFailing | `assets.pipeline.results{result=failed}` above 0 for 10 minutes (stroke logs missing or unreadable: an S3 outage longer than 7 days, or a game-server bug) | warning |
@@ -181,6 +185,8 @@ A purchase is a `market.purchase` span (`listing.id`, `drawing.id`, `sale.id`, `
 Starting a checkout is a `market.checkout` span (`user.id`, `coin_pack.id`, `stripe.session_id`) around the Stripe API call; a webhook is a `market.stripe.webhook` span (`stripe.event_type`, `stripe.event_id`, `stripe.result`). The webhook starts a new trace (Stripe sends no `traceparent`); its `CoinsCredited` is published under it. Logs carry the session id and `user_id`, never the payload or any key.
 
 A webhook's trace continues the event's: the notifier's `notifier.queue` span (under kotel's consumer span) stores its trace context on the delivery row, and every attempt, however much later, is a `notifier.deliver` span under it (`delivery.id`, `endpoint.id`, `event.type`, `delivery.attempt`, `http.response.status_code`, `result`). Outgoing webhooks carry no `traceparent` (trace ids stay inside). Logs carry `endpoint_id`, `delivery_id` and the event id, never secrets, keys or response bodies; an API key appears only as its prefix. A `DeliveryDead` is published by a background relay in a trace of its own; its `delivery_id` leads to the delivery's attempts and their trace.
+
+A credential theft is one trace (ADR 0015): auth's `POST /api/auth/refresh`, its SQL (the revocation and the outbox insert), the relay's `auth.users.v1 publish` (parented by the trace context stored with the row), then the notifier's `notifier.revoke` span (`user.id`, `event.id`, `endpoints.disabled`, `result`) under kotel's consumer span. Logs carry `user_id` and the event id, never tokens.
 
 Paying a match is a `market.reward` span (`match.id`, `reward.players`, `reward.coins`, `reward.duplicate`) under the agent's consumer span for `game.matches.v1`, so the trace starts at the game server's `game.match.end`; its `CoinsCredited` events are published under that trace by the relay.
 
