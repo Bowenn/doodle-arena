@@ -24,6 +24,8 @@ run_one() {
     # gitleaks scans every commit of the checked-out history (rules and exceptions: .gitleaks.toml).
     secrets) go run github.com/zricethezav/gitleaks/v8@v8.28.0 git --redact --no-banner . ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm run lint) ;;
+    # Dashboards, alert rules and runbooks against each other and docs/observability.md.
+    observability) uv run --no-project --with pyyaml==6.0.3 python scripts/observability-lint.py ;;
   esac
 }
 

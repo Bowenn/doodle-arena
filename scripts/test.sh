@@ -29,6 +29,7 @@ run_one() {
     proto) ./scripts/proto.sh check ;;
     ci) echo "(no tests; workflows are checked by make lint s=ci)" ;;
     secrets) echo "(no tests; history is scanned by make lint s=secrets)" ;;
+    observability) echo "(no tests; checked by make lint s=observability, and live by make alerts-check)" ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm test) ;;
   esac
 }
