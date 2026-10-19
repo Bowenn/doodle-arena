@@ -38,6 +38,7 @@ dist/
 
 # Terraform (infra/terraform/): providers and local state stay local; the lock file is committed.
 .terraform/
+.terraform-lint/
 *.tfstate
 *.tfstate.*
 *.tfvars
