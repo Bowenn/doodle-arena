@@ -56,6 +56,7 @@ The notifier couldn't act on either, because nothing told it about the revocatio
 - **The API:**
   - Every credential issued at or before the watermark is refused with 401: a session by `iat`, a key by `created_at`. Auth's verify now returns `created_at`, because the notifier caches valid keys for 30 seconds.
   - Registering and enabling re-check the watermark under the owner's advisory lock, which the revocation also takes. So a request that passed the first check can't commit an endpoint after the revocation was applied.
+- **Auth's own watermark:** the theft transaction sets `users.credentials_revoked_at`, and the API-key routes refuse an access token issued at or before it (`401 TOKEN_REVOKED`). Without this, the thief's still-valid token could mint a fresh key whose `created_at` passes the notifier's watermark.
   - `POST /api/notifier/endpoints/{id}/enable` makes a disabled endpoint live with a new secret, shown once.
 
 ## Consequences
