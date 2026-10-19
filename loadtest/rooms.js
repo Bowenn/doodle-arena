@@ -127,7 +127,7 @@ export default function () {
   }
   const room = created.json()
 
-  const state = { word: '', drawers: [], round: 0, seq: 0, host: players[0].id, closing: false }
+  const state = { word: '', drawers: [], round: 0, seq: 0, drawToken: 0, host: players[0].id, closing: false }
   const sockets = players.map((player, index) => ({
     player, index, ws: null, lastSeq: 0, connectedOnce: false, replaying: false, guessSent: 0,
     knowsWord: false, guessedRound: 0, droppedAt: 0, attempt: 0, resumeCode: 0, pinger: null,
@@ -161,13 +161,16 @@ export default function () {
   }
 
   function startDrawing(roundNo) {
-    // Both drawers send a stroke batch every 50 ms until the round ends.
+    // Both drawers send a stroke batch every 50 ms until the round ends. Each round gets its own
+    // token, so a drawing loop from an earlier round (round numbers repeat every match, and a
+    // takeover can replay a round's start) stops instead of drawing twice as fast.
+    const token = ++state.drawToken
     for (const s of sockets.filter((x) => state.drawers.includes(x.player.id))) {
       let points = 0
       let strokeStarted = 0
       let strokeId = ''
       const id = every(50, () => {
-        if (state.round !== roundNo || state.closing) return clearInterval(id)
+        if (state.drawToken !== token || state.round !== roundNo || state.closing) return clearInterval(id)
         const now = Date.now()
         if (points === 0) {
           strokeSeq++
