@@ -16,11 +16,20 @@ the canvas, and the drill also checks that both drawers get their word back afte
 kill:  docker kill on the owner. pause: docker pause for 9 s (the lobby reassigns the room
 after 6 s without heartbeats), then unpause: the zombie's next lease renewal or write fails
 the fencing check, and its log says so.
+
+stop:  in AWS (task 5.3, ADR 0003), `aws ecs stop-task` on the owner's task: SIGTERM, as a deploy
+or a scale-in sends it (a crash like docker kill isn't possible on Fargate: the image has no
+shell). ECS starts a replacement. Set GATEWAY to the stack's URL; the tokens are signed with the
+stack's key, read from SSM into DRILL_JWT_PEM (mint_tokens.py shows how):
+
+    GATEWAY=https://icanfly.click DRILL_JWT_PEM="$(aws ssm get-parameter ...)" \
+        uv run --project services/auth --with websockets python scripts/drills/failover.py stop
 """
 
 import asyncio
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -35,7 +44,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "services" / "auth"))
 from app.tokens import SigningKey, TokenIssuer  # noqa: E402
 
-GW, WS, ORIGIN = "http://localhost:8080", "ws://localhost:8080", "http://localhost:8080"
+GW = os.environ.get("GATEWAY", "http://localhost:8080")
+WS, ORIGIN = GW.replace("http", "ws", 1), GW
 COMPOSE = [
     "docker",
     "compose",
@@ -45,7 +55,10 @@ COMPOSE = [
     str(ROOT / ".env"),
 ]
 issuer = TokenIssuer(
-    SigningKey.from_file(str(ROOT / "secrets/jwt-private.pem")),
+    SigningKey.load(
+        os.environ.get("DRILL_JWT_PEM", ""),
+        os.environ.get("DRILL_JWT_KEY") or str(ROOT / "secrets/jwt-private.pem"),
+    ),
     GW + "/api/auth",
     timedelta(minutes=10),
 )
@@ -131,6 +144,45 @@ class Bot:
         return bad
 
 
+def stop_ecs_task(service):
+    """Stops the running task of an ECS service (a game server's server id is its service)."""
+    profile = os.environ.get("AWS_PROFILE", "doodle-arena")
+    aws = ["aws", "--profile", profile, "--region", "us-west-2"]
+    task = subprocess.run(
+        [
+            *aws,
+            "ecs",
+            "list-tasks",
+            "--cluster",
+            "doodle-arena",
+            "--service-name",
+            service,
+            "--query",
+            "taskArns[0]",
+            "--output",
+            "text",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            *aws,
+            "ecs",
+            "stop-task",
+            "--cluster",
+            "doodle-arena",
+            "--task",
+            task,
+            "--reason",
+            "failover drill (scripts/drills/failover.py stop)",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
 async def main(mode, players):
     room = call(
         "POST",
@@ -184,6 +236,8 @@ async def main(mode, players):
         subprocess.run(
             ["docker", "kill", f"doodle-arena-{owner}-1"], check=True, capture_output=True
         )
+    elif mode == "stop":
+        stop_ecs_task(owner)
     else:
         subprocess.run(
             ["docker", "pause", f"doodle-arena-{owner}-1"], check=True, capture_output=True
