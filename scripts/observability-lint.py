@@ -30,8 +30,9 @@ RUNBOOK_URL = "https://github.com/Bowenn/gap-project_private/blob/master/docs/ru
 
 # Alerts in the spec that aren't Grafana rules: AWS Budgets / CloudWatch (task 5.2).
 NOT_GRAFANA = {"AwsBudget"}
-# Metrics from instrumentation or the kafka-metrics collector rather than the spec's table.
-STANDARD = ("http_server_", "rpc_server_", "rpc_client_", "kafka_consumer_group_", "target_info")
+# Metrics from instrumentation, the kafka-metrics collector or k6 rather than the spec's table
+# (observability.md lists each source).
+STANDARD = ("http_server_", "rpc_server_", "rpc_client_", "kafka_consumer_group_", "target_info", "go_", "k6_")
 PROMQL_WORDS = {
     "sum", "max", "min", "avg", "count", "abs", "rate", "increase", "delta", "deriv", "by", "without",
     "on", "ignoring", "and", "or", "unless", "vector", "histogram_quantile", "last_over_time",
@@ -98,7 +99,7 @@ def check_dashboards(spec: set[str]) -> dict[str, set[int]]:
             ids.add(p["id"])
             for t in p.get("targets", []):
                 ds = t.get("datasource", {}).get("uid")
-                if ds not in ("prometheus", "loki"):
+                if ds not in ("prometheus", "loki", "cloudwatch"):
                     fail(f"{name} panel {p['id']}: unknown data source {ds!r}")
                 if ds == "prometheus":
                     for m in metric_names(t["expr"]):
