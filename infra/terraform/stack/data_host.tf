@@ -55,7 +55,7 @@ data "aws_ssm_parameter" "al2023_arm64" {
 
 resource "aws_security_group" "data_host" {
   name        = "doodle-data-host"
-  description = "The data host: each store's port is open to the services that own its data"
+  description = "The data host: each store port is open to the services that own its data"
   vpc_id      = aws_vpc.main.id
 
   egress {
