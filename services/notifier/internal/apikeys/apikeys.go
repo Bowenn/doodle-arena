@@ -23,6 +23,10 @@ type Identity struct {
 	KeyID  *uuid.UUID `json:"key_id"`
 	UserID string     `json:"user_id"`
 	Scopes []string   `json:"scopes"`
+	// When the credential was issued: a key's created_at, a session token's iat. Credentials
+	// issued at or before the user's credential revocation are refused (ADR 0015), even while
+	// this cache still holds the key as valid.
+	IssuedAt time.Time `json:"created_at"`
 }
 
 // HasScope reports whether the key was granted scope.

@@ -103,4 +103,5 @@ def verify_key(ctx: Ctx, body: VerifyKey) -> dict[str, Any]:
         "key_id": str(verified.key_id),
         "user_id": verified.user_id,
         "scopes": verified.scopes,
+        "created_at": verified.created_at.isoformat(),
     }

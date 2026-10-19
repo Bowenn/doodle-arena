@@ -20,6 +20,9 @@ var (
 	ErrTooManyEndpoints = errors.New("too many endpoints")
 	// ErrEndpointActive: the endpoint isn't disabled, so there is nothing to enable.
 	ErrEndpointActive = errors.New("endpoint is active")
+	// ErrCredentialsRevoked: the caller's credential was issued at or before the owner's
+	// credential revocation (ADR 0015).
+	ErrCredentialsRevoked = errors.New("credentials revoked")
 )
 
 // Endpoint is a developer's webhook URL and what it subscribes to.
@@ -47,9 +50,11 @@ func scanEndpoint(row pgx.Row) (Endpoint, error) {
 	return e, err
 }
 
-// CreateEndpoint stores e, unless its owner already has MaxEndpointsPerOwner. The owner's rows
-// are locked while counting, so two concurrent registrations can't both slip under the cap.
-func (s *Store) CreateEndpoint(ctx context.Context, e Endpoint) (Endpoint, error) {
+// CreateEndpoint stores e, unless its owner already has MaxEndpointsPerOwner or the caller's
+// credential (issued at issuedAt) predates the owner's credential revocation. Both checks run
+// under the owner's advisory lock, which RevokeCredentials takes too: a registration either
+// commits before a revocation (which then disables it) or sees the revocation and is refused.
+func (s *Store) CreateEndpoint(ctx context.Context, e Endpoint, issuedAt time.Time) (Endpoint, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return Endpoint{}, fmt.Errorf("begin: %w", err)
@@ -57,8 +62,11 @@ func (s *Store) CreateEndpoint(ctx context.Context, e Endpoint) (Endpoint, error
 	defer tx.Rollback(ctx) //nolint:errcheck // a no-op after Commit
 	// An advisory lock per owner serializes registrations of one owner (a count can't lock rows
 	// that don't exist yet).
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", e.OwnerID); err != nil {
-		return Endpoint{}, fmt.Errorf("lock owner: %w", err)
+	if err := lockOwner(ctx, tx, e.OwnerID); err != nil {
+		return Endpoint{}, err
+	}
+	if err := checkNotRevoked(ctx, tx, e.OwnerID, issuedAt); err != nil {
+		return Endpoint{}, err
 	}
 	var n int
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM endpoints WHERE owner_id = $1 AND deleted_at IS NULL", e.OwnerID).Scan(&n); err != nil {

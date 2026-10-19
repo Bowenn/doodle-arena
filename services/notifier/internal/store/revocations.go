@@ -25,6 +25,9 @@ func (s *Store) RevokeCredentials(ctx context.Context, ownerID string, revokedAt
 		return 0, false, fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // a no-op after Commit
+	if err := lockOwner(ctx, tx, ownerID); err != nil {
+		return 0, false, err
+	}
 	var owner string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO revocations (owner_id, revoked_at) VALUES ($1, $2)
@@ -72,9 +75,22 @@ func (s *Store) RevokedAt(ctx context.Context, ownerID string) (time.Time, bool,
 
 // EnableEndpoint makes a disabled endpoint live again with a new signing secret (the old one may
 // be known to whoever had the credentials). ErrNotFound for an unknown or someone else's
-// endpoint, ErrEndpointActive when it isn't disabled.
-func (s *Store) EnableEndpoint(ctx context.Context, ownerID string, id uuid.UUID, ciphertext, nonce []byte) (Endpoint, error) {
-	e, err := scanEndpoint(s.Pool.QueryRow(ctx, `
+// endpoint, ErrEndpointActive when it isn't disabled, ErrCredentialsRevoked when the caller's
+// credential (issued at issuedAt) predates the owner's revocation; checked under the owner's
+// lock, like CreateEndpoint.
+func (s *Store) EnableEndpoint(ctx context.Context, ownerID string, id uuid.UUID, ciphertext, nonce []byte, issuedAt time.Time) (Endpoint, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return Endpoint{}, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // a no-op after Commit
+	if err := lockOwner(ctx, tx, ownerID); err != nil {
+		return Endpoint{}, err
+	}
+	if err := checkNotRevoked(ctx, tx, ownerID, issuedAt); err != nil {
+		return Endpoint{}, err
+	}
+	e, err := scanEndpoint(tx.QueryRow(ctx, `
 		UPDATE endpoints SET disabled_at = NULL, disabled_reason = NULL, secret_ciphertext = $3, secret_nonce = $4
 		WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL AND disabled_at IS NOT NULL
 		RETURNING `+endpointColumns, id, ownerID, ciphertext, nonce))
@@ -87,5 +103,30 @@ func (s *Store) EnableEndpoint(ctx context.Context, ownerID string, id uuid.UUID
 	if err != nil {
 		return Endpoint{}, fmt.Errorf("enable endpoint: %w", err)
 	}
-	return e, nil
+	return e, tx.Commit(ctx)
+}
+
+// lockOwner serializes changes to one owner's endpoints (registrations, enables, revocations)
+// until the transaction ends.
+func lockOwner(ctx context.Context, tx pgx.Tx, ownerID string) error {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ownerID); err != nil {
+		return fmt.Errorf("lock owner: %w", err)
+	}
+	return nil
+}
+
+// checkNotRevoked refuses a credential issued at or before the owner's newest revocation.
+func checkNotRevoked(ctx context.Context, tx pgx.Tx, ownerID string, issuedAt time.Time) error {
+	var revokedAt time.Time
+	err := tx.QueryRow(ctx, "SELECT revoked_at FROM revocations WHERE owner_id = $1", ownerID).Scan(&revokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("revoked at: %w", err)
+	}
+	if !issuedAt.After(revokedAt) {
+		return ErrCredentialsRevoked
+	}
+	return nil
 }

@@ -40,6 +40,9 @@ class Verified:
     key_id: uuid.UUID
     user_id: str
     scopes: list[str]
+    # When the key was made: the notifier refuses keys made at or before the user's credential
+    # revocation, even while it still has them cached as valid (ADR 0015).
+    created_at: datetime
 
 
 VerifyResult = Literal["valid", "invalid", "revoked"]
@@ -166,4 +169,6 @@ def verify(conn: Connection, key: str, now: datetime) -> tuple[VerifyResult, Ver
         return "revoked", None
     if row.last_used_at is None or now - row.last_used_at >= LAST_USED_GRANULARITY:
         conn.execute(update(api_keys).where(api_keys.c.id == row.id).values(last_used_at=now))
-    return "valid", Verified(key_id=row.id, user_id=row.user_id, scopes=list(row.scopes))
+    return "valid", Verified(
+        key_id=row.id, user_id=row.user_id, scopes=list(row.scopes), created_at=row.created_at
+    )

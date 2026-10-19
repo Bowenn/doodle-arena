@@ -84,7 +84,7 @@ func TestConsumerQueuesForOwnersOnly(t *testing.T) {
 	brokers := cluster.ListenAddrs()
 
 	register := func(owner string, types ...string) store.Endpoint {
-		e, err := st.CreateEndpoint(ctx, store.Endpoint{ID: uuid.New(), OwnerID: owner, APIKeyID: ptr(uuid.New()), URL: "https://example.com/" + owner, EventTypes: types, SecretCiphertext: []byte("c"), SecretNonce: []byte("n")})
+		e, err := st.CreateEndpoint(ctx, store.Endpoint{ID: uuid.New(), OwnerID: owner, APIKeyID: ptr(uuid.New()), URL: "https://example.com/" + owner, EventTypes: types, SecretCiphertext: []byte("c"), SecretNonce: []byte("n")}, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}

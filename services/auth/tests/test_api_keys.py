@@ -75,7 +75,12 @@ def test_verify_answers_who_owns_the_key(
     r = verify(client, created["key"])
 
     assert r.status_code == 200
-    assert r.json() == {"key_id": created["id"], "user_id": "u-ada", "scopes": ["webhooks"]}
+    assert r.json() == {
+        "key_id": created["id"],
+        "user_id": "u-ada",
+        "scopes": ["webhooks"],
+        "created_at": created["created_at"],
+    }
 
 
 def test_wrong_unknown_or_malformed_keys_are_refused(client: TestClient) -> None:

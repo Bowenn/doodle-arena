@@ -59,7 +59,7 @@ func TestRevocationDisablesEndpointsAndStopsDeliveries(t *testing.T) {
 	victim, bystander := "u_vic_"+uuid.NewString()[:8], "u_by_"+uuid.NewString()[:8]
 	register := func(owner string) store.Endpoint {
 		e, err := st.CreateEndpoint(ctx, store.Endpoint{ID: uuid.New(), OwnerID: owner, URL: "https://example.com/" + owner,
-			EventTypes: []string{webhook.TypeSaleCompleted}, SecretCiphertext: []byte("c"), SecretNonce: []byte("n")})
+			EventTypes: []string{webhook.TypeSaleCompleted}, SecretCiphertext: []byte("c"), SecretNonce: []byte("n")}, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}

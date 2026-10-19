@@ -16,9 +16,9 @@ func TestRevokeCredentials(t *testing.T) {
 	s := pgtest.Store(t)
 	ctx := t.Context()
 	owner, other := "u_rev_"+uuid.NewString(), "u_rev_other_"+uuid.NewString()
-	a, _ := s.CreateEndpoint(ctx, endpoint(owner, "sale.completed"))
-	b, _ := s.CreateEndpoint(ctx, endpoint(owner, "coins.credited"))
-	untouched, _ := s.CreateEndpoint(ctx, endpoint(other, "sale.completed"))
+	a, _ := s.CreateEndpoint(ctx, endpoint(owner, "sale.completed"), time.Now())
+	b, _ := s.CreateEndpoint(ctx, endpoint(owner, "coins.credited"), time.Now())
+	untouched, _ := s.CreateEndpoint(ctx, endpoint(other, "sale.completed"), time.Now())
 	pending := delivery(a, "evt-pending-"+uuid.NewString())
 	theirs := delivery(untouched, "evt-theirs-"+uuid.NewString())
 	_, _ = s.InsertDeliveries(ctx, []store.Delivery{pending, theirs})
@@ -63,7 +63,7 @@ func TestRevokeCredentials(t *testing.T) {
 	})
 
 	t.Run("enabling rotates the secret; a replayed event doesn't disable it again", func(t *testing.T) {
-		e, err := s.EnableEndpoint(ctx, owner, a.ID, []byte("new-ct"), []byte("new-nonce"))
+		e, err := s.EnableEndpoint(ctx, owner, a.ID, []byte("new-ct"), []byte("new-nonce"), time.Now())
 		if err != nil || e.DisabledAt != nil || string(e.SecretCiphertext) != "new-ct" {
 			t.Fatalf("EnableEndpoint = %+v, %v", e, err)
 		}
@@ -83,10 +83,10 @@ func TestRevokeCredentials(t *testing.T) {
 	})
 
 	t.Run("enable refuses active and unknown endpoints", func(t *testing.T) {
-		if _, err := s.EnableEndpoint(ctx, owner, a.ID, []byte("x"), []byte("y")); !errors.Is(err, store.ErrEndpointActive) {
+		if _, err := s.EnableEndpoint(ctx, owner, a.ID, []byte("x"), []byte("y"), time.Now()); !errors.Is(err, store.ErrEndpointActive) {
 			t.Fatalf("enable an active endpoint: %v", err)
 		}
-		if _, err := s.EnableEndpoint(ctx, other, b.ID, []byte("x"), []byte("y")); !errors.Is(err, store.ErrNotFound) {
+		if _, err := s.EnableEndpoint(ctx, other, b.ID, []byte("x"), []byte("y"), time.Now()); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("enable someone else's endpoint: %v", err)
 		}
 	})
@@ -97,4 +97,45 @@ func TestRevokeCredentials(t *testing.T) {
 			t.Fatalf("newer revocation = %d, %v, %v; want 1 endpoint", n, fresh, err)
 		}
 	})
+}
+
+// A registration with a credential issued before a revocation can't slip in while the revocation
+// is being applied: both run under the owner's lock, and the registration re-checks the
+// watermark once it holds it.
+func TestRegistrationRacingARevocation(t *testing.T) {
+	s := pgtest.Store(t)
+	ctx := t.Context()
+	owner := "u_race_" + uuid.NewString()[:8]
+	issued := time.Now().Add(-time.Minute) // the thief's token, checked before the revocation landed
+
+	// Stand in for RevokeCredentials holding the owner's lock while it applies.
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", owner); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := s.CreateEndpoint(ctx, endpoint(owner, "sale.completed"), issued)
+		result <- err
+	}()
+	time.Sleep(200 * time.Millisecond) // the registration is now waiting for the lock
+	if _, err := tx.Exec(ctx, "INSERT INTO revocations (owner_id, revoked_at) VALUES ($1, now())", owner); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; !errors.Is(err, store.ErrCredentialsRevoked) {
+		t.Fatalf("registration after the revocation committed: err = %v", err)
+	}
+	if es, _ := s.ListEndpoints(ctx, owner); len(es) != 0 {
+		t.Fatalf("endpoints = %+v, want none", es)
+	}
+	// A credential issued after the revocation registers normally.
+	if _, err := s.CreateEndpoint(ctx, endpoint(owner, "sale.completed"), time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
 }

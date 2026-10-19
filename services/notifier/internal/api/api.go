@@ -76,18 +76,7 @@ func (a *API) auth(next handler) http.Handler {
 				writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "invalid or expired access token")
 				return
 			}
-			// A token issued at or before the user's credential revocation may be the thief's:
-			// it still verifies for up to 15 minutes, but manages no webhooks (ADR 0015).
-			revokedAt, revoked, err := a.Store.RevokedAt(r.Context(), claims.UserID)
-			if err != nil {
-				a.fail(w, r, err)
-				return
-			}
-			if revoked && !claims.IssuedAt.After(revokedAt) {
-				writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "this session was revoked: sign in again")
-				return
-			}
-			next(w, r, apikeys.Identity{UserID: claims.UserID, Scopes: []string{Scope}})
+			a.checkRevoked(w, r, apikeys.Identity{UserID: claims.UserID, Scopes: []string{Scope}, IssuedAt: claims.IssuedAt}, next)
 			return
 		}
 		who, err := a.Keys.Verify(r.Context(), credential)
@@ -103,8 +92,29 @@ func (a *API) auth(next handler) http.Handler {
 			writeError(w, r, http.StatusForbidden, "FORBIDDEN", "this API key lacks the webhooks scope")
 			return
 		}
-		next(w, r, who)
+		a.checkRevoked(w, r, who, next)
 	})
+}
+
+// checkRevoked refuses a credential issued at or before its user's credential revocation (ADR
+// 0015): the thief's access token, which still verifies for up to 15 minutes, or a revoked API
+// key this process still has cached as valid. Endpoint changes check again under the owner's
+// lock (store.ErrCredentialsRevoked), so a revocation landing mid-request can't be missed.
+func (a *API) checkRevoked(w http.ResponseWriter, r *http.Request, who apikeys.Identity, next handler) {
+	revokedAt, revoked, err := a.Store.RevokedAt(r.Context(), who.UserID)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	if revoked && !who.IssuedAt.After(revokedAt) {
+		writeRevoked(w, r)
+		return
+	}
+	next(w, r, who)
+}
+
+func writeRevoked(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "this credential was revoked: sign in again")
 }
 
 type endpointView struct {
@@ -162,7 +172,11 @@ func (a *API) createEndpoint(w http.ResponseWriter, r *http.Request, who apikeys
 	e, err := a.Store.CreateEndpoint(r.Context(), store.Endpoint{
 		ID: id, OwnerID: who.UserID, APIKeyID: who.KeyID, URL: u.String(), EventTypes: types,
 		SecretCiphertext: ct, SecretNonce: nonce,
-	})
+	}, who.IssuedAt)
+	if errors.Is(err, store.ErrCredentialsRevoked) {
+		writeRevoked(w, r)
+		return
+	}
 	if errors.Is(err, store.ErrTooManyEndpoints) {
 		writeError(w, r, http.StatusConflict, "TOO_MANY_ENDPOINTS", "at most "+strconv.Itoa(store.MaxEndpointsPerOwner)+" endpoints per user")
 		return
@@ -224,8 +238,11 @@ func (a *API) enableEndpoint(w http.ResponseWriter, r *http.Request, who apikeys
 		a.fail(w, r, err)
 		return
 	}
-	e, err := a.Store.EnableEndpoint(r.Context(), who.UserID, id, ct, nonce)
+	e, err := a.Store.EnableEndpoint(r.Context(), who.UserID, id, ct, nonce, who.IssuedAt)
 	switch {
+	case errors.Is(err, store.ErrCredentialsRevoked):
+		writeRevoked(w, r)
+		return
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "ENDPOINT_NOT_FOUND", "no such endpoint")
 		return

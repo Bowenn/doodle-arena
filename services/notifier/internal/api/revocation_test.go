@@ -74,3 +74,21 @@ func TestCredentialRevocation(t *testing.T) {
 		t.Fatalf("enable someone else's endpoint: %d %v", status, out)
 	}
 }
+
+// API keys go through the same watermark: auth revoked them, but this process may still have a
+// key cached as valid for up to 30 seconds. A key made before the revocation is refused.
+func TestRevokedUsersCachedKeyIsRefused(t *testing.T) {
+	srv, a := newServer(t)
+	user := "keyrev" + uuid.NewString()[:6]
+	key := "da_" + user + "_ok" // the fake verifier answers valid, with no creation time newer than the revocation
+	if status, _ := call(t, srv, "GET", "/api/notifier/endpoints", key, nil); status != 200 {
+		t.Fatalf("before the revocation: %d", status)
+	}
+	if _, _, err := a.Store.RevokeCredentials(t.Context(), user, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if status, out := call(t, srv, "POST", "/api/notifier/endpoints", key,
+		map[string]any{"url": "https://example.com/hook", "event_types": []string{"sale.completed"}}); status != 401 || errCode(out) != "UNAUTHENTICATED" {
+		t.Fatalf("a cached key made before the revocation: %d %v", status, out)
+	}
+}
