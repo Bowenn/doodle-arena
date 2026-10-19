@@ -49,10 +49,26 @@ resource "aws_service_discovery_private_dns_namespace" "internal" {
   vpc  = aws_vpc.main.id
 }
 
-resource "aws_route53_record" "data_host" {
-  zone_id = aws_service_discovery_private_dns_namespace.internal.hosted_zone
-  name    = "data.doodle.internal"
-  type    = "A"
-  ttl     = 60
-  records = [aws_instance.data.private_ip]
+# The namespace's zone belongs to Cloud Map (Route 53 refuses direct records in it), so the data
+# host is a Cloud Map instance too: data.doodle.internal -> its private address.
+resource "aws_service_discovery_service" "data_host" {
+  name = "data"
+
+  dns_config {
+    namespace_id   = aws_service_discovery_private_dns_namespace.internal.id
+    routing_policy = "MULTIVALUE"
+    dns_records {
+      type = "A"
+      ttl  = 60
+    }
+  }
+  force_destroy = true
+}
+
+resource "aws_service_discovery_instance" "data_host" {
+  instance_id = aws_instance.data.id
+  service_id  = aws_service_discovery_service.data_host.id
+  attributes = {
+    AWS_INSTANCE_IPV4 = aws_instance.data.private_ip
+  }
 }
