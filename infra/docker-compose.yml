@@ -541,7 +541,9 @@ services:
   # ------------------------------------------------------------------- web app
 
   web:
-    build: ../web
+    build:
+      context: ../web
+      target: dev
     restart: unless-stopped
     environment:
       VITE_HMR_CLIENT_PORT: "8080"
