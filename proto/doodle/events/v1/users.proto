@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+import "google/protobuf/timestamp.proto";
+
+// UserEvent is the only message type on the topic auth.users.v1 (key: user_id).
+// Produced by auth through its transactional outbox (the auth-relay process); consumed by the
+// notifier (group notifier-auth), which disables the user's webhook endpoints (ADR 0015).
+message UserEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // Auth revoked a user's credentials.
+    CredentialsRevoked credentials_revoked = 1;
+  }
+}
+
+// CredentialsRevoked says auth revoked a user's sessions and API keys, because a rotated refresh
+// token was used again (someone else had the session). Everything the thief could have set up
+// with those credentials must stop: the notifier disables the user's webhook endpoints and
+// refuses access tokens issued at or before revoked_at.
+message CredentialsRevoked {
+  // Event metadata.
+  EventMeta meta = 1;
+  // The user whose credentials were revoked.
+  string user_id = 2;
+  // Why: "refresh_token_reuse" (a rotated refresh token came back).
+  string reason = 3;
+  // When auth revoked them. Access tokens issued at or before this time are no longer trusted
+  // for anything the notifier guards.
+  google.protobuf.Timestamp revoked_at = 4;
+}

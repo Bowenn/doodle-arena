@@ -14,6 +14,7 @@ TOPICS=(
   market.sales.v1
   market.wallet.v1
   notifier.dlq.v1
+  auth.users.v1
 )
 
 for topic in "${TOPICS[@]}"; do
