@@ -13,6 +13,10 @@ on:
         description: Folder of the uv project
         type: string
         required: true
+      runner:
+        description: The runner image (assets needs ubuntu-22.04 for MongoDB, see stack.yml)
+        type: string
+        default: ubuntu-24.04
 
 permissions:
   contents: read
@@ -20,7 +24,7 @@ permissions:
 jobs:
   lint-test:
     name: lint and test
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 15
     env:
       SERVICE: ${{ inputs.service }}
