@@ -22,7 +22,7 @@ flowchart LR
 - Every service sends all three signals with the OpenTelemetry SDK, over OTLP, to one collector.
 - The collector routes metrics to Prometheus, traces to Tempo and logs to Loki. Prometheus alone stores only metrics.
 - In AWS, managed resources (load balancer, databases, containers) report to CloudWatch on their own. Grafana reads CloudWatch as a data source, so every signal is visible in one UI.
-- Locally, `grafana/otel-lgtm` bundles the collector, Prometheus, Tempo, Loki and Grafana in one container. It is meant for development and demos. In AWS, either run the components separately or state clearly that the demo uses this image (ADR 0003).
+- Locally, `grafana/otel-lgtm` bundles the collector, Prometheus, Tempo, Loki and Grafana in one container. It is meant for development and demos. In AWS (ADR 0003, task 5.2) the demo uses the same image, on the data host, with the same dashboards and alert rules: services export to `http://data.doodle.internal:4318`, Grafana listens on the host's 127.0.0.1 only (reach it with `make aws-grafana`, a Session Manager port forward), anonymous visitors only view, and its CloudWatch data source reads AWS metrics through the data host's instance role. Every task's stdout also goes to CloudWatch Logs (`/doodle-arena/ecs`, 3 days), as a copy for when the collector is down. Every signal carries `deployment.environment=aws` there.
 - Every signal carries the resource attributes `service.name`, `service.version`, `service.instance.id` and `deployment.environment`.
 
 ### How each service is wired (task 1.5)
