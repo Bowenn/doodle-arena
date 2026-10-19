@@ -1,0 +1,542 @@
+# Grafana-managed alert rules (observability.md, section 5), provisioned from this file. Edit the
+# file, not the UI: Grafana reloads it on restart and refuses UI edits to provisioned rules.
+# Every rule links its runbook and the dashboard panel that shows the same query. Thresholds are
+# starting values (tune them after the first load test); GameServerDown expects the two game
+# servers of infra/docker-compose.yml.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: marketplace
+    folder: Doodle Arena
+    interval: 1m
+    rules:
+      - uid: ledger-imbalance
+        title: LedgerImbalance
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(abs(market_ledger_imbalance))"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              expr: "max(market_ledger_mismatched_accounts)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A != 0 || $B > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: critical
+          service: marketplace
+        annotations:
+          summary: "The ledger doesn't balance: entries sum to {{ $values.A }} coins, {{ $values.B }} accounts don't match their entries."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/ledger-imbalance.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "1"
+      - uid: ownership-violation
+        title: OwnershipViolation
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(market_ownership_violations)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: critical
+          service: marketplace
+        annotations:
+          summary: "{{ $values.A }} drawings have an ownership row that disagrees with their provenance."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/ownership-violation.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "3"
+      - uid: reconciliation-stale
+        title: ReconciliationStale
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "count(last_over_time(market_ledger_imbalance[1m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: lt, params: [1]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: marketplace
+        annotations:
+          summary: "The reconciliation job hasn't reported for 5 minutes: the ledger and ownership alerts are blind."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/reconciliation-stale.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "1"
+      - uid: market-outbox-stuck
+        title: MarketOutboxStuck
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(market_outbox_lag_seconds)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [60]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: marketplace
+        annotations:
+          summary: "The marketplace outbox's oldest event is {{ $values.A }} s old: sales and coin credits aren't reaching Kafka."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/outbox-stuck.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "4"
+      - uid: stripe-signature-failures
+        title: StripeSignatureFailures
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "sum(increase(market_stripe_webhooks_total{result=\"invalid_signature\"}[10m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [5]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+          service: marketplace
+        annotations:
+          summary: "{{ $values.A }} Stripe webhooks with an invalid signature in 10 minutes: a wrong secret or forged requests."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/stripe-signature-failures.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "9"
+  - orgId: 1
+    name: auth
+    folder: Doodle Arena
+    interval: 1m
+    rules:
+      - uid: auth-outbox-stuck
+        title: AuthOutboxStuck
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(auth_outbox_lag_seconds)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [60]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: critical
+          service: auth
+        annotations:
+          summary: "Auth's outbox is {{ $values.A }} s behind: a credential revocation isn't reaching the notifier, so a thief's webhooks keep running."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/outbox-stuck.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "2"
+      - uid: refresh-token-reuse
+        title: RefreshTokenReuse
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "sum(increase(auth_refreshes_total{result=\"reuse_detected\"}[10m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [3]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+          service: auth
+        annotations:
+          summary: "{{ $values.A }} reused refresh tokens in 10 minutes: stolen tokens, or a client refreshing concurrently."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/refresh-token-reuse.md
+          __dashboardUid__: da-overview
+          __panelId__: "7"
+  - orgId: 1
+    name: game
+    folder: Doodle Arena
+    interval: 1m
+    rules:
+      - uid: game-server-down
+        title: GameServerDown
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(lobby_servers_healthy) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: lt, params: [2]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: critical
+          service: lobby
+        annotations:
+          summary: "The lobby sees {{ $values.A }} healthy game servers, fewer than expected: rooms fail over and new rooms have less room."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/game-server-down.md
+          __dashboardUid__: da-overview
+          __panelId__: "9"
+      - uid: slow-broadcasts
+        title: SlowBroadcasts
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "histogram_quantile(0.99, sum by (le) (rate(game_broadcast_duration_milliseconds_bucket[5m]))) >= 0"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [150]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: game-server
+        annotations:
+          summary: "Broadcast p99 is {{ $values.A }} ms: players see strokes and guesses late."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/slow-broadcasts.md
+          __dashboardUid__: da-game-server
+          __panelId__: "3"
+      - uid: outbox-stuck
+        title: OutboxStuck
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "sum(game_outbox_pending)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+          service: game-server
+        annotations:
+          summary: "{{ $values.A }} finished rounds or matches have waited over 10 minutes for Kafka: rewards and drawings are late."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/outbox-stuck.md
+          __dashboardUid__: da-game-server
+          __panelId__: "10"
+  - orgId: 1
+    name: pipeline
+    folder: Doodle Arena
+    interval: 1m
+    rules:
+      - uid: drawing-events-stuck
+        title: DrawingEventsStuck
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(assets_outbox_lag_seconds)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [60]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: assets
+        annotations:
+          summary: "The assets outbox is {{ $values.A }} s behind: approved drawings aren't being minted."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/outbox-stuck.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "2"
+      - uid: drawings-failing
+        title: DrawingsFailing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "sum(increase(assets_pipeline_results_total{result=\"failed\"}[10m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+          service: assets
+        annotations:
+          summary: "Drawings have kept failing for 10 minutes ({{ $values.A }} in the last 10): stroke logs missing or unreadable."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/drawings-pipeline.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "7"
+      - uid: jobs-backlog
+        title: JobsBacklog
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(assets_jobs_oldest_age_seconds) or vector(0)"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              expr: "count(last_over_time(assets_jobs_oldest_age_seconds[1m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 300 || $B < 1"
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: assets
+        annotations:
+          summary: "The oldest Celery job is {{ $values.A }} s old ({{ $values.B }} workers reporting): drawings are late."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/drawings-pipeline.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "5"
+      - uid: consumer-lag-growing
+        title: ConsumerLagGrowing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "sum by (group) (kafka_consumer_group_lag_sum)"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              expr: "sum by (group) (delta(kafka_consumer_group_lag_sum[10m]))"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 0 && $B > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: kafka
+        annotations:
+          summary: "Consumer group {{ $labels.group }} is {{ $values.A }} messages behind and falling further back."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/consumer-lag-growing.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "1"
+      - uid: webhooks-failing
+        title: WebhooksFailing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "(sum(increase(notifier_deliveries_total{result!=\"success\"}[5m])) or vector(0)) / sum(increase(notifier_deliveries_total[5m])) and on () sum(increase(notifier_deliveries_total{result!=\"success\"}[15m])) >= 50"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0.5]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        labels:
+          severity: warning
+          service: notifier
+        annotations:
+          summary: "{{ humanizePercentage $values.A.Value }} of webhook attempts fail, 50 or more in 15 minutes: our sender or network, not one developer's server."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/webhooks.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "9"
+      - uid: webhook-queue-stuck
+        title: WebhookQueueStuck
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(notifier_queue_oldest_age_seconds)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [300]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: notifier
+        annotations:
+          summary: "The oldest due webhook has waited {{ $values.A }} s for a worker."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/webhooks.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "10"
+  - orgId: 1
+    name: platform
+    folder: Doodle Arena
+    interval: 1m
+    rules:
+      - uid: high-error-rate
+        title: HighErrorRate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "(sum by (service_name) (rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m]) or rate(rpc_server_call_duration_seconds_count{rpc_response_status_code=~\"UNKNOWN|DEADLINE_EXCEEDED|INTERNAL|UNAVAILABLE|DATA_LOSS\"}[5m])) or sum by (service_name) (rate(http_server_request_duration_seconds_count[5m]) or rate(rpc_server_call_duration_seconds_count[5m])) * 0) / sum by (service_name) (rate(http_server_request_duration_seconds_count[5m]) or rate(rpc_server_call_duration_seconds_count[5m])) and sum by (service_name) (increase(http_server_request_duration_seconds_count[5m]) or increase(rpc_server_call_duration_seconds_count[5m])) >= 20"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0.01]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service_name }} answers {{ humanizePercentage $values.A.Value }} of requests with a server error."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/high-error-rate.md
+          __dashboardUid__: da-overview
+          __panelId__: "4"

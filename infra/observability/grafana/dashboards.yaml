@@ -1,0 +1,12 @@
+# Doodle Arena's dashboards (infra/observability/dashboards/), next to otel-lgtm's own. Edit the
+# JSON files, not the UI: UI changes to a provisioned dashboard can't be saved.
+apiVersion: 1
+providers:
+  - name: doodle-arena
+    type: file
+    folder: Doodle Arena
+    allowUiUpdates: false
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/doodle-arena/dashboards

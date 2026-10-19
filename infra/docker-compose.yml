@@ -716,6 +716,9 @@ services:
       # CI sets this to see the collector's and Loki's own logs (otel-lgtm hides them by default).
       ENABLE_LOGS_OTELCOL: ${OTEL_LGTM_COMPONENT_LOGS:-false}
       ENABLE_LOGS_LOKI: ${OTEL_LGTM_COMPONENT_LOGS:-false}
+      # Read by the Discord contact point (infra/observability/grafana/alerting/). Without a
+      # Discord webhook in .env, alerts go to the webhook-receiver test service instead.
+      DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:-http://webhook-receiver:9000/hooks/alerts}
     # The image's own check (every backend ready, Loki included), run more often than its 30 s
     # default: every service waits for it, so records never queue up behind a starting Loki.
     healthcheck:
@@ -725,6 +728,12 @@ services:
       retries: 60
     volumes:
       - lgtm-data:/data
+      # Dashboards and alerting as code, next to the image's own provisioning files.
+      - ./observability/grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/doodle-arena.yaml:ro
+      - ./observability/dashboards:/etc/doodle-arena/dashboards:ro
+      - ./observability/grafana/alerting/contact-points.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-contact-points.yaml:ro
+      - ./observability/grafana/alerting/policies.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-policies.yaml:ro
+      - ./observability/grafana/alerting/rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-rules.yaml:ro
     ports:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:4317:4317"

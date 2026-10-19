@@ -1,0 +1,26 @@
+# Where alerts go: one Discord channel (design doc D17). DISCORD_ALERT_WEBHOOK_URL comes from .env
+# (docs/setup.md); without it, infra/docker-compose.yml points it at the webhook-receiver test
+# service, so CI and drills can see a notification was sent. The URL is a secret: anyone holding
+# it can post to the channel, so it never goes in the repo or a log.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: discord
+    receivers:
+      - uid: discord
+        type: discord
+        settings:
+          url: $DISCORD_ALERT_WEBHOOK_URL
+          title: '{{ template "doodle.title" . }}'
+          message: '{{ template "doodle.message" . }}'
+          use_discord_username: false
+
+templates:
+  - orgId: 1
+    name: doodle
+    template: |
+      {{ define "doodle.title" }}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ if .CommonLabels.service }} ({{ .CommonLabels.service }}){{ end }}{{ end }}
+      {{ define "doodle.message" }}{{ range .Alerts }}**{{ .Labels.severity }}** {{ .Labels.alertname }}{{ if .Labels.service_name }} {{ .Labels.service_name }}{{ end }}{{ if .Labels.group }} {{ .Labels.group }}{{ end }}: {{ if eq .Status "resolved" }}resolved. {{ end }}{{ .Annotations.summary }}
+      Runbook: {{ .Annotations.runbook_url }}{{ if .PanelURL }}
+      Panel: {{ .PanelURL }}{{ end }}
+      {{ end }}{{ end }}
