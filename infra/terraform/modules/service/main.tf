@@ -40,8 +40,8 @@ resource "aws_service_discovery_service" "this" {
     }
   }
 
-  # ECS's own health checks decide which tasks are registered.
-  health_check_custom_config {}
+  # ECS registers a task when it starts and removes it when it stops. (No empty
+  # health_check_custom_config block: AWS doesn't keep it, so every plan would replace this.)
   force_destroy = true
 }
 

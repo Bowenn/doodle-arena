@@ -188,6 +188,12 @@ locals {
   }
 }
 
+locals {
+  # As in compose: <name>-1, except a game server, whose instance id is its server id
+  # (game-server-1), the one the gateway routes /ws/<server_id>/ by (ADR 0002).
+  instance_id = { for name in keys(local.services) : name => startswith(name, "game-server") ? name : "${name}-1" }
+}
+
 # for_each over the names: the services' settings differ in shape (each leaves out what it
 # doesn't need), which a map value can't.
 module "svc" {
@@ -204,9 +210,9 @@ module "svc" {
   environment = merge(local.common_env, try(local.services[each.key].env, {}), each.key == "gateway" ? {
     SERVICE_INSTANCE_ID = "gateway-1"
     } : {
-    SERVICE_INSTANCE_ID      = "${each.key}-1"
+    SERVICE_INSTANCE_ID      = local.instance_id[each.key]
     OTEL_SERVICE_NAME        = try(local.services[each.key].instance_service, startswith(each.key, "game-server") ? "game-server" : each.key)
-    OTEL_RESOURCE_ATTRIBUTES = "service.instance.id=${each.key}-1,service.version=${var.image_tag},deployment.environment=aws"
+    OTEL_RESOURCE_ATTRIBUTES = "service.instance.id=${local.instance_id[each.key]},service.version=${var.image_tag},deployment.environment=aws"
   })
   secrets             = try(local.services[each.key].secrets, {})
   health_check        = try(local.services[each.key].health, null)
