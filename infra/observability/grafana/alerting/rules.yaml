@@ -41,7 +41,7 @@ groups:
           severity: critical
           service: marketplace
         annotations:
-          summary: "The ledger doesn't balance: entries sum to {{ $values.A }} coins, {{ $values.B }} accounts don't match their entries."
+          summary: "The ledger doesn't balance: its entries sum to {{ $values.A }} coins, and {{ $values.B }} accounts don't match their entries."
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/ledger-imbalance.md
           __dashboardUid__: da-marketplace
           __panelId__: "1"
