@@ -3,3 +3,8 @@
 
 # A made-up API key in the developer settings test (task 4.8): it was never issued by auth.
 245f9fa9be45eafcc754a25b37395b1e9bbe827e:web/src/developer/Developer.test.tsx:generic-api-key:56
+
+# The SSM parameter for the join-ticket key (task 5.2): a map from the parameter's name to a
+# Terraform reference (tls_private_key.ticket.private_key_pem_pkcs8), not a key. The key itself is
+# generated at apply time and lives only in SSM and the encrypted state bucket.
+d674ccc5739b453594f325c76dd12f7d03afc967:infra/terraform/stack/secrets.tf:generic-api-key:43

@@ -29,7 +29,10 @@ concurrency:
 jobs:
   smoke:
     name: make up and make smoke
-    runs-on: ubuntu-24.04
+    # Not ubuntu-24.04: its kernel is now in the 6.19 to 7.0.13 range, where MongoDB 8.0 refuses
+    # to start (SERVER-121912; MongoDB's 8.0 release notes). Move back once the runner's kernel
+    # is 7.0.14 or newer, or a MongoDB 8.0 patch supports it.
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:
       # Show otel-lgtm's collector and Loki logs, so a failed export to Loki is explained.
@@ -41,6 +44,8 @@ jobs:
       # The runner's disk is ~94% full once every service image is built, and Loki stops
       # accepting logs above 90% disk usage ("Ingester is shutting down"). Remove large
       # preinstalled toolchains this job never uses.
+      - name: Kernel (MongoDB 8.0 refuses 6.19 to 7.0.13)
+        run: uname -r
       - name: Free disk space
         run: |
           df -h /
