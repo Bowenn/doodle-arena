@@ -7,6 +7,7 @@ import {
   createApiKey,
   createEndpoint,
   deleteEndpoint,
+  enableEndpoint,
   EVENT_TYPES,
   listApiKeys,
   listDeliveries,
@@ -200,6 +201,10 @@ function Webhooks() {
               key={ep.id}
               endpoint={ep}
               onDeleted={() => setEndpoints((prev) => prev?.filter((x) => x.id !== ep.id) ?? null)}
+              onEnabled={(enabled, secret) => {
+                setEndpoints((prev) => prev?.map((x) => (x.id === enabled.id ? enabled : x)) ?? null)
+                setCreated(secret)
+              }}
             />
           ))}
         </ul>
@@ -208,7 +213,14 @@ function Webhooks() {
   )
 }
 
-function EndpointRow({ endpoint, onDeleted }: { endpoint: Endpoint; onDeleted: () => void }) {
+type RowProps = {
+  endpoint: Endpoint
+  onDeleted: () => void
+  /** The endpoint is live again; its new secret is shown once, like a new endpoint's. */
+  onEnabled: (endpoint: Endpoint, secret: string) => void
+}
+
+function EndpointRow({ endpoint, onDeleted, onEnabled }: RowProps) {
   const [deliveries, setDeliveries] = useState<Delivery[] | null>(null)
   const [note, setNote] = useState<string | null>(null)
 
@@ -228,6 +240,13 @@ function EndpointRow({ endpoint, onDeleted }: { endpoint: Endpoint; onDeleted: (
       .catch((e: unknown) => setNote(message(e, 'Could not send a test event.')))
   }
 
+  function enable() {
+    setNote(null)
+    enableEndpoint(endpoint.id)
+      .then(({ secret, ...enabled }) => onEnabled(enabled, secret))
+      .catch((e: unknown) => setNote(message(e, 'Could not enable the endpoint.')))
+  }
+
   function remove() {
     deleteEndpoint(endpoint.id)
       .then(onDeleted)
@@ -238,10 +257,23 @@ function EndpointRow({ endpoint, onDeleted }: { endpoint: Endpoint; onDeleted: (
     <li className="endpoint">
       <code>{endpoint.url}</code>
       <span className="muted">{endpoint.event_types.join(', ')}</span>
+      {endpoint.status === 'disabled' && (
+        <span role="status" className="notice bad">
+          {endpoint.disabled_reason === 'credentials_revoked'
+            ? 'Disabled: your sign-in was revoked after a stolen session was detected. Enable it to get a new signing secret.'
+            : 'Disabled.'}
+        </span>
+      )}
       <span className="actions">
-        <button type="button" onClick={test}>
-          Send test
-        </button>
+        {endpoint.status === 'disabled' ? (
+          <button type="button" onClick={enable}>
+            Enable with a new secret
+          </button>
+        ) : (
+          <button type="button" onClick={test}>
+            Send test
+          </button>
+        )}
         <button type="button" onClick={load}>
           {deliveries ? 'Refresh deliveries' : 'Show deliveries'}
         </button>
