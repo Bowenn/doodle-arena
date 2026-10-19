@@ -626,7 +626,7 @@ CI (GitHub Actions, `.github/workflows/`):
 
 AWS (Stage 5):
 
-- The shape of the deployment is open: see ADR 0003.
+- ADR 0003, Option B: ECS on Fargate (Graviton) for the services, one EC2 data host for Postgres, Redis, MongoDB, Kafka and otel-lgtm, an ALB with an ACM certificate on a Route 53 domain, private subnets with one NAT gateway, secrets in SSM Parameter Store. Created and destroyed per session (task 5.2).
 - Fixed parts: S3 for both buckets, CloudWatch for AWS resource metrics and logs, a billing alarm, Terraform in `infra/terraform/`, and secrets in SSM Parameter Store or Secrets Manager.
 
 Releases:
@@ -688,7 +688,6 @@ New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 15. Open questions
 
-- ADR 0003: the shape of the AWS deployment. Decide at the start of Stage 5.
 - Coin pack prices and reward amounts are set (sections 6.3 and 7.9) and configurable; anti-farming (daily caps, bot-only matches) waits for the Stage 6 analytics.
 - Co-drawn drawings have one owner: only `drawer_ids[0]` is minted as the owner. Their royalties are settled (section 8: every author who isn't party to a sale is paid); shared ownership isn't designed.
 - `docs/keyword-coverage.md` mentions a MongoDB replica set, which this doc doesn't design yet. (Cache-aside was settled in D43: the assets gallery, task 6.7b; balances aren't cached.)
