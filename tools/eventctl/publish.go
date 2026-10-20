@@ -17,6 +17,7 @@ import (
 
 type publishConfig struct {
 	brokers    []string
+	kafka      []kgo.Opt // the Kafka user (kafka.go)
 	s3         s3Config
 	bucket     string
 	matchID    string
@@ -70,7 +71,7 @@ func publish(ctx context.Context, cfg publishConfig) error {
 	}
 	fmt.Fprintf(cfg.out, "uploaded s3://%s/%s (%d strokes)\n", cfg.bucket, b.strokeLogKey, len(b.strokeLog.GetStrokes()))
 
-	client, err := kgo.NewClient(kgo.SeedBrokers(cfg.brokers...), kgo.RequiredAcks(kgo.AllISRAcks()))
+	client, err := kgo.NewClient(append([]kgo.Opt{kgo.SeedBrokers(cfg.brokers...), kgo.RequiredAcks(kgo.AllISRAcks())}, cfg.kafka...)...)
 	if err != nil {
 		return fmt.Errorf("kafka client: %w", err)
 	}

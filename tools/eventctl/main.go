@@ -31,6 +31,10 @@ func run(args []string) error {
 	defer stop()
 
 	brokers := strings.Split(envOr("KAFKA_BROKERS", "localhost:9094"), ",")
+	auth, err := devToolsAuth()
+	if err != nil {
+		return err
+	}
 
 	switch args[0] {
 	case "publish":
@@ -42,6 +46,7 @@ func run(args []string) error {
 		}
 		return publish(ctx, publishConfig{
 			brokers: brokers,
+			kafka:   auth,
 			s3: s3Config{
 				endpoint:  envOr("S3_ENDPOINT", "http://localhost:8333"),
 				accessKey: os.Getenv("S3_ACCESS_KEY"),
@@ -66,7 +71,7 @@ func run(args []string) error {
 		if *n < 1 {
 			return fmt.Errorf("-n must be at least 1")
 		}
-		return decode(ctx, decodeConfig{brokers: brokers, topic: *topicName, n: *n, timeout: 15 * time.Second, out: os.Stdout})
+		return decode(ctx, decodeConfig{brokers: brokers, kafka: auth, topic: *topicName, n: *n, timeout: 15 * time.Second, out: os.Stdout})
 	default:
 		return fmt.Errorf("unknown command %q (want publish or decode)", args[0])
 	}
