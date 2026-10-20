@@ -62,13 +62,27 @@ Lighthouse 12.6.1 (`@lhci/cli` 0.15.1), mobile emulation with simulated throttli
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-20 | Local production image | `/` | 0.99 | 1.66 s | 0 | 0 ms | 1.43 s | 1.00 |
 | 2026-10-20 | Local production image | `/gallery` | 0.99 | 1.66 s | 0 | 0 ms | 1.43 s | 1.00 |
-| | AWS (https://icanfly.click) | `/`, `/gallery` | Not measured yet: needs an AWS session | | | | | |
+| 2026-10-20 | AWS (https://icanfly.click) | `/` | 1.00 | 1.21 s | 0 | 0 ms | 1.21 s | 1.00 |
+| 2026-10-20 | AWS (https://icanfly.click) | `/gallery` | 1.00 | 1.21 s | 0 | 0 ms | 1.21 s | 1.00 |
 
-The local run serves the image AWS runs, alone, so its API calls fail: it measures the bundle, caching and compression, not the API. Only AWS gives the real numbers.
+The local run serves the image AWS runs, alone, so its API calls fail: it measures the bundle, caching and compression, not the API. AWS scores a little better than local, probably because the ALB speaks HTTP/2 (the local image HTTP/1.1), which Lighthouse's simulation rewards; the server answered in 13 ms. Lighthouse has no session, so on AWS both paths show the signed-out screen (the app checks `/api/auth/refresh`, gets 401 and renders the sign-in button): these numbers are the first visit's, not a signed-in gallery full of drawings. On the wire on AWS: main bundle 86 KB (gzip), telemetry chunk 24 KB, CSS 1.9 KB, all over h2.
 
 ### Real users
 
-The web app reports `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` (each by `page`) and `web.ws.rtt` to the collector through the gateway (`docs/observability.md`, "Browser telemetry"). Checked end to end locally on 2026-10-20: a real browser's gallery and lobby vitals and a room's round trips (4 to 9 ms locally) reached Prometheus. Real AWS numbers come with the next AWS session.
+The web app reports `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` (each by `page`) and `web.ws.rtt` to the collector through the gateway (`docs/observability.md`, "Browser telemetry"). Checked end to end locally on 2026-10-20: a real browser's gallery and lobby vitals and a room's round trips (4 to 9 ms locally) reached Prometheus.
+
+On AWS (2026-10-20, the signed-out screen; Prometheus on the data host):
+
+| Page | Page loads | LCP | CLS | INP |
+|---|---|---|---|---|
+| `lobby` (`/`) | 6 LCP, 3 CLS, 1 INP | mean 74 ms | 0 | 8 ms |
+| `gallery` | 6 LCP, 3 CLS, 1 INP | mean 65 ms | 0 | 8 ms |
+| `market`, `leaderboard` | 1 INP each | – | – | under 25 ms |
+
+- The LCP and CLS came from Lighthouse's own Chrome: its page loads run the app's RUM too, without throttling, so they report the real paint (about 70 ms on a fast laptop), while Lighthouse's own report gives the simulated slow-phone value (1.2 s). A real dashboard would want to drop those, for example by user agent at the gateway; with real users they are a small share.
+- The INP came from clicks in the app's browser pane. That pane reports no LCP, because Chrome records none for a page loaded in a background view.
+- The p75 panels read 375 ms for LCP and 18.75 ms for INP: every sample is in the first bucket (0 to 500 ms and 0 to 25 ms), and `histogram_quantile` interpolates inside it. The bucket bounds sit around Google's thresholds, so they say "good" correctly but can't tell 70 ms from 300 ms.
+- `web.ws.rtt` wasn't measured on AWS: a room needs a Google sign-in, which only a human can do.
 
 ## 4. AWS sessions
 
@@ -76,5 +90,6 @@ The web app reports `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` (each b
 |---|---|---|---|
 | 2026-10-19, task 5.3 | 505 s (208 resources) | 296 s | 28 minutes |
 | 2026-10-19, the re-measure | 506 s | 315 s | 29 minutes |
+| 2026-10-20, task 5.4 (209 resources: one more security-group rule) | 515 s | 357 s | 18 minutes |
 
 The cost per session comes from Cost Explorer, whose data lags about a day.
