@@ -43,7 +43,8 @@ locals {
     DB_HOST            = local.data_host
     DB_NAME            = "assets"
     DB_USER            = "assets"
-    CELERY_BROKER_URL  = "redis://${local.redis}/1"
+    REDIS_URL          = "redis://${local.redis}/1"
+    REDIS_USERNAME     = "assets"
     AUTH_JWKS_URL      = local.jwks
     JWT_ISSUER         = local.issuer
     PUBLIC_BASE_URL    = local.public_url
@@ -56,6 +57,7 @@ locals {
     DJANGO_SECRET_KEY = local.secret_arn["django-secret-key"]
     DB_PASSWORD       = local.secret_arn["assets-db-password"]
     MONGO_URL         = local.secret_arn["mongo-url"]
+    REDIS_PASSWORD    = local.secret_arn["redis-assets-password"]
   }
   # Kafka for assets' round consumer and outbox relay only, as in compose (ADR 0013).
   assets_kafka_env     = merge(local.assets_env, local.kafka_env, { KAFKA_USERNAME = "assets" })
@@ -74,11 +76,12 @@ locals {
       image = "lobby", ports = [8080, 9090], discover = true, singleton = true, health = local.go_health
       env = merge(local.kafka_env, {
         GRPC_PORT     = "9090", REDIS_ADDR = local.redis, KAFKA_USERNAME = "lobby",
-        AUTH_JWKS_URL = local.jwks, JWT_ISSUER = local.issuer,
+        AUTH_JWKS_URL = local.jwks, JWT_ISSUER = local.issuer, REDIS_USERNAME = "lobby",
       })
       secrets = {
         TICKET_PRIVATE_KEY_PEM = local.secret_arn["ticket-private-key"]
         KAFKA_PASSWORD         = local.secret_arn["kafka-lobby-password"]
+        REDIS_PASSWORD         = local.secret_arn["redis-lobby-password"]
       }
     }
     game-server-1 = {
@@ -88,10 +91,12 @@ locals {
         GRPC_PORT       = "9090", LOBBY_GRPC_ADDR = "lobby.doodle.internal:9090",
         CONTROL_ADDRESS = "game-server-1.doodle.internal:9090", WS_ADDRESS = "/ws/game-server-1",
         REDIS_ADDR      = local.redis, KAFKA_USERNAME = "game-server", WS_ALLOWED_ORIGINS = var.domain_name,
+        REDIS_USERNAME  = "game-server",
       })
       secrets = {
         TICKET_PUBLIC_KEY_PEM = local.secret_arn["ticket-public-key"]
         KAFKA_PASSWORD        = local.secret_arn["kafka-game-server-password"]
+        REDIS_PASSWORD        = local.secret_arn["redis-game-server-password"]
       }
     }
     game-server-2 = {
@@ -101,10 +106,12 @@ locals {
         GRPC_PORT       = "9090", LOBBY_GRPC_ADDR = "lobby.doodle.internal:9090",
         CONTROL_ADDRESS = "game-server-2.doodle.internal:9090", WS_ADDRESS = "/ws/game-server-2",
         REDIS_ADDR      = local.redis, KAFKA_USERNAME = "game-server", WS_ALLOWED_ORIGINS = var.domain_name,
+        REDIS_USERNAME  = "game-server",
       })
       secrets = {
         TICKET_PUBLIC_KEY_PEM = local.secret_arn["ticket-public-key"]
         KAFKA_PASSWORD        = local.secret_arn["kafka-game-server-password"]
+        REDIS_PASSWORD        = local.secret_arn["redis-game-server-password"]
       }
     }
     notifier = {

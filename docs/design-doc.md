@@ -111,7 +111,7 @@ Owns the Redis key prefix `lobby:*`.
 - Redis keys: `lobby:server:{server_id}` (the last heartbeat, 6-second TTL), `lobby:servers` (set of server ids), `lobby:room:{room_id}` (the room, expiring 10 minutes after its server last reported it; only the owning server's heartbeat refreshes it), `lobby:rooms:public` (sorted set by creation time, for the room list), `lobby:leaderboard:{week}` (sorted set of user ids by points; expires 35 days after its last write), `lobby:lb:seen:{match_id}` (a counted match, 8-day TTL), `lobby:names` (hash of user id to display name), `lobby:server_rooms:{server_id}` (set of the rooms placed on that server, so the reassigner finds a dead server's rooms), `lobby:room_hosts` (set of server ids with rooms, pruned lazily when a server's set is empty), `lobby:reassigner` (lock, 10-second TTL: every lobby instance tries every 2 seconds, and only the holder runs a reassignment pass, re-taking the lock before every `AllocateRoom`, so a crashed holder can delay failover by up to 10 seconds).
 - Heartbeats and `AllocateRoom` aren't authenticated: for now the internal gRPC relies on network isolation (ADR 0006). So the lobby accepts only a `/ws…` gateway path as `ws_address` and `host:port` as `control_address`; a bogus heartbeat can't send players to another host.
 - Notices dead game servers through missed heartbeats and reassigns their rooms. Clients that reconnect get the new server's URL.
-- Consumes `MatchFinished` from `game.matches.v1` (consumer group `lobby-leaderboard`) to keep a weekly leaderboard: the sum of each player's match scores per ISO week, with the week taken from `ended_at` in UTC (Monday to Sunday, named like `2026-W42`). `ZINCRBY` isn't idempotent, so one Lua script does both steps: `SET NX lobby:lb:seen:{match_id}` (8-day TTL, longer than any week a match can count towards), and only if that marker is new, `ZINCRBY` for every result. A crash can't separate the marker from the increments, and two deliveries at the same moment can't both pass the check. Offsets are committed only after the script ran (at-least-once), and while Redis is down the consumer retries instead of moving past a match. An unset or unknown `oneof` case, or bytes that don't decode, is logged with topic, partition and offset, counted, committed and skipped (ADR 0004). Each record's `traceparent` continues the producer's trace (span `lobby.leaderboard.apply`).
+- Consumes `MatchFinished` from `game.matches.v1` (consumer group `lobby-leaderboard`) to keep a weekly leaderboard: the sum of each player's match scores per ISO week, with the week taken from `ended_at` in UTC (Monday to Sunday, named like `2026-W42`). `ZINCRBY` isn't idempotent, so one Lua script does both steps: `SET NX lobby:leaderboard:{<week>}:seen:<match_id>` (8-day TTL, longer than any week a match can count towards; the literal braces are a Redis Cluster hash tag the marker shares with the week's sorted set `lobby:leaderboard:{<week>}`, so the script's two keys are in one slot), and only if that marker is new, `ZINCRBY` for every result. A crash can't separate the marker from the increments, and two deliveries at the same moment can't both pass the check. Offsets are committed only after the script ran (at-least-once), and while Redis is down the consumer retries instead of moving past a match. An unset or unknown `oneof` case, or bytes that don't decode, is logged with topic, partition and offset, counted, committed and skipped (ADR 0004). Each record's `traceparent` continues the producer's trace (span `lobby.leaderboard.apply`).
 - Display names for the leaderboard come from a name cache, since `MatchFinished` carries only user ids: every join and quick play stores the access token's `name` claim in `lobby:names`. A player who never joined through the lobby shows without a name. A failure to store a name never fails the join.
 
 ### 4.4 Game server (Go)
@@ -248,9 +248,9 @@ The economy pages (task 4.8):
 | PostgreSQL | `assets` | Drawing metadata and moderation status, the outbox of drawing events, admin sessions | assets |
 | PostgreSQL | `marketplace` | Accounts, ledger, balances, ownership, listings, idempotency keys, outbox, Stripe events | marketplace |
 | PostgreSQL | `notifier` | Endpoints, deliveries, credential revocation watermarks | notifier |
-| Redis | `room:*` | Room event streams, snapshots, leases, fencing counters | game-server |
+| Redis | `room:*`, `ticket:*` | Room event streams, snapshots, leases, fencing counters; redeemed join tickets | game-server |
 | Redis | `lobby:*` | Rooms, game-server registry, leaderboards | lobby |
-| Redis | Logical database 1 | Celery broker (no result backend) | assets |
+| Redis | `assets:*` (logical database 1) | Celery broker (no result backend); kombu's `global_keyprefix` puts its keys and channels under `assets:` | assets |
 | MongoDB | `assets.replays` (user `assets`, `readWrite` on `assets` only) | Stroke logs for replays | assets |
 | Object storage | `round-logs` bucket | Raw round stroke logs; a lifecycle rule deletes them after 7 days. Assets reads them: the claim check in `RoundFinished` (D13) is the one deliberate exception to "no service reads another's bucket" | game-server |
 | Object storage | `drawings` bucket | PNGs and thumbnails, content-addressed | assets |
@@ -258,6 +258,22 @@ The economy pages (task 4.8):
 | Kafka | Topics in section 6.2 | Events between services | Each topic's producer |
 
 Locally there is one Postgres server with four databases and one database user per service, plus one Redis, one MongoDB, SeaweedFS for S3, and one Kafka broker in KRaft mode.
+
+The owners are enforced, not just agreed on (task 5.5):
+
+- **Postgres:** one login role per database, with `CONNECT` revoked from `PUBLIC`.
+- **Redis:** one ACL user per service, allowed only its prefixes (`infra/redis/start.sh`).
+  - The default user is off, and no user has `@admin` or `@dangerous` commands.
+  - Celery's two `PSUBSCRIBE` patterns are listed literally, because Redis compares a subscribed pattern with the ACL as text.
+- **Object storage:** one SeaweedFS identity per service, scoped to its buckets (`infra/seaweedfs/entrypoint.sh`). In AWS, the IAM task roles do the same (`infra/terraform/stack/iam.tf`).
+  - game-server may only write `round-logs`.
+  - assets may only read it, and read and write `drawings`.
+- **MongoDB:** the `assets` user with `readWrite` on `assets` only.
+- **Kafka:** per-topic ACLs (ADR 0013).
+
+`make data-acl-check` and `make kafka-acl-check` prove the refusals in CI's stack job.
+
+The lobby's leaderboard script uses a Redis Cluster hash tag (`lobby:leaderboard:{<week>}` and its `:seen:` markers), like the rooms' `{id}`. The lobby's room scripts still span untagged keys (`moveScript`: the room, two servers' indexes and the host map; the registry's and the room store's `MULTI` blocks), so Redis Cluster would still need a `{lobby}` tag on those. That is not needed while Redis is one node.
 
 ## 6. Contracts
 

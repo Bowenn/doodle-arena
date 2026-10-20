@@ -17,7 +17,7 @@ mkdir -p /opt/doodle
 cd /opt/doodle
 aws s3 cp --region ${region} "s3://${bundle_bucket}/${bundle_key}" bundle.zip
 unzip -o -q bundle.zip
-chmod +x kafka/*.sh postgres/init/*.sh
+chmod +x kafka/*.sh redis/*.sh postgres/init/*.sh
 
 # Secrets never touch the user data or a log: read with the instance role, written mode 600.
 umask 077

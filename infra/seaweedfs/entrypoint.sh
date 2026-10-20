@@ -1,15 +1,32 @@
 #!/bin/sh
 # Starts SeaweedFS (master, volume, filer and S3 gateway in one process) with one S3 identity
-# whose keys come from the environment, so no credentials are committed.
+# per service, scoped to its buckets (task 5.5), as the IAM task roles are in AWS
+# (infra/terraform/stack/iam.tf). Keys come from the environment, so no credentials are committed.
+#   game-server  writes round-logs (stroke logs)
+#   assets       reads round-logs (the claim check, design doc D13), reads and writes drawings
+#   dev-tools    the host tools (S3_ACCESS_KEY in .env): reads everything, writes round-logs
+#                for scripts/fake-events.sh and pipeline-check
+# The buckets are created by seaweedfs-buckets with `weed shell`, which needs no identity.
 set -eu
 
+: "${S3_GAME_SERVER_SECRET_KEY:?}" "${S3_ASSETS_SECRET_KEY:?}" "${S3_ACCESS_KEY:?}" "${S3_SECRET_KEY:?}"
 cat > /tmp/s3.json <<EOF
 {
   "identities": [
     {
-      "name": "doodle-local",
+      "name": "game-server",
+      "credentials": [{ "accessKey": "game-server", "secretKey": "${S3_GAME_SERVER_SECRET_KEY}" }],
+      "actions": ["Write:round-logs"]
+    },
+    {
+      "name": "assets",
+      "credentials": [{ "accessKey": "assets", "secretKey": "${S3_ASSETS_SECRET_KEY}" }],
+      "actions": ["Read:round-logs", "Read:drawings", "Write:drawings"]
+    },
+    {
+      "name": "dev-tools",
       "credentials": [{ "accessKey": "${S3_ACCESS_KEY}", "secretKey": "${S3_SECRET_KEY}" }],
-      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+      "actions": ["Read", "List", "Write:round-logs"]
     }
   ]
 }

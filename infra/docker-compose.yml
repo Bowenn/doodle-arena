@@ -33,8 +33,9 @@ x-game-events-env: &game-events-env
   KAFKA_USERNAME: game-server
   KAFKA_PASSWORD: ${KAFKA_GAME_SERVER_PASSWORD:?}
   S3_ENDPOINT: http://seaweedfs:8333
-  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
-  S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+  # The game-server S3 identity: it may only write round-logs (task 5.5).
+  S3_ACCESS_KEY: game-server
+  S3_SECRET_KEY: ${S3_GAME_SERVER_SECRET_KEY:?}
   ROUND_LOGS_BUCKET: round-logs
 
 # The assets database, broker and token verification, shared by the web process, the worker and
@@ -46,7 +47,10 @@ x-assets-env: &assets-env
   DB_USER: assets
   DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
   # Redis logical database 1 belongs to assets' Celery (design doc, section 5).
-  CELERY_BROKER_URL: redis://redis:6379/1
+  REDIS_URL: redis://redis:6379/1
+  # The assets Redis user: assets:* only (infra/redis/start.sh).
+  REDIS_USERNAME: assets
+  REDIS_PASSWORD: ${REDIS_ASSETS_PASSWORD:?}
   # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
   AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
   JWT_ISSUER: http://localhost:8080/api/auth
@@ -58,8 +62,9 @@ x-assets-env: &assets-env
   # Browsers load images from presigned URLs signed for this address: SeaweedFS's port published
   # on the host (in AWS, the S3 endpoint itself).
   S3_PUBLIC_ENDPOINT: http://localhost:8333
-  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
-  S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+  # The assets S3 identity: it reads round-logs and reads and writes drawings (task 5.5).
+  S3_ACCESS_KEY: assets
+  S3_SECRET_KEY: ${S3_ASSETS_SECRET_KEY:?}
   MONGO_URL: mongodb://assets:${MONGO_ASSETS_PASSWORD:?}@mongo:27017/assets
   # Moderation (design doc 4.8). Not a startup dependency: while the AI service is down,
   # drawings retry and then wait in the review queue.
@@ -104,6 +109,9 @@ services:
       # Internal gRPC port for game-server heartbeats; the gateway never routes it.
       GRPC_PORT: "9090"
       REDIS_ADDR: redis:6379
+      # The lobby Redis user: lobby:* only (infra/redis/start.sh).
+      REDIS_USERNAME: lobby
+      REDIS_PASSWORD: ${REDIS_LOBBY_PASSWORD:?}
       # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
       AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
       JWT_ISSUER: http://localhost:8080/api/auth
@@ -142,6 +150,9 @@ services:
       CONTROL_ADDRESS: game-server-1:9090
       WS_ADDRESS: /ws/game-server-1
       REDIS_ADDR: redis:6379
+      # The game-server Redis user: room:* and ticket:* only (infra/redis/start.sh).
+      REDIS_USERNAME: game-server
+      REDIS_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
       # The lobby's public keys only: game servers verify join tickets, never mint them (ADR 0005).
       TICKET_PUBLIC_KEY_PATH: /run/secrets/ticket-public-key
       # Browsers send Origin http://localhost:8080; the gateway forwards Host without the port.
@@ -177,6 +188,9 @@ services:
       CONTROL_ADDRESS: game-server-2:9090
       WS_ADDRESS: /ws/game-server-2
       REDIS_ADDR: redis:6379
+      # The game-server Redis user: room:* and ticket:* only (infra/redis/start.sh).
+      REDIS_USERNAME: game-server
+      REDIS_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
       # The lobby's public keys only: game servers verify join tickets, never mint them (ADR 0005).
       TICKET_PUBLIC_KEY_PATH: /run/secrets/ticket-public-key
       # Browsers send Origin http://localhost:8080; the gateway forwards Host without the port.
@@ -608,13 +622,21 @@ services:
 
   redis:
     image: redis:8.10.2-trixie
-    command: ["redis-server", "--appendonly", "yes"]
+    # One ACL user per service and key prefix, the default user off (infra/redis/start.sh).
+    entrypoint: ["sh", "/etc/doodle-arena/redis-start.sh"]
+    environment:
+      REDIS_ADMIN_PASSWORD: ${REDIS_ADMIN_PASSWORD:?}
+      REDIS_LOBBY_PASSWORD: ${REDIS_LOBBY_PASSWORD:?}
+      REDIS_GAME_SERVER_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
+      REDIS_ASSETS_PASSWORD: ${REDIS_ASSETS_PASSWORD:?}
     volumes:
       - redis-data:/data
+      - ./redis/start.sh:/etc/doodle-arena/redis-start.sh:ro
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # redis-cli reads the password from REDISCLI_AUTH, so it's not on the command line.
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_ADMIN_PASSWORD\" redis-cli --user admin ping | grep -q PONG"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -705,8 +727,11 @@ services:
     image: chrislusf/seaweedfs:4.48
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
+      # One identity per service (infra/seaweedfs/entrypoint.sh); S3_ACCESS_KEY is dev-tools'.
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
       S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+      S3_GAME_SERVER_SECRET_KEY: ${S3_GAME_SERVER_SECRET_KEY:?}
+      S3_ASSETS_SECRET_KEY: ${S3_ASSETS_SECRET_KEY:?}
     volumes:
       - seaweedfs-data:/data
       - ./seaweedfs/entrypoint.sh:/entrypoint.sh:ro

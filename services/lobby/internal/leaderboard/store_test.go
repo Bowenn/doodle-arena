@@ -1,6 +1,7 @@
 package leaderboard
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,7 +129,7 @@ func TestApplySetsExpiries(t *testing.T) {
 	if _, err := s.Apply(t.Context(), Match{ID: "m1", EndedAt: friday, Results: []Result{{"alice", 1}}}); err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]time.Duration{seenKey("m1"): SeenTTL, weekKey("2026-W42"): WeekTTL} {
+	for key, want := range map[string]time.Duration{seenKey("2026-W42", "m1"): SeenTTL, weekKey("2026-W42"): WeekTTL} {
 		ttl, err := rdb.TTL(t.Context(), key).Result()
 		if err != nil {
 			t.Fatal(err)
@@ -223,5 +224,22 @@ func TestBoardOfAnEmptyWeek(t *testing.T) {
 	}
 	if b.Entries == nil || len(b.Entries) != 0 || b.Me != nil {
 		t.Errorf("board = %+v, want no entries (an empty list, not nil) and no me", b)
+	}
+}
+
+// The script's two keys must share a Redis Cluster hash tag, or Redis Cluster refuses the script
+// (CROSSSLOT). The tag is the text between the first { and the next }.
+func TestApplyKeysShareAHashTag(t *testing.T) {
+	tag := func(key string) string {
+		start := strings.IndexByte(key, '{')
+		end := strings.IndexByte(key[start+1:], '}')
+		if start < 0 || end <= 0 {
+			t.Fatalf("%s has no hash tag", key)
+		}
+		return key[start+1 : start+1+end]
+	}
+	week := Week(friday)
+	if seen, board := tag(seenKey(week, "m1")), tag(weekKey(week)); seen != board || seen != "2026-W42" {
+		t.Errorf("hash tags: seen marker %q, week %q; want both 2026-W42", seen, board)
 	}
 }
