@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Bowenn/gap-project_private/libs/go/redistest"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/leaderboard"
-	"github.com/Bowenn/gap-project_private/services/lobby/internal/redistest"
 )
 
 func TestMain(m *testing.M) { redistest.Main(m) }

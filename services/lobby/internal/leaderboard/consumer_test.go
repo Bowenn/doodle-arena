@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Bowenn/gap-project_private/libs/go/redistest"
 	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
-	"github.com/Bowenn/gap-project_private/services/lobby/internal/redistest"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kfake"

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Bowenn/gap-project_private/libs/go/redistest"
 	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/redistest"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/ticket"

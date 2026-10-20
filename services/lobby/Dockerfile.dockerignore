@@ -1,6 +1,7 @@
 # The build context is the repository root; send only what the lobby build needs.
 *
 !proto/gen/go
+!libs/go
 !services/lobby
 services/lobby/bin
 services/lobby/coverage.out
