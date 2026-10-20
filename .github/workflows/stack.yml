@@ -60,6 +60,8 @@ jobs:
         run: make telemetry-check
       - name: make pipeline-check (a round becomes an approved, stored, published drawing)
         run: make pipeline-check
+      - name: make kafka-acl-check (the broker refuses what each service must not do, ADR 0013)
+        run: make kafka-acl-check
       - name: make alerts-check (dashboards, alert rules and the contact point load and evaluate)
         run: make alerts-check
       # The load test's script must keep working: two rooms for a minute, thresholds included.
