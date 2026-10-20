@@ -47,6 +47,8 @@ type fakeAllocator struct {
 	delay       time.Duration
 	inFlight    int
 	maxInFlight int
+	inFlightTo  map[string]int
+	maxTo       int // the most calls out to any one address at once
 }
 
 func (f *fakeAllocator) Forget(addr string) {
@@ -59,6 +61,11 @@ func (f *fakeAllocator) AllocateRoom(ctx context.Context, addr string, req *game
 	f.mu.Lock()
 	f.inFlight++
 	f.maxInFlight = max(f.maxInFlight, f.inFlight)
+	if f.inFlightTo == nil {
+		f.inFlightTo = map[string]int{}
+	}
+	f.inFlightTo[addr]++
+	f.maxTo = max(f.maxTo, f.inFlightTo[addr])
 	delay := f.delay
 	f.mu.Unlock()
 	if delay > 0 {
@@ -70,6 +77,7 @@ func (f *fakeAllocator) AllocateRoom(ctx context.Context, addr string, req *game
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.inFlight--
+	f.inFlightTo[addr]--
 	if ctx.Err() != nil {
 		return nil, status.FromContextError(ctx.Err()).Err()
 	}
@@ -824,12 +832,15 @@ func (e *env) deadServerWithRooms(t *testing.T, n int) []string {
 	return ids
 }
 
-// A dead server's rooms move in parallel: with AllocateRoom taking 300 ms, 40 rooms one at a
-// time would need 12 s (three passes' start windows); the pass moves them all in about 1.5 s.
+// A dead server's rooms move in parallel, at most perServerReassigns at a time to each live
+// server: with AllocateRoom taking 300 ms and four live servers, 40 rooms one at a time would
+// need 12 s (three passes' start windows); the pass moves them all in about 1.5 s.
 func TestReassignMovesManyRoomsAtOnce(t *testing.T) {
 	e := newEnv(t)
 	ids := e.deadServerWithRooms(t, 40)
-	e.beat(t, "gs-2", 0, false)
+	for _, id := range []string{"gs-2", "gs-3", "gs-4", "gs-5"} {
+		e.beat(t, id, 0, false)
+	}
 	e.alloc.delay = 300 * time.Millisecond
 
 	began := time.Now()
@@ -837,11 +848,12 @@ func TestReassignMovesManyRoomsAtOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	took := time.Since(began)
-	if got := e.roomsOn(t, "gs-2"); len(got) != len(ids) {
-		t.Fatalf("one pass moved %d of %d rooms", len(got), len(ids))
+	if left := e.roomsOn(t, "gs-1"); len(left) != 0 {
+		t.Fatalf("one pass left %d of %d rooms", len(left), len(ids))
 	}
-	if e.alloc.maxInFlight != reassignWorkers {
-		t.Fatalf("%d calls out at once, want %d", e.alloc.maxInFlight, reassignWorkers)
+	if e.alloc.maxInFlight != reassignWorkers || e.alloc.maxTo != perServerReassigns {
+		t.Fatalf("%d calls out at once, %d to one server; want %d and %d",
+			e.alloc.maxInFlight, e.alloc.maxTo, reassignWorkers, perServerReassigns)
 	}
 	if took > 3*time.Second {
 		t.Fatalf("pass took %v: rooms moved one at a time", took)
@@ -867,15 +879,15 @@ func TestReassignSpreadsRoomsOverTheLiveServers(t *testing.T) {
 // recorded, and the servers they went to aren't suspected of anything.
 func TestReassignStopsStartingRoomsAtTheDeadline(t *testing.T) {
 	e := newEnv(t)
-	ids := e.deadServerWithRooms(t, reassignWorkers+2)
+	ids := e.deadServerWithRooms(t, 10)
 	e.beat(t, "gs-2", 0, false)
 	e.alloc.delay = 300 * time.Millisecond
 
 	if err := e.svc.reassignPass(t.Context(), time.Now().Add(100*time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
-	if moved, left := len(e.roomsOn(t, "gs-2")), len(e.roomsOn(t, "gs-1")); moved != reassignWorkers || left != 2 {
-		t.Fatalf("moved %d, left %d; want %d moved (the first wave) and 2 for the next pass", moved, left, reassignWorkers)
+	if moved, left := len(e.roomsOn(t, "gs-2")), len(e.roomsOn(t, "gs-1")); moved != perServerReassigns || left != 10-perServerReassigns {
+		t.Fatalf("moved %d, left %d; want the first %d moved and the rest for the next pass", moved, left, perServerReassigns)
 	}
 	if got := e.svc.withoutSuspects(registry.Candidates([]registry.Server{{ID: "gs-2"}, {ID: "gs-3"}})); got[0].ID != "gs-2" {
 		t.Fatal("gs-2 was marked suspect")

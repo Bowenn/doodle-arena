@@ -28,10 +28,12 @@ const (
 	// passTimeout is when a pass stops starting rooms; the rest wait for the next pass, which
 	// begins at once with a fresh view of the servers. Rooms already started finish.
 	passTimeout = 2 * ReassignEvery
-	// reassignWorkers is how many rooms a pass moves at once. Each AllocateRoom keeps its own
-	// 2-second deadline, so a dead server's rooms take about ceil(rooms/8) calls' time, not
-	// rooms calls' time.
-	reassignWorkers = 8
+	// reassignWorkers is how many rooms a pass moves at once, and perServerReassigns how many
+	// of them may be out to one game server. A takeover replays the room's events, which is CPU
+	// work on the target: 8 at once on one 0.25-CPU server all ran past their 2-second deadline
+	// (evidence log), so the parallelism comes mostly from spreading over the servers.
+	reassignWorkers    = 8
+	perServerReassigns = 2
 	// roomTimeout bounds one room's moves: every attempt with its redial, and the writes.
 	roomTimeout = maxAttempts*2*allocateTimeout + time.Second
 )
@@ -62,7 +64,7 @@ func (s *Service) reassignPass(ctx context.Context, startBy time.Time) error {
 	if len(moves) == 0 {
 		return nil
 	}
-	plan := newPlacement(all)
+	plan := newPlacement(all, startBy)
 	var (
 		mu     sync.Mutex
 		counts = map[string]int{}
@@ -153,15 +155,37 @@ func (s *Service) findMoves(ctx context.Context) ([]registry.Server, []move, err
 // placement spreads one pass's rooms over the servers that may take them: each room goes to
 // the server with the fewest rooms counting those this pass already sent it (then the
 // registry's order: fewest sockets). Without it, every room of a pass would go to the server
-// that was least loaded when the pass began.
+// that was least loaded when the pass began. It also holds perServerReassigns slots per
+// server.
 type placement struct {
 	mu      sync.Mutex
 	servers []registry.Server // registry.Candidates order
 	added   map[string]int
+	slots   map[string]chan struct{}
+	startBy time.Time // no room starts after it
 }
 
-func newPlacement(all []registry.Server) *placement {
-	return &placement{servers: registry.Candidates(all), added: map[string]int{}}
+func newPlacement(all []registry.Server, startBy time.Time) *placement {
+	return &placement{servers: registry.Candidates(all), added: map[string]int{},
+		slots: map[string]chan struct{}{}, startBy: startBy}
+}
+
+// slot waits for one of the server's perServerReassigns slots; release gives it back. ok is
+// false if ctx ended first.
+func (p *placement) slot(ctx context.Context, serverID string) (release func(), ok bool) {
+	p.mu.Lock()
+	ch := p.slots[serverID]
+	if ch == nil {
+		ch = make(chan struct{}, perServerReassigns)
+		p.slots[serverID] = ch
+	}
+	p.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, true
+	case <-ctx.Done():
+		return nil, false
+	}
 }
 
 // choose returns the candidates for the next room, least loaded first after reorder (which
@@ -188,8 +212,9 @@ func (p *placement) add(serverID string, n int) {
 	p.added[serverID] += n
 }
 
-// reassign allocates one room again and returns its lobby.reassignments result, or "" when
-// another pass moved it first or the lock was lost (errLockLost) before an attempt.
+// reassign allocates one room again and returns its lobby.reassignments result, "deferred" when
+// its first server had no free slot before the pass's start deadline, or "" when another pass
+// moved it first, the lobby is stopping, or the lock was lost (errLockLost) before an attempt.
 func (s *Service) reassign(ctx context.Context, r Room, plan *placement, hostAlive bool) (string, error) {
 	ctx, span := s.tracer.Start(ctx, "lobby.reassign_room", trace.WithAttributes(
 		attribute.String("room.id", r.ID), attribute.String("from_server_id", r.ServerID), attribute.Bool("host_alive", hostAlive)))
@@ -207,11 +232,23 @@ func (s *Service) reassign(ctx context.Context, r Room, plan *placement, hostAli
 		if i > 0 {
 			plan.add(srv.ID, 1)
 		}
+		release, ok := plan.slot(ctx, srv.ID)
+		if !ok {
+			plan.add(srv.ID, -1)
+			return "", nil
+		}
+		if i == 0 && time.Now().After(plan.startBy) {
+			release()
+			plan.add(srv.ID, -1)
+			return "deferred", nil // retried on the next pass
+		}
 		if s.lockHolder != nil && !s.lockHolder(ctx) {
+			release()
 			plan.add(srv.ID, -1)
 			return "", errLockLost
 		}
 		err := s.tryAllocate(ctx, srv, req)
+		release()
 		switch status.Code(err) {
 		case grpccodes.OK:
 			r.ServerID = srv.ID
