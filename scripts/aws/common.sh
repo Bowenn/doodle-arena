@@ -17,16 +17,17 @@ require_aws() {
 
 account_id() { aws sts get-caller-identity --query Account --output text; }
 
-# The stack root's settings: the domain (required), the team's addresses (default: this
-# machine's public address) and the image tag (default: HEAD, which push-images.sh pushed).
+# The stack root's settings: the domain (required), who may reach the load balancer
+# (ALLOWED_CIDRS, default everyone; TEAM_CIDRS is its old name) and the image tag (default: HEAD,
+# which push-images.sh pushed).
 stack_vars() {
   : "${DOMAIN:?set DOMAIN to the Route 53 domain, for example DOMAIN=example.com}"
-  TEAM_CIDRS="${TEAM_CIDRS:-$(curl -fsS https://checkip.amazonaws.com)/32}"
+  ALLOWED_CIDRS="${ALLOWED_CIDRS:-${TEAM_CIDRS:-0.0.0.0/0}}"
   IMAGE_TAG="${IMAGE_TAG:-$(git -C "$ROOT" rev-parse --short=12 HEAD)}"
   local cidrs
-  cidrs="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1].split(",")))' "$TEAM_CIDRS")"
+  cidrs="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1].split(",")))' "$ALLOWED_CIDRS")"
   # shellcheck disable=SC2034 # used by the scripts that source this file
-  TF_STACK_VARS=(-var "domain_name=$DOMAIN" -var "team_cidrs=$cidrs" -var "image_tag=$IMAGE_TAG")
+  TF_STACK_VARS=(-var "domain_name=$DOMAIN" -var "allowed_cidrs=$cidrs" -var "image_tag=$IMAGE_TAG")
 }
 
 # Points the stack root at the state bucket the bootstrap root made.

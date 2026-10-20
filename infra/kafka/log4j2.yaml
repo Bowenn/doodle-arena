@@ -1,0 +1,22 @@
+# The broker's logging (infra/kafka/broker.sh): everything to stdout, nothing to files inside
+# the container, so `make logs s=kafka` shows it. The authorizer logs every denied request at
+# INFO (principal, operation, resource): a service missing an ACL, or something probing, shows
+# up here. Allowed requests are DEBUG and stay off.
+Configuration:
+  Appenders:
+    Console:
+      name: STDOUT
+      PatternLayout:
+        pattern: "[%d] %p %m (%c)%n"
+  Loggers:
+    Root:
+      level: INFO
+      AppenderRef:
+        - ref: STDOUT
+    Logger:
+      - name: kafka.request.logger
+        level: WARN
+      - name: kafka.network.RequestChannel$
+        level: WARN
+      - name: kafka.authorizer.logger
+        level: INFO

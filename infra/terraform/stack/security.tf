@@ -27,7 +27,8 @@ locals {
     [for c in ["auth", "auth-relay", "notifier", "marketplace", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat"] : [5432, c]],
     [for c in ["lobby", "game-server-1", "game-server-2", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat"] : [6379, c]],
     [for c in ["assets", "assets-worker"] : [27017, c]],
-    [for c in ["lobby", "game-server-1", "game-server-2", "notifier", "auth-relay", "marketplace", "assets-consumer", "assets-relay", "assets-worker", "assets"] : [9092, c]],
+    # Kafka: its clients only (ADR 0013). The assets web process and worker have no Kafka user.
+    [for c in ["lobby", "game-server-1", "game-server-2", "notifier", "auth-relay", "marketplace", "assets-consumer", "assets-relay"] : [9092, c]],
     # Telemetry: OTLP/HTTP from every service, OTLP/gRPC from the gateway's module.
     [for c in keys(local.services) : [4318, c]],
     [[4317, "gateway"]],

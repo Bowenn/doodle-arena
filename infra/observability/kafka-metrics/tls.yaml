@@ -1,0 +1,6 @@
+# AWS only (infra/aws/data-host/compose.yml): the broker speaks SASL_SSL there, with a
+# certificate from the stack's own CA (infra/terraform/stack/kafka.tf). Merged over config.yaml.
+receivers:
+  kafka_metrics:
+    tls:
+      ca_file: /etc/doodle-arena/kafka-tls/ca.pem

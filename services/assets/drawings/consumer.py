@@ -38,6 +38,7 @@ from kombu.exceptions import OperationalError as BrokerError
 from opentelemetry import metrics, propagate, trace
 from opentelemetry.trace import SpanKind
 
+from drawings.kafka_auth import kafka_auth
 from drawings.models import Drawing, Status
 from drawings.tasks import prepare_drawing
 
@@ -206,6 +207,8 @@ def run(
             "auto.offset.reset": "earliest",
             # Commit by hand, after the round is stored and its task sent.
             "enable.auto.commit": False,
+            # The assets Kafka user: it may read game.rounds.v1 in group assets.
+            **kafka_auth(),
         }
     )
     consumer.subscribe([topic])

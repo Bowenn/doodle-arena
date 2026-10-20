@@ -91,5 +91,6 @@ On AWS (2026-10-20, the signed-out screen; Prometheus on the data host):
 | 2026-10-19, task 5.3 | 505 s (208 resources) | 296 s | 28 minutes |
 | 2026-10-19, the re-measure | 506 s | 315 s | 29 minutes |
 | 2026-10-20, task 5.4 (209 resources: one more security-group rule) | 515 s | 357 s | 18 minutes |
+| 2026-10-20, task 5.5a (230 resources: Kafka's passwords and TLS) | 515 s | 317 s | 18 minutes |
 
 The cost per session comes from Cost Explorer, whose data lags about a day.

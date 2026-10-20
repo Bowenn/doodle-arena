@@ -22,6 +22,7 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/events"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/heartbeat"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/kafkaauth"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
@@ -167,7 +168,12 @@ func run(cfg config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	kafka, err := events.NewKafkaClient(cfg.kafkaBrokers)
+	// The game-server Kafka user (ADR 0013): it may write game.rounds.v1 and game.matches.v1.
+	kafkaAuth, err := kafkaauth.FromEnv().Opts()
+	if err != nil {
+		return err
+	}
+	kafka, err := events.NewKafkaClient(cfg.kafkaBrokers, kafkaAuth...)
 	if err != nil {
 		return err
 	}

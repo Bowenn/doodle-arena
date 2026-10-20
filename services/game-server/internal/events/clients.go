@@ -20,15 +20,17 @@ import (
 // in-sync replicas, records that were never sent fail after 30 s (so the publisher can retry
 // them), and the tracing hook writes each record's traceparent header from the context it is
 // produced with.
-func NewKafkaClient(brokers []string) (*kgo.Client, error) {
+// Extra options carry the service's Kafka user (internal/kafkaauth).
+func NewKafkaClient(brokers []string, extra ...kgo.Opt) (*kgo.Client, error) {
 	tracer := kotel.NewTracer() // the global tracer provider and propagator
-	c, err := kgo.NewClient(
+	opts := append([]kgo.Opt{
 		kgo.SeedBrokers(brokers...),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
-		kgo.RecordDeliveryTimeout(30*time.Second),
+		kgo.RecordDeliveryTimeout(30 * time.Second),
 		kgo.ProducerLinger(0),
 		kgo.WithHooks(kotel.NewKotel(kotel.WithTracer(tracer)).Hooks()...),
-	)
+	}, extra...)
+	c, err := kgo.NewClient(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka client: %w", err)
 	}

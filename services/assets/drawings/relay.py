@@ -27,6 +27,7 @@ from opentelemetry import metrics, propagate, trace
 from opentelemetry.metrics import CallbackOptions, Observation
 from opentelemetry.trace import SpanKind
 
+from drawings.kafka_auth import kafka_auth
 from drawings.models import OutboxEvent
 
 BATCH = 100
@@ -79,6 +80,8 @@ def new_producer(brokers: str, client_id: str) -> Producer:
             "linger.ms": 5,
             # Give up on a message after this long; the row stays unpublished and is retried.
             "message.timeout.ms": int(FLUSH_TIMEOUT * 1000),
+            # The assets Kafka user: it may write assets.drawings.v1.
+            **kafka_auth(),
         }
     )
 

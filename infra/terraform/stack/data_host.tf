@@ -14,8 +14,18 @@ locals {
     MONGO_ASSETS_PASSWORD     = "stack/mongo-assets-password"
     GRAFANA_ADMIN_PASSWORD    = "stack/grafana-admin-password"
     DISCORD_ALERT_WEBHOOK_URL = "discord/alert-webhook-url"
+    # Kafka (ADR 0013): kafka-init sets each service's password; kafka-metrics uses its own.
+    KAFKA_ADMIN_PASSWORD       = "stack/kafka-admin-password"
+    KAFKA_GAME_SERVER_PASSWORD = "stack/kafka-game-server-password"
+    KAFKA_LOBBY_PASSWORD       = "stack/kafka-lobby-password"
+    KAFKA_ASSETS_PASSWORD      = "stack/kafka-assets-password"
+    KAFKA_MARKETPLACE_PASSWORD = "stack/kafka-marketplace-password"
+    KAFKA_NOTIFIER_PASSWORD    = "stack/kafka-notifier-password"
+    KAFKA_AUTH_PASSWORD        = "stack/kafka-auth-password"
+    KAFKA_METRICS_PASSWORD     = "stack/kafka-metrics-password"
   }
-  data_host_secrets = values(local.data_host_env)
+  # Read with the instance role too: the broker's TLS key and the CA, written to files at boot.
+  data_host_secrets = concat(values(local.data_host_env), ["stack/kafka-server-pem", "stack/kafka-ca-pem"])
 
   # The bundle the data host unpacks into /opt/doodle: its compose file and everything that
   # file mounts, from the same sources the local stack uses.
@@ -24,7 +34,7 @@ locals {
     { for f in fileset("${local.repo}/infra/aws/data-host", "*") : f => "${local.repo}/infra/aws/data-host/${f}" },
     { for f in fileset("${local.repo}/infra/observability", "**") : "observability/${f}" => "${local.repo}/infra/observability/${f}" },
     { for f in fileset("${local.repo}/infra/postgres/init", "*") : "postgres/init/${f}" => "${local.repo}/infra/postgres/init/${f}" },
-    { "kafka/create-topics.sh" = "${local.repo}/infra/kafka/create-topics.sh" },
+    { for f in fileset("${local.repo}/infra/kafka", "*") : "kafka/${f}" => "${local.repo}/infra/kafka/${f}" },
     { "mongo/create-users.js" = "${local.repo}/infra/mongo/create-users.js" },
   )
 }

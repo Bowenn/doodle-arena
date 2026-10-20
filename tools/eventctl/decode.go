@@ -16,6 +16,7 @@ import (
 
 type decodeConfig struct {
 	brokers []string
+	kafka   []kgo.Opt // the Kafka user (kafka.go)
 	topic   string
 	n       int
 	timeout time.Duration
@@ -33,7 +34,7 @@ func decode(ctx context.Context, cfg decodeConfig) error {
 	defer cancel()
 
 	// Find where each partition ends, then read the last n messages of every partition.
-	admClient, err := kgo.NewClient(kgo.SeedBrokers(cfg.brokers...))
+	admClient, err := kgo.NewClient(append([]kgo.Opt{kgo.SeedBrokers(cfg.brokers...)}, cfg.kafka...)...)
 	if err != nil {
 		return fmt.Errorf("kafka client: %w", err)
 	}
@@ -59,8 +60,8 @@ func decode(ctx context.Context, cfg decodeConfig) error {
 		return nil
 	}
 
-	client, err := kgo.NewClient(kgo.SeedBrokers(cfg.brokers...),
-		kgo.ConsumePartitions(map[string]map[int32]kgo.Offset{cfg.topic: starts}))
+	client, err := kgo.NewClient(append([]kgo.Opt{kgo.SeedBrokers(cfg.brokers...),
+		kgo.ConsumePartitions(map[string]map[int32]kgo.Offset{cfg.topic: starts})}, cfg.kafka...)...)
 	if err != nil {
 		return fmt.Errorf("kafka client: %w", err)
 	}

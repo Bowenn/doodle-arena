@@ -8,9 +8,13 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-if [[ -f .env ]]; then
+# The dev-tools Kafka user's password (ADR 0013) and the S3 keys come from .env; a worktree has
+# none of its own, so set ENV_FILE to the main checkout's.
+env_file="${ENV_FILE:-.env}"
+if [[ -f "$env_file" ]]; then
   set -a
-  source .env
+  # shellcheck disable=SC1090
+  source "$env_file"
   set +a
 fi
 

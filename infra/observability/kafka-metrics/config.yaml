@@ -8,6 +8,12 @@ receivers:
     cluster_alias: doodle-arena
     scrapers: [consumers, topics]
     collection_interval: 30s
+    # Its own Kafka user, with Describe on every topic and group (ADR 0013, infra/kafka/init.sh).
+    auth:
+      sasl:
+        mechanism: SCRAM-SHA-512
+        username: ${env:KAFKA_USERNAME}
+        password: ${env:KAFKA_PASSWORD}
 
 processors:
   resource:

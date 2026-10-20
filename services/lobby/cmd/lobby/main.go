@@ -17,6 +17,7 @@ import (
 
 	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/authn"
+	"github.com/Bowenn/gap-project_private/services/lobby/internal/kafkaauth"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/leaderboard"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/registry"
@@ -140,7 +141,12 @@ func run(cfg config, logger *slog.Logger) error {
 		return err
 	}
 	board := leaderboard.NewStore(rdb)
-	consumer, err := leaderboard.NewConsumer(cfg.kafka, board, logger)
+	// The lobby Kafka user (ADR 0013): it may read game.matches.v1 in group lobby-leaderboard.
+	kafkaAuth, err := kafkaauth.FromEnv().Opts()
+	if err != nil {
+		return err
+	}
+	consumer, err := leaderboard.NewConsumer(cfg.kafka, board, logger, kafkaAuth...)
 	if err != nil {
 		return err
 	}
