@@ -20,7 +20,10 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/ticket"
 	"github.com/coder/websocket"
 	"github.com/golang-jwt/jwt/v5"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 type roomTable map[string]*room.Room
@@ -64,6 +67,11 @@ type env struct {
 
 func newEnv(t *testing.T, maxPlayers int, hello time.Duration) *env {
 	t.Helper()
+	return newEnvWithMeter(t, maxPlayers, hello, noop.NewMeterProvider().Meter("t"))
+}
+
+func newEnvWithMeter(t *testing.T, maxPlayers int, hello time.Duration, meter metric.Meter) *env {
+	t.Helper()
 	pub, key, _ := ed25519.GenerateKey(rand.Reader)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -79,7 +87,7 @@ func newEnv(t *testing.T, maxPlayers int, hello time.Duration) *env {
 	h, err := NewHandler(Config{
 		ServerID: "gs-1", Rooms: rooms, Verifier: ticket.NewVerifier([]ed25519.PublicKey{pub}, time.Now),
 		Redeemer: red, Origins: []string{"localhost:8080"}, HelloTimeout: hello, Log: log,
-		Meter: noop.NewMeterProvider().Meter("t"),
+		Meter: meter,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -343,7 +351,7 @@ func TestCloseDuringWritesKeepsTheCloseCode(t *testing.T) {
 		if err != nil {
 			return
 		}
-		pc := newPlayerConn(context.Background(), c, "u1", func() {})
+		pc := newPlayerConn(context.Background(), c, "u1", func() {}, func(time.Duration) {})
 		accepted <- pc
 		<-pc.writerDone
 	}))
@@ -366,4 +374,169 @@ func TestCloseDuringWritesKeepsTheCloseCode(t *testing.T) {
 		}
 		c.CloseNow()
 	}
+}
+
+// sendLag reads game.ws.send_lag from the reader.
+func sendLag(t *testing.T, reader *sdkmetric.ManualReader) (metricdata.Metrics, metricdata.HistogramDataPoint[float64]) {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(t.Context(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name == "game.ws.send_lag" {
+				dps := m.Data.(metricdata.Histogram[float64]).DataPoints
+				if len(dps) != 1 {
+					t.Fatalf("send_lag has %d series, want 1 (no attributes)", len(dps))
+				}
+				return m, dps[0]
+			}
+		}
+	}
+	t.Fatal("game.ws.send_lag not recorded")
+	return metricdata.Metrics{}, metricdata.HistogramDataPoint[float64]{}
+}
+
+// Every message written to a socket records its send lag, in milliseconds and without
+// attributes (ids never go on metrics).
+func TestSendLagIsRecordedForEveryWrite(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("t")
+	e := newEnvWithMeter(t, 8, time.Second, meter)
+	c := e.join("u1", "j1") // welcome
+	write(t, c, "ping", map[string]any{"t": 1})
+	next(t, c, "pong")
+
+	m, dp := sendLag(t, reader)
+	if m.Unit != "ms" {
+		t.Fatalf("unit = %q, want ms", m.Unit)
+	}
+	if dp.Attributes.Len() != 0 {
+		t.Fatalf("attributes = %v, want none", dp.Attributes.ToSlice())
+	}
+	if dp.Count < 2 {
+		t.Fatalf("count = %d, want at least 2 (welcome and pong)", dp.Count)
+	}
+}
+
+// lagConn is a playerConn on a real socket that records its send lags.
+type lagConn struct {
+	pc     *playerConn
+	client *websocket.Conn
+	mu     sync.Mutex
+	lags   []time.Duration
+}
+
+func newLagConn(t *testing.T) *lagConn {
+	t.Helper()
+	lc := &lagConn{}
+	accepted := make(chan *playerConn, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		pc := newPlayerConn(context.Background(), c, "u1", func() {}, func(lag time.Duration) {
+			lc.mu.Lock()
+			lc.lags = append(lc.lags, lag)
+			lc.mu.Unlock()
+		})
+		accepted <- pc
+		<-pc.writerDone
+	}))
+	t.Cleanup(srv.Close)
+	c, _, err := websocket.Dial(t.Context(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SetReadLimit(1 << 22)
+	t.Cleanup(func() { c.CloseNow() })
+	lc.pc, lc.client = <-accepted, c
+	return lc
+}
+
+func (lc *lagConn) recorded() []time.Duration {
+	<-lc.pc.writerDone
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	return append([]time.Duration(nil), lc.lags...)
+}
+
+// More than the kernel's socket buffers hold on loopback, so the writer blocks until the
+// client reads, as it does behind a slow network or when the CPU is pinned.
+const (
+	bigMessages = 8
+	bigSize     = 1 << 20
+)
+
+var bigMessage = []byte(`{"type":"x","data":"` + strings.Repeat("a", bigSize) + `"}`)
+
+// The lag runs from Send, not from the write: messages that wait in the queue behind a
+// blocked write carry the wait. That is what game.broadcast.duration can't see.
+func TestSendLagIncludesTheWaitInTheQueue(t *testing.T) {
+	lc := newLagConn(t)
+	const hold = 300 * time.Millisecond
+	for range bigMessages {
+		lc.pc.Send(bigMessage)
+	}
+	time.Sleep(hold) // the client isn't reading yet
+	for i := range bigMessages {
+		if _, _, err := lc.client.Read(t.Context()); err != nil {
+			t.Fatalf("message %d: %v", i, err)
+		}
+	}
+	lc.pc.Close(int(websocket.StatusNormalClosure), "")
+	closeCode(t, lc.client) // answers the close handshake
+	lags := lc.recorded()
+	if len(lags) != bigMessages {
+		t.Fatalf("%d lags recorded, want %d", len(lags), bigMessages)
+	}
+	if last := lags[len(lags)-1]; last < hold {
+		t.Fatalf("the last message's lag = %v, want at least the %v it waited", last, hold)
+	}
+}
+
+// A message that is never written (the socket closed first) records nothing, so a socket
+// closed as slow can't drag the lag towards its 10-second write timeout.
+func TestSendLagSkipsMessagesNeverWritten(t *testing.T) {
+	lc := newLagConn(t)
+	for range bigMessages {
+		lc.pc.Send(bigMessage)
+	}
+	lc.pc.Close(int(protocol.CloseReplaced), "connected again elsewhere")
+	lc.pc.Send(bigMessage) // after the close: dropped
+	received := 0
+	for {
+		if _, _, err := lc.client.Read(t.Context()); err != nil {
+			if got := websocket.CloseStatus(err); got != protocol.CloseReplaced {
+				t.Fatalf("close = %d, want %d", got, protocol.CloseReplaced)
+			}
+			break
+		}
+		received++
+	}
+	lags := lc.recorded()
+	if received >= bigMessages {
+		t.Fatalf("received all %d messages: the close didn't win over the queue", received)
+	}
+	if len(lags) != received {
+		t.Fatalf("%d lags recorded for %d messages written", len(lags), received)
+	}
+}
+
+// What the metric adds per message and socket: a clock read and one Record, from many
+// writer goroutines into one series.
+func BenchmarkSendLagRecord(b *testing.B) {
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
+	h, err := NewHandler(Config{Meter: mp.Meter("b")})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			queued := time.Now()
+			h.sendLag.Record(context.Background(), float64(time.Since(queued))/float64(time.Millisecond))
+		}
+	})
 }
