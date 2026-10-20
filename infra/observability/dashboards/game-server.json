@@ -604,8 +604,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (result) (rate(lobby_reassignments_total[$__rate_interval]))",
-          "legendFormat": "{{result}}"
+          "expr": "sum by (reason, result) (rate(lobby_reassignments_total[$__rate_interval]))",
+          "legendFormat": "{{reason}} {{result}}"
         }
       ],
       "gridPos": {
