@@ -248,9 +248,9 @@ The economy pages (task 4.8):
 | PostgreSQL | `assets` | Drawing metadata and moderation status, the outbox of drawing events, admin sessions | assets |
 | PostgreSQL | `marketplace` | Accounts, ledger, balances, ownership, listings, idempotency keys, outbox, Stripe events | marketplace |
 | PostgreSQL | `notifier` | Endpoints, deliveries, credential revocation watermarks | notifier |
-| Redis | `room:*` | Room event streams, snapshots, leases, fencing counters | game-server |
+| Redis | `room:*`, `ticket:*` | Room event streams, snapshots, leases, fencing counters; redeemed join tickets | game-server |
 | Redis | `lobby:*` | Rooms, game-server registry, leaderboards | lobby |
-| Redis | Logical database 1 | Celery broker (no result backend) | assets |
+| Redis | `assets:*` (logical database 1) | Celery broker (no result backend); kombu's `global_keyprefix` puts its keys and channels under `assets:` | assets |
 | MongoDB | `assets.replays` (user `assets`, `readWrite` on `assets` only) | Stroke logs for replays | assets |
 | Object storage | `round-logs` bucket | Raw round stroke logs; a lifecycle rule deletes them after 7 days. Assets reads them: the claim check in `RoundFinished` (D13) is the one deliberate exception to "no service reads another's bucket" | game-server |
 | Object storage | `drawings` bucket | PNGs and thumbnails, content-addressed | assets |
@@ -258,6 +258,22 @@ The economy pages (task 4.8):
 | Kafka | Topics in section 6.2 | Events between services | Each topic's producer |
 
 Locally there is one Postgres server with four databases and one database user per service, plus one Redis, one MongoDB, SeaweedFS for S3, and one Kafka broker in KRaft mode.
+
+The owners are enforced, not just agreed on (task 5.5):
+
+- **Postgres:** one login role per database, with `CONNECT` revoked from `PUBLIC`.
+- **Redis:** one ACL user per service, allowed only its prefixes (`infra/redis/start.sh`).
+  - The default user is off, and no user has `@admin` or `@dangerous` commands.
+  - Celery's two `PSUBSCRIBE` patterns are listed literally, because Redis compares a subscribed pattern with the ACL as text.
+- **Object storage:** one SeaweedFS identity per service, scoped to its buckets (`infra/seaweedfs/entrypoint.sh`). In AWS, the IAM task roles do the same (`infra/terraform/stack/iam.tf`).
+  - game-server may only write `round-logs`.
+  - assets may only read it, and read and write `drawings`.
+- **MongoDB:** the `assets` user with `readWrite` on `assets` only.
+- **Kafka:** per-topic ACLs (ADR 0013).
+
+`make data-acl-check` and `make kafka-acl-check` prove the refusals in CI's stack job.
+
+The lobby's leaderboard script uses a Redis Cluster hash tag (`lobby:leaderboard:{<week>}` and its `:seen:` markers), like the rooms' `{id}`. The lobby's room scripts still span untagged keys (`moveScript`: the room, two servers' indexes and the host map; the registry's and the room store's `MULTI` blocks), so Redis Cluster would still need a `{lobby}` tag on those. That is not needed while Redis is one node.
 
 ## 6. Contracts
 
