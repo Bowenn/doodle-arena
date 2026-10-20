@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/Bowenn/gap-project_private/libs/go/tcretry"
 	"github.com/redis/go-redis/v9"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )
@@ -19,7 +20,7 @@ var addr string
 // Main starts Redis, runs the package's tests and stops it. Call it from TestMain.
 func Main(m *testing.M) {
 	ctx := context.Background()
-	c, err := tcredis.Run(ctx, Image)
+	c, err := tcretry.Run("redis", func() (*tcredis.RedisContainer, error) { return tcredis.Run(ctx, Image) })
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start redis:", err)
 		os.Exit(1)
