@@ -67,6 +67,8 @@ http {
     # client's address, also behind the load balancer (real_ip above).
     limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
     limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/s;
+    # Browser telemetry: a page posts its Web Vitals once, on page hide (task 5.4).
+    limit_req_zone $binary_remote_addr zone=telemetry:10m rate=2r/s;
     limit_req_status 429;
     limit_req_log_level warn;
 
@@ -206,6 +208,24 @@ http {
             include /etc/nginx/proxy_common.conf;
             set $upstream notifier${SERVICE_DOMAIN}:8080;
             proxy_pass http://$upstream;
+        }
+
+        # Browser telemetry (task 5.4): the web app's Web Vitals, to the collector's browser
+        # receiver, which keeps only the web app's own metrics (infra/observability/otelcol/
+        # browser.yaml). POST only, small bodies, a per-address limit; not traced (a span per
+        # beacon would only describe the beacon).
+        location = /otlp/v1/metrics {
+            otel_trace off;
+            otel_trace_context ignore;
+            access_log off;
+            limit_except POST {
+                deny all;
+            }
+            client_max_body_size 64k;
+            limit_req zone=telemetry burst=10 nodelay;
+            include /etc/nginx/proxy_common.conf;
+            set $upstream ${SERVICE_OTLP_BROWSER};
+            proxy_pass http://$upstream/v1/metrics;
         }
 
         # Game WebSockets. Not traced here: a span would last as long as the game. The game

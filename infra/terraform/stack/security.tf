@@ -31,6 +31,8 @@ locals {
     # Telemetry: OTLP/HTTP from every service, OTLP/gRPC from the gateway's module.
     [for c in keys(local.services) : [4318, c]],
     [[4317, "gateway"]],
+    # Browser telemetry, through the gateway only (task 5.4).
+    [[4319, "gateway"]],
   )
 }
 

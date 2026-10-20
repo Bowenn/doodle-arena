@@ -76,7 +76,7 @@ Until Will joins the project, Bowen covers every service, including marketplace 
 
 ### 4.1 Gateway (Nginx)
 
-- Routes `/api/auth/*` to auth, `/api/lobby/*` to lobby, `/api/assets/*` and `/admin/*` to assets, `/api/market/*` to marketplace, `/api/notifier/*` to notifier, and `/ws/*` to game servers. A route `/otlp/*` to the collector, for browser telemetry, comes with task 5.4.
+- Routes `/api/auth/*` to auth, `/api/lobby/*` to lobby, `/api/assets/*` and `/admin/*` to assets, `/api/market/*` to marketplace, `/api/notifier/*` to notifier, and `/ws/*` to game servers. `/otlp/v1/metrics` goes to the collector's browser receiver (task 5.4: POST only, 64 KB, 2 requests a second per address; `docs/observability.md`, "Browser telemetry").
 - Passes the `Upgrade` and `Connection` headers for WebSockets, with a long read timeout.
 - Applies coarse per-IP rate limiting with `limit_req`, which is a leaky bucket. Fine-grained limits live in the services.
 - Serves `/healthz` for itself and `/healthz/<service>` for every service, including each game-server instance (used by `make smoke`). These are restricted to internal traffic in AWS.
@@ -223,7 +223,7 @@ The room client (task 2.3):
 - The canvas has a fixed 4:3 aspect and two layers. The base layer paints only the server's `stroke_batch` events, so every player sees the same picture; the overlay paints the drawer's own stroke at once and drops it when the server's copy arrives, so drawing doesn't lag by a round trip. Points go out every 50 ms (`VITE_STROKE_BATCH_MS`, or `?batch_ms=` for one experiment) or at 512 points.
 - The connection asks the lobby for a new ticket on every attempt and reconnects with jittered exponential backoff (0.5 s doubling to 8 s, giving up after 12 attempts, about a minute, which matches the seat grace). Close codes 4000, 4003, 4004 and 4009 and a lobby `ROOM_NOT_FOUND` or `SIGNED_OUT` end the connection instead (4004 is the client's own code for `ROOM_NOT_FOUND`; the server never sends it). A gap in `seq`, or a `resumed {seq}` ahead of the last applied event, reconnects at once; `room_moved` reconnects after the usual jittered backoff, so a fenced server's players don't all ask the lobby in the same millisecond.
 - The timer counts down to the server's deadline on the local clock. It is display only; the server ends phases. Clock skew shows as a timer that is a little off.
-- The ping round-trip time is shown next to the connection status; exporting it as `web.ws.rtt` comes with browser telemetry (task 5.4).
+- The ping round-trip time is shown next to the connection status and exported as `web.ws.rtt` (task 5.4), with the Core Web Vitals: `web/src/rum.ts` loads the OpenTelemetry SDK only after the page's load event.
 
 The gallery (task 3.5):
 
@@ -626,7 +626,7 @@ CI (GitHub Actions, `.github/workflows/`):
 - `secrets.yml`: gitleaks over the whole git history, on every PR and push with no path filter (`make lint s=secrets` locally). Exceptions live in `.gitleaks.toml`; today only the JWT test fixtures, whose signing key is never stored.
 - Actions are pinned to full commit SHAs, and Dependabot updates them weekly. Workflows have read-only permissions, and event data never goes straight into `run:` scripts.
 - A path-filtered workflow that doesn't run never reports a status, so it can't be a required check. If `master` gets branch protection, add an always-run gate job first.
-- From Stage 5: push images on merge to the default branch (`master`), plus Lighthouse CI for the web app.
+- From Stage 5: push images on merge to the default branch (`master`). Lighthouse (task 5.4) is `make lighthouse`, not a CI gate: a per-PR run on a shared runner measures the runner as much as the app, and the numbers that matter come from the AWS stack and from real users' vitals.
 
 AWS (Stage 5):
 

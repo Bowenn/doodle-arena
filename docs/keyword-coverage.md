@@ -44,10 +44,10 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | High-traffic / high-volume servers | Live-stream room; flash sales | 6 |
 | Low-latency, high-throughput services | Game-server broadcast; relays | 2, 6 |
 | Backend load testing (后端压测) | k6 scenarios | 5, 6 |
-| Frontend FCP/FMP | Core Web Vitals (LCP, INP, CLS) through Lighthouse CI and real-user monitoring; FMP is deprecated | 5 |
+| Frontend FCP/FMP | Core Web Vitals (LCP, INP, CLS) through Lighthouse (`make lighthouse`, FCP included) and real-user monitoring over OpenTelemetry; FMP is deprecated | 5 |
 | CI/CD / continuous integration | GitHub Actions per service | 1, 5 |
 | Jenkins | Optional deployment pipeline | 7 |
-| GitHub Actions | CI for every service, proto checks, Lighthouse | 1, 5 |
+| GitHub Actions | CI for every service, proto checks | 1, 5 |
 | Real-time systems | Game server | 2 |
 | Real-time collaboration (实时协作), WebSocket | Shared canvas with two drawers; WebSocket protocol | 2 |
 | Real-time continuous ingestion (实时持续接收), Kafka, Flink | Kafka in Stage 2; Flink jobs in Stage 6 | 2, 6 |

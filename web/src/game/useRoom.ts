@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { joinRoom } from '../lobby.ts'
+import { recordWsRtt } from '../rum.ts'
 import { RoomConnection, type ConnectionStatus } from './connection.ts'
 import type { ClientMessage } from './protocol.ts'
 import { roomReducer } from './roomState.ts'
@@ -27,7 +28,10 @@ export function useRoom(roomId: string) {
         event: (event) => dispatch({ type: 'event', event }),
         private: (msg) => dispatch({ type: 'private', msg }),
         status: setStatus,
-        rtt: setRtt,
+        rtt: (ms) => {
+          setRtt(ms)
+          recordWsRtt(ms)
+        },
       },
       { join: joinRoom },
     )

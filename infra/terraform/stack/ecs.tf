@@ -179,6 +179,7 @@ locals {
         SERVICE_OTLP_ENDPOINT = "${local.data_host}:4317", SERVICE_ENVIRONMENT = "aws",
         SERVICE_RESOLVER      = "169.254.169.253", SERVICE_DOMAIN = ".doodle.internal",
         SERVICE_WEB_PORT      = "8080", SERVICE_TRUSTED_PROXIES = aws_vpc.main.cidr_block,
+        SERVICE_OTLP_BROWSER  = "${local.data_host}:4319",
       }
     }
     web = {
