@@ -48,5 +48,18 @@ services=()
 while IFS= read -r s; do services+=("$s"); done < <(terraform -chdir="$TF/stack" output -json services | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)))')
 aws ecs wait services-stable --cluster "$cluster" --services "${services[@]:0:10}"
 aws ecs wait services-stable --cluster "$cluster" --services "${services[@]:10}"
-echo "Up in $((SECONDS - start)) s: $(tf_output url)"
+# ECS calls a service stable while a container is still in its health check's start period (the
+# marketplace's JVM takes about a minute): wait until every service answers through the gateway.
+url="$(tf_output url)"
+for target in healthz healthz/auth healthz/lobby healthz/game-server-1 healthz/game-server-2 healthz/assets \
+  healthz/ai healthz/marketplace healthz/notifier healthz/web; do
+  until [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url/$target")" == 200 ]]; do
+    if ((SECONDS - start > 1800)); then
+      echo "$url/$target still isn't healthy; see CloudWatch Logs, /doodle-arena/ecs" >&2
+      exit 1
+    fi
+    sleep 5
+  done
+done
+echo "Up in $((SECONDS - start)) s: $url"
 echo "Check it: DOMAIN=$DOMAIN make aws-check. Tear it down after the session: DOMAIN=$DOMAIN make aws-down"
