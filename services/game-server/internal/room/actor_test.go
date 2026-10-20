@@ -737,3 +737,50 @@ func TestFinishedRoundsAndMatchesReachTheSink(t *testing.T) {
 		t.Fatalf("match span = %v, want game.match.end", sink.spans[1])
 	}
 }
+
+// game.room.input_lag is how long a player's message waited for the actor: here 2 s on the
+// fake clock while the actor wasn't running, as when it is stuck behind earlier steps.
+func TestInputLagMeasuresTheWaitForTheActor(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	m, err := NewMetrics(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("t"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &fakeClock{now: t0}
+	r := mustNew(t, Config{ID: "r1", Mode: "classic", HostID: "a", Settings: DefaultSettings, Clock: clock,
+		Rand: rand.New(rand.NewPCG(9, 9)), Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Metrics: m})
+	if err := r.Input(context.Background(), &fakeConn{uid: "a"}, protocol.Guess{Text: "apple"}); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(2 * time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	go r.Run(ctx)
+	t.Cleanup(func() { cancel(); <-r.Done() })
+	if err := r.sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, mt := range sm.Metrics {
+			if mt.Name != "game.room.input_lag" {
+				continue
+			}
+			if mt.Unit != "ms" {
+				t.Fatalf("unit = %q, want ms", mt.Unit)
+			}
+			dps := mt.Data.(metricdata.Histogram[float64]).DataPoints
+			if len(dps) != 1 || dps[0].Attributes.Len() != 0 {
+				t.Fatalf("want one series without attributes, got %+v", dps)
+			}
+			if dps[0].Count != 1 || dps[0].Sum != 2000 {
+				t.Fatalf("count = %d, sum = %v ms, want 1 input that waited 2000 ms", dps[0].Count, dps[0].Sum)
+			}
+			return
+		}
+	}
+	t.Fatal("game.room.input_lag not recorded")
+}
