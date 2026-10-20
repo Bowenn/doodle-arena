@@ -1,7 +1,7 @@
 """Alert drill (task 5.1, M5): the ledger-imbalance and error-rate alerts fire, reach the contact
 point, and clear again.
 
-    python3 scripts/drills/alerts.py [ledger|errors]
+    python3 scripts/drills/alerts.py [ledger|errors|kafka]
 
 Against `make up` (standard library only; needs `~/.docker/bin` on PATH or there). It changes the
 shared stack for a few minutes and puts everything back, even when interrupted:
@@ -16,6 +16,11 @@ shared stack for a few minutes and puts everything back, even when interrupted:
    (5xx above 1% for 5 minutes: about 6 minutes), then restores the stub's previous mode. It
    doesn't wait for the alert to resolve, which takes another 5 minutes of clean traffic.
    Drawings moderated meanwhile retry, or wait in the review queue.
+3. KafkaAdminUsed and KafkaAuthFailures (ADR 0013): runs one kafka-admin command inside the broker
+   container (an admin login on its localhost ADMIN listener) and waits for KafkaAdminUsed; then
+   tries a wrong password on the broker every 15 s until KafkaAuthFailures fires (failures every
+   minute for 5 minutes: about 6 minutes). Nothing changes, so there is nothing to put back; the
+   alerts resolve on their own 5 minutes later. Not in the default run: `alerts.py kafka`.
 
 Notifications go to Discord when DISCORD_ALERT_WEBHOOK_URL is set in .env; check the channel.
 Otherwise they land on the webhook-receiver test service, and the drill checks them there.
@@ -34,6 +39,15 @@ GRAFANA = os.environ.get("GRAFANA", "http://localhost:3000")
 RECEIVER = os.environ.get("RECEIVER", "http://localhost:9000")
 POSTGRES = "doodle-arena-postgres-1"
 AI = "doodle-arena-ai-1"
+KAFKA = "doodle-arena-kafka-1"
+# A client config with a password no Kafka user has, written inside the broker container.
+BAD_LOGIN = """cat > /tmp/drill-bad-login.properties <<'EOF'
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required username="marketplace" password="not-the-password";
+EOF
+timeout 20 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --command-config /tmp/drill-bad-login.properties --list >/dev/null 2>&1
+true"""
 DRILL_OWNER = "drill-alerts"
 
 os.environ["PATH"] = os.path.expanduser("~/.docker/bin") + os.pathsep + os.environ["PATH"]
@@ -196,10 +210,44 @@ def errors_drill() -> dict:
     return result
 
 
+def kafka_drill() -> dict:
+    result: dict = {}
+    sent_before = received("KafkaAdminUsed", "FIRING")
+    log("KafkaAdminUsed: one kafka-admin command inside the broker container")
+    subprocess.run(["docker", "exec", KAFKA, "kafka-admin", "kafka-topics.sh", "--list"],
+                   check=True, capture_output=True)
+    result["admin_fire_s"] = wait_for("KafkaAdminUsed firing", lambda: state("KafkaAdminUsed") == "firing", 240)
+    if result["admin_fire_s"] is not None:
+        start = time.monotonic()
+        sent = wait_for("its notification on webhook-receiver",
+                        lambda: received("KafkaAdminUsed", "FIRING") > sent_before, 90)
+        result["admin_notify_s"] = None if sent is None else result["admin_fire_s"] + (time.monotonic() - start)
+
+    sent_before = received("KafkaAuthFailures", "FIRING")
+    log("KafkaAuthFailures: a wrong password on the broker every 15 s")
+    start = time.monotonic()
+    result["auth_fire_s"] = None
+    while time.monotonic() - start < 600:
+        subprocess.run(["docker", "exec", KAFKA, "bash", "-c", BAD_LOGIN], capture_output=True)
+        if state("KafkaAuthFailures") == "firing":
+            result["auth_fire_s"] = time.monotonic() - start
+            log(f"KafkaAuthFailures firing after {result['auth_fire_s']:.0f} s")
+            break
+        time.sleep(15)
+    else:
+        log("TIMEOUT waiting for KafkaAuthFailures firing (600 s)")
+    subprocess.run(["docker", "exec", KAFKA, "rm", "-f", "/tmp/drill-bad-login.properties"], capture_output=True)
+    if result["auth_fire_s"] is not None:
+        sent = wait_for("its notification on webhook-receiver",
+                        lambda: received("KafkaAuthFailures", "FIRING") > sent_before, 90)
+        result["auth_notify_s"] = None if sent is None else result["auth_fire_s"] + sent
+    return result
+
+
 def main() -> int:
     which = sys.argv[1:] or ["ledger", "errors"]
-    if not set(which) <= {"ledger", "errors"}:
-        sys.exit("usage: alerts.py [ledger|errors]")
+    if not set(which) <= {"ledger", "errors", "kafka"}:
+        sys.exit("usage: alerts.py [ledger|errors|kafka]")
     try:
         urllib.request.urlopen(f"{RECEIVER}/healthz", timeout=3)
         target = "webhook-receiver (or Discord, if DISCORD_ALERT_WEBHOOK_URL is set: check the channel)"
@@ -210,6 +258,10 @@ def main() -> int:
         results["LedgerImbalance"] = ledger_drill()
     if "errors" in which:
         results["HighErrorRate"] = errors_drill()
+    if "kafka" in which:
+        k = kafka_drill()
+        results["KafkaAdminUsed"] = {"fire_s": k.get("admin_fire_s"), "notify_s": k.get("admin_notify_s")}
+        results["KafkaAuthFailures"] = {"fire_s": k.get("auth_fire_s"), "notify_s": k.get("auth_notify_s")}
 
     print("\nalert             fired after   sent after   resolved after")
     ok = True
