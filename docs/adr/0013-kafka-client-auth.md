@@ -188,7 +188,7 @@ Rejected: B for now (certificate operations in every environment, better done to
 - **Every new Kafka client adds a principal and its rows** to the ACL table and the init job's list, in the same task: the notifier (4.7), analytics and relays (Stage 6). A Flink exactly-once sink also needs a prefixed `TransactionalId` grant.
 - **Integration tests stay on unauthenticated brokers**; each service's client-config function is unit-tested with and without credentials, and the stack job's negative checks test the ACLs themselves.
 - **Still trusted:** an authenticated producer's content. A compromised or buggy game server can still publish wrong results, so the marketplace keeps its contract checks. Locally the traffic is unencrypted; that is accepted for a single-host bridge network and fixed by `SASL_SSL` in AWS.
-- **Watch:** the `admin` credential is all-powerful; only the init job and humans use it, and an `admin` login outside the init job is worth an alert once dashboards exist (5.1).
+- **Watch:** the `admin` credential is all-powerful. It's for humans only, on the broker's localhost ADMIN listener, and every use raises KafkaAdminUsed (implementation notes below).
 - Interview angle: authorization per topic and per consumer group, why consumer-group hijacking is as dangerous as forged events, why the mechanism (SCRAM, mTLS, IAM) is swappable while the ACLs stay, and why a topic ACL makes a per-event signature unnecessary.
 
 ## Implementation notes (task 5.5)
@@ -206,4 +206,15 @@ Rejected: B for now (certificate operations in every environment, better done to
 - **Telemetry.**
   - The broker logs every denial at INFO on stdout (`kafka.authorizer.logger`: principal, operation, resource; `make logs s=kafka`).
   - Clients log their produce and consume errors as before; Kafka itself never prints a password (`sasl.jaas.config = [hidden]`).
-  - The marketplace's Java agent already exports `kafka_consumer_failed_authentication_total` and `kafka_producer_failed_authentication_total`. The Go and Python clients have no such counter yet; it's a follow-up, together with the `admin`-login alert.
+  - The marketplace's Java agent already exports `kafka_consumer_failed_authentication_total` and `kafka_producer_failed_authentication_total`.
+- **Counted at the broker, and admin made countable** (follow-up to task 5.5).
+  - The broker runs the OpenTelemetry Java agent: its logs (each denial with its principal) go to Loki, and JMX rules export failed and successful logins per listener and the authorizer's denied rate (`docs/observability.md`).
+  - Counting at the broker covers every client, including the one a client-side counter can't: a client that isn't ours.
+  - The authorizer's denied rate also counts topics it quietly filters out of metadata answers, so it never reads zero. KafkaAuthFailures therefore alerts on failed logins and on logged denials, for 5 minutes in a row.
+- **Three super users.** Idle, the broker made 47 requests a minute as `admin` (its own controller heartbeats), so "admin must not be used" needed separate identities:
+  - `broker`, the broker itself;
+  - `kafka-init`, the init job;
+  - `admin`, humans only.
+- **admin has no SCRAM credential** (an older volume's is deleted by `kafka-init`). It exists only as a PLAIN user on a localhost ADMIN listener inside the broker container (`kafka-admin`), so it can't be used over the network at all, and `make kafka-acl-check` proves that.
+  - Every admin login counts on that listener and raises KafkaAdminUsed.
+  - Rejected: logging the authorizer's allowed requests at DEBUG with a log4j filter that keeps only admin's. The agent captures log events before that filter, so every authorized request would have reached Loki.
