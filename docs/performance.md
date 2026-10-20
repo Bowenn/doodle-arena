@@ -41,8 +41,14 @@ The capacity, in one line: a game server at 0.25 vCPU holds about 20 to 40 four-
 | Local, `kill`, 0.25 CPU, parallel reassignment (#49) | 62 rooms in one pass, +7.1 s to +10.6 s | 12.9 s | missed (a saturated server) |
 | AWS, `stop`, first run | 41 rooms in 7 passes; the last 36 s after the stop | The drill's players gave up at 30 s | missed |
 | AWS, `stop`, after #49 | 40 rooms in 3 passes, all within 17.8 s of the shutdown | 16 to 17.5 s after the shutdown, no gap or duplicate | missed (the surviving server was saturated) |
+| Local, `stop` with the drain (5.5c), idle | 1 room, moved 2.0 s after SIGTERM | 2.1 s after the stop | met |
+| Local, `stop` with the drain, 80 rooms, uncapped | 41 rooms in 3 passes within 14.4 s; the first pass 0.8 s after SIGTERM | 15.8 to 19.4 s after the stop (the rooms kept running until moved) | missed (one laptop runs both servers) |
+| Local, `stop` with the drain, 80 rooms, 0.25 CPU | 41 rooms within 17.5 s | disconnected for 5.3 to 7.4 s (12.9 s for a capped kill) | met, for the disconnection |
+| AWS, `stop` with the drain (5.5c), 80 rooms | 41 rooms in 2 passes within 6.8 s of the SIGTERM (which ECS sent about 18 s after `stop-task`) | disconnected for 0.5 to 2.0 s (16 to 17.5 s before the drain) | met |
 
 ECS delivered SIGTERM about 18 s after `stop-task`, so the drill's own clock (32.6 s from the call) includes that delay. The lobby notices a dead server 6 to 7 s after its last heartbeat.
+
+With the drain (task 5.5c), a stop is no longer a failover. The server takes no new rooms and tells the lobby at once, and the lobby moves its rooms while they keep running. A drained room's players are cut off only for the reconnect after `room_moved`, so the drill also reports "disconnected for". The moves are still takeovers, so they are bounded by the surviving server's CPU, as before.
 
 ## 3. The web app (task 5.4)
 
@@ -92,5 +98,6 @@ On AWS (2026-10-20, the signed-out screen; Prometheus on the data host):
 | 2026-10-19, the re-measure | 506 s | 315 s | 29 minutes |
 | 2026-10-20, task 5.4 (209 resources: one more security-group rule) | 515 s | 357 s | 18 minutes |
 | 2026-10-20, task 5.5a (230 resources: Kafka's passwords and TLS) | 515 s | 317 s | 18 minutes |
+| 2026-10-20, task 5.5c (238 resources: Redis's passwords) | 530 s | 325 s | 30 minutes (with the load test) |
 
 The cost per session comes from Cost Explorer, whose data lags about a day.
