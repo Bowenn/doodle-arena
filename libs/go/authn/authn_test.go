@@ -23,7 +23,7 @@ import (
 
 // The shared cases from fixtures/jwt/ (ADR 0001): auth runs the same ones in Python.
 func TestSharedJWTFixtures(t *testing.T) {
-	dir := filepath.Join("..", "..", "..", "..", "fixtures", "jwt")
+	dir := filepath.Join("..", "..", "..", "fixtures", "jwt")
 	jwksDoc, err := os.ReadFile(filepath.Join(dir, "jwks.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -457,5 +457,35 @@ func TestParseJWKSRejectsShortKeys(t *testing.T) {
 	}
 	if _, err := ParseJWKS(jwksJSON(map[string]*rsa.PublicKey{"weak": &k.PublicKey})); err == nil {
 		t.Fatal("accepted a 1024-bit key")
+	}
+}
+
+// A token without iat passes by default (the lobby compares nothing with it) and is refused
+// with RequireIssuedAt (the notifier compares it with credential revocations, ADR 0015).
+func TestRequireIssuedAt(t *testing.T) {
+	key := newKey(t)
+	now := time.Now()
+	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"sub": "u-1", "roles": []string{"player"}, "iss": testIssuer, "aud": Audience,
+		"exp": now.Add(time.Minute).Unix(),
+	})
+	tok.Header["kid"] = "k1"
+	noIat, err := tok.SignedString(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := StaticKeys{"k1": &key.PublicKey}
+
+	c, err := NewVerifier(testIssuer, keys).Verify(t.Context(), noIat)
+	if err != nil || !c.IssuedAt.IsZero() {
+		t.Fatalf("default verifier: claims %+v, err %v; want accepted with a zero IssuedAt", c, err)
+	}
+	if _, err := NewVerifier(testIssuer, keys, RequireIssuedAt()).Verify(t.Context(), noIat); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("RequireIssuedAt: err = %v, want ErrInvalidToken", err)
+	}
+	iat := now.Add(-time.Minute).Truncate(time.Second)
+	c, err = NewVerifier(testIssuer, keys, RequireIssuedAt()).Verify(t.Context(), sign(t, key, "k1", iat, now.Add(time.Minute)))
+	if err != nil || !c.IssuedAt.Equal(iat) {
+		t.Fatalf("RequireIssuedAt with iat: IssuedAt %v, err %v; want %v", c.IssuedAt, err, iat)
 	}
 }
