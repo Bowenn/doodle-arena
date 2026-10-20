@@ -17,7 +17,7 @@ mkdir -p /opt/doodle
 cd /opt/doodle
 aws s3 cp --region ${region} "s3://${bundle_bucket}/${bundle_key}" bundle.zip
 unzip -o -q bundle.zip
-chmod +x kafka/create-topics.sh postgres/init/*.sh
+chmod +x kafka/*.sh postgres/init/*.sh
 
 # Secrets never touch the user data or a log: read with the instance role, written mode 600.
 umask 077
@@ -27,8 +27,15 @@ umask 077
   echo "${var}=$(aws ssm get-parameter --region ${region} --with-decryption --name /doodle-arena/${name} --query Parameter.Value --output text)"
 %{ endfor ~}
 } > .env
+# The broker's TLS key and certificate (kafka.tf), for the Kafka container's user (uid 1000).
+mkdir -p kafka-tls
+aws ssm get-parameter --region ${region} --with-decryption --name /doodle-arena/stack/kafka-server-pem --query Parameter.Value --output text > kafka-tls/server.pem
+aws ssm get-parameter --region ${region} --name /doodle-arena/stack/kafka-ca-pem --query Parameter.Value --output text > kafka-tls/ca.pem
+chown 1000:1000 kafka-tls/server.pem
+chmod 644 kafka-tls/ca.pem
+chmod 755 kafka-tls
 # Until a human puts the Discord webhook (docs/setup.md), alerts go nowhere instead of failing.
 sed -i 's|^DISCORD_ALERT_WEBHOOK_URL=unset$|DISCORD_ALERT_WEBHOOK_URL=http://127.0.0.1:9/discord-not-configured|' .env
 
-# Not --wait: mongo-users and kafka-topics are one-shot jobs that exit when done.
+# Not --wait: mongo-users and kafka-init are one-shot jobs that exit when done.
 docker compose up -d

@@ -63,20 +63,26 @@ group.initial.rebalance.delay.ms=0
 auto.create.topics.enable=false
 EOF
 
-if [[ "$KAFKA_INTERNAL_PROTOCOL" == SASL_SSL ]]; then
-  : "${KAFKA_TLS_DIR:?}"
-  cat >> "$CONFIG" <<EOF
-ssl.keystore.type=PEM
-ssl.keystore.location=${KAFKA_TLS_DIR}/server.pem
-EOF
-fi
-
-# The admin client config for the healthcheck and kafka-init (the same credential).
+# The admin client config for the healthcheck (kafka-init writes its own).
 cat > /tmp/admin.properties <<EOF
 security.protocol=${KAFKA_INTERNAL_PROTOCOL}
 sasl.mechanism=SCRAM-SHA-512
 sasl.jaas.config=${scram_admin}
 EOF
+
+# AWS: the broker's key and certificate (one PEM file, the key in PKCS#8) from the stack's own
+# CA (infra/terraform/stack/kafka.tf), which clients trust.
+if [[ "$KAFKA_INTERNAL_PROTOCOL" == SASL_SSL ]]; then
+  : "${KAFKA_TLS_DIR:?}"
+  # The truststore is for the broker's own inter-broker client, which checks it at startup.
+  cat >> "$CONFIG" <<EOF
+ssl.keystore.type=PEM
+ssl.keystore.location=${KAFKA_TLS_DIR}/server.pem
+ssl.truststore.type=PEM
+ssl.truststore.location=${KAFKA_TLS_DIR}/ca.pem
+EOF
+  printf 'ssl.truststore.type=PEM\nssl.truststore.location=%s/ca.pem\n' "$KAFKA_TLS_DIR" >> /tmp/admin.properties
+fi
 
 # Format once. The data now lives under kraft/: a volume formatted before ADR 0013 has no admin
 # credential, so it's left alone instead (delete the old files under /var/lib/kafka/data by hand).

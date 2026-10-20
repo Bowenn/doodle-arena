@@ -9,6 +9,10 @@ locals {
     "postgres-password", "auth-db-password", "assets-db-password", "marketplace-db-password",
     "notifier-db-password", "mongo-root-password", "mongo-assets-password", "django-secret-key",
     "oauth-state-secret", "notifier-secret-key", "grafana-admin-password",
+    # Kafka (ADR 0013, kafka.tf): the admin super user and one SCRAM user per service.
+    "kafka-admin-password", "kafka-game-server-password", "kafka-lobby-password",
+    "kafka-assets-password", "kafka-marketplace-password", "kafka-notifier-password",
+    "kafka-auth-password", "kafka-metrics-password",
   ])
 }
 

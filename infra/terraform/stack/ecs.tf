@@ -48,7 +48,6 @@ locals {
     JWT_ISSUER         = local.issuer
     PUBLIC_BASE_URL    = local.public_url
     SECURE_COOKIES     = "true"
-    KAFKA_BROKERS      = local.kafka
     S3_PUBLIC_ENDPOINT = ""
     DRAWINGS_BUCKET    = aws_s3_bucket.bucket["drawings"].bucket
     AI_URL             = "http://ai.doodle.internal:8080"
@@ -58,7 +57,10 @@ locals {
     DB_PASSWORD       = local.secret_arn["assets-db-password"]
     MONGO_URL         = local.secret_arn["mongo-url"]
   }
-  auth_db_env = { DB_HOST = local.data_host, DB_NAME = "auth", DB_USER = "auth" }
+  # Kafka for assets' round consumer and outbox relay only, as in compose (ADR 0013).
+  assets_kafka_env     = merge(local.assets_env, local.kafka_env, { KAFKA_USERNAME = "assets" })
+  assets_kafka_secrets = merge(local.assets_secrets, { KAFKA_PASSWORD = local.secret_arn["kafka-assets-password"] })
+  auth_db_env          = { DB_HOST = local.data_host, DB_NAME = "auth", DB_USER = "auth" }
 
   go_health     = ["CMD", "/app", "healthcheck"]
   py_health     = ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).status != 200)"]
@@ -70,42 +72,52 @@ locals {
   services = {
     lobby = {
       image = "lobby", ports = [8080, 9090], discover = true, singleton = true, health = local.go_health
-      env = {
-        GRPC_PORT     = "9090", REDIS_ADDR = local.redis, KAFKA_BROKERS = local.kafka,
+      env = merge(local.kafka_env, {
+        GRPC_PORT     = "9090", REDIS_ADDR = local.redis, KAFKA_USERNAME = "lobby",
         AUTH_JWKS_URL = local.jwks, JWT_ISSUER = local.issuer,
+      })
+      secrets = {
+        TICKET_PRIVATE_KEY_PEM = local.secret_arn["ticket-private-key"]
+        KAFKA_PASSWORD         = local.secret_arn["kafka-lobby-password"]
       }
-      secrets = { TICKET_PRIVATE_KEY_PEM = local.secret_arn["ticket-private-key"] }
     }
     game-server-1 = {
       image  = "game-server", role = "game-server", ports = [8080, 9090], discover = true, singleton = true,
       health = local.go_health, stop_timeout = 60
-      env = merge(local.s3_env, {
+      env = merge(local.s3_env, local.kafka_env, {
         GRPC_PORT       = "9090", LOBBY_GRPC_ADDR = "lobby.doodle.internal:9090",
         CONTROL_ADDRESS = "game-server-1.doodle.internal:9090", WS_ADDRESS = "/ws/game-server-1",
-        REDIS_ADDR      = local.redis, KAFKA_BROKERS = local.kafka, WS_ALLOWED_ORIGINS = var.domain_name,
+        REDIS_ADDR      = local.redis, KAFKA_USERNAME = "game-server", WS_ALLOWED_ORIGINS = var.domain_name,
       })
-      secrets = { TICKET_PUBLIC_KEY_PEM = local.secret_arn["ticket-public-key"] }
+      secrets = {
+        TICKET_PUBLIC_KEY_PEM = local.secret_arn["ticket-public-key"]
+        KAFKA_PASSWORD        = local.secret_arn["kafka-game-server-password"]
+      }
     }
     game-server-2 = {
       image  = "game-server", role = "game-server", ports = [8080, 9090], discover = true, singleton = true,
       health = local.go_health, stop_timeout = 60
-      env = merge(local.s3_env, {
+      env = merge(local.s3_env, local.kafka_env, {
         GRPC_PORT       = "9090", LOBBY_GRPC_ADDR = "lobby.doodle.internal:9090",
         CONTROL_ADDRESS = "game-server-2.doodle.internal:9090", WS_ADDRESS = "/ws/game-server-2",
-        REDIS_ADDR      = local.redis, KAFKA_BROKERS = local.kafka, WS_ALLOWED_ORIGINS = var.domain_name,
+        REDIS_ADDR      = local.redis, KAFKA_USERNAME = "game-server", WS_ALLOWED_ORIGINS = var.domain_name,
       })
-      secrets = { TICKET_PUBLIC_KEY_PEM = local.secret_arn["ticket-public-key"] }
+      secrets = {
+        TICKET_PUBLIC_KEY_PEM = local.secret_arn["ticket-public-key"]
+        KAFKA_PASSWORD        = local.secret_arn["kafka-game-server-password"]
+      }
     }
     notifier = {
       image = "notifier", ports = [8080], discover = true, health = local.go_health
-      env = {
+      env = merge(local.kafka_env, {
         DB_HOST           = local.data_host, DB_NAME = "notifier", DB_USER = "notifier",
         AUTH_INTERNAL_URL = "http://auth.doodle.internal:9091", AUTH_JWKS_URL = local.jwks,
-        JWT_ISSUER        = local.issuer, KAFKA_BROKERS = local.kafka, NOTIFIER_ALLOWED_PRIVATE_HOSTS = "",
-      }
+        JWT_ISSUER        = local.issuer, KAFKA_USERNAME = "notifier", NOTIFIER_ALLOWED_PRIVATE_HOSTS = "",
+      })
       secrets = {
         DB_PASSWORD         = local.secret_arn["notifier-db-password"]
         NOTIFIER_SECRET_KEY = local.secret_arn["notifier-secret-key"]
+        KAFKA_PASSWORD      = local.secret_arn["kafka-notifier-password"]
       }
     }
     auth = {
@@ -125,8 +137,11 @@ locals {
     auth-relay = {
       image            = "auth", command = ["python", "-m", "app.relay"], singleton = true, health = local.alive_health
       instance_service = "auth"
-      env              = merge(local.auth_db_env, { KAFKA_BROKERS = local.kafka })
-      secrets          = { DB_PASSWORD = local.secret_arn["auth-db-password"] }
+      env              = merge(local.auth_db_env, local.kafka_env, { KAFKA_USERNAME = "auth" })
+      secrets = {
+        DB_PASSWORD    = local.secret_arn["auth-db-password"]
+        KAFKA_PASSWORD = local.secret_arn["kafka-auth-password"]
+      }
     }
     ai = {
       image = "ai", ports = [8080], discover = true, health = local.py_health
@@ -145,12 +160,12 @@ locals {
     assets-consumer = {
       image   = "assets", role = "assets", singleton = true, instance_service = "assets",
       command = ["python", "manage.py", "consume_rounds"], health = local.consumer_live,
-      env     = local.assets_env, secrets = local.assets_secrets
+      env     = local.assets_kafka_env, secrets = local.assets_kafka_secrets
     }
     assets-relay = {
       image   = "assets", role = "assets", singleton = true, instance_service = "assets",
       command = ["python", "manage.py", "relay_outbox"], health = local.alive_health,
-      env     = local.assets_env, secrets = local.assets_secrets
+      env     = local.assets_kafka_env, secrets = local.assets_kafka_secrets
     }
     assets-beat = {
       image   = "assets", role = "assets", singleton = true, instance_service = "assets",
@@ -161,13 +176,14 @@ locals {
     marketplace = {
       image  = "marketplace", ports = [8080], discover = true, cpu = 512, memory = 1024, start_period = 90,
       health = ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
-      env = {
+      env = merge(local.kafka_env, {
         DB_HOST         = local.data_host, DB_NAME = "marketplace", DB_USER = "marketplace",
-        AUTH_JWKS_URL   = local.jwks, JWT_ISSUER = local.issuer, KAFKA_BROKERS = local.kafka,
+        AUTH_JWKS_URL   = local.jwks, JWT_ISSUER = local.issuer, KAFKA_USERNAME = "marketplace",
         PUBLIC_BASE_URL = local.public_url,
-      }
+      })
       secrets = {
         DB_PASSWORD           = local.secret_arn["marketplace-db-password"]
+        KAFKA_PASSWORD        = local.secret_arn["kafka-marketplace-password"]
         STRIPE_SECRET_KEY     = local.secret_arn["stripe/secret-key"]
         STRIPE_WEBHOOK_SECRET = local.secret_arn["stripe/webhook-secret"]
       }
