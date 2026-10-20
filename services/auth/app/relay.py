@@ -31,6 +31,7 @@ from sqlalchemy.exc import OperationalError
 
 from app import SERVICE_NAME, telemetry
 from app.db import make_engine, outbox
+from app.kafka_auth import kafka_auth
 from app.logs import logging_config
 from app.settings import Settings
 
@@ -86,6 +87,8 @@ def new_producer(brokers: str, client_id: str) -> Producer:
             "message.timeout.ms": int(FLUSH_TIMEOUT * 1000),
             # Compose publishes Kafka on 127.0.0.1 for host-side tools; stay on IPv4.
             "broker.address.family": "v4",
+            # The auth Kafka user: it may write auth.users.v1.
+            **kafka_auth(),
         }
     )
 
