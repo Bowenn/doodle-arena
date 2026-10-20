@@ -44,8 +44,9 @@ fi
 ./scripts/gen-ticket-key.sh
 
 # --renew-anon-volumes refreshes web's node_modules volume after a dependency change.
-# Data lives in named volumes, which it never touches.
-docker compose -f infra/docker-compose.yml --env-file .env up -d --build --wait --renew-anon-volumes "$@"
+# Data lives in named volumes, which it never touches. --remove-orphans removes the containers
+# of services that were renamed or removed (kafka-topics became kafka-init).
+docker compose -f infra/docker-compose.yml --env-file .env up -d --build --wait --renew-anon-volumes --remove-orphans "$@"
 
 cat <<'EOF'
 

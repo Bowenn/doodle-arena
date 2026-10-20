@@ -29,6 +29,9 @@ x-auth-db-env: &auth-db-env
 # to Kafka (design doc, section 4.4).
 x-game-events-env: &game-events-env
   KAFKA_BROKERS: kafka:9092
+  # One Kafka user per service (ADR 0013); both game servers are the principal game-server.
+  KAFKA_USERNAME: game-server
+  KAFKA_PASSWORD: ${KAFKA_GAME_SERVER_PASSWORD:?}
   S3_ENDPOINT: http://seaweedfs:8333
   S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
   S3_SECRET_KEY: ${S3_SECRET_KEY:?}
@@ -49,9 +52,8 @@ x-assets-env: &assets-env
   JWT_ISSUER: http://localhost:8080/api/auth
   # The browser-facing origin, for Django's CSRF Origin check behind the gateway.
   PUBLIC_BASE_URL: http://localhost:8080
-  # The pipeline (design doc 4.5): RoundFinished from Kafka, stroke logs from round-logs, images
-  # to drawings, replays to MongoDB with assets' own user.
-  KAFKA_BROKERS: kafka:9092
+  # The pipeline (design doc 4.5): stroke logs from round-logs, images to drawings, replays to
+  # MongoDB with assets' own user. Kafka is in assets-kafka-env, for two processes only.
   S3_ENDPOINT: http://seaweedfs:8333
   # Browsers load images from presigned URLs signed for this address: SeaweedFS's port published
   # on the host (in AWS, the S3 endpoint itself).
@@ -62,6 +64,14 @@ x-assets-env: &assets-env
   # Moderation (design doc 4.8). Not a startup dependency: while the AI service is down,
   # drawings retry and then wait in the review queue.
   AI_URL: http://ai:8080
+
+# Kafka for assets' round consumer and outbox relay only (ADR 0013): the web process, the
+# Celery worker and beat get no Kafka credential and aren't on the Kafka network, so a bug in
+# rendering user drawings can't reach the broker as assets.
+x-assets-kafka-env: &assets-kafka-env
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_USERNAME: assets
+  KAFKA_PASSWORD: ${KAFKA_ASSETS_PASSWORD:?}
 
 # Go services check their own /healthz (their runtime image has no shell).
 x-go-healthcheck: &go-healthcheck
@@ -100,14 +110,17 @@ services:
       TICKET_PRIVATE_KEY_PATH: /run/secrets/ticket-private-key
       # MatchFinished events for the weekly leaderboard (consumer group lobby-leaderboard).
       KAFKA_BROKERS: kafka:9092
+      KAFKA_USERNAME: lobby
+      KAFKA_PASSWORD: ${KAFKA_LOBBY_PASSWORD:?}
     secrets:
       - ticket-private-key
+    networks: [default, kafka]
     depends_on:
       otel-lgtm:
         condition: service_healthy
       redis:
         condition: service_healthy
-      kafka-topics:
+      kafka-init:
         condition: service_completed_successfully
     healthcheck: *go-healthcheck
 
@@ -135,12 +148,13 @@ services:
       WS_ALLOWED_ORIGINS: localhost:8080
     secrets:
       - ticket-public-key
+    networks: [default, kafka]
     depends_on:
       redis:
         condition: service_healthy
       otel-lgtm:
         condition: service_healthy
-      kafka-topics:
+      kafka-init:
         condition: service_completed_successfully
       seaweedfs-buckets:
         condition: service_completed_successfully
@@ -169,12 +183,13 @@ services:
       WS_ALLOWED_ORIGINS: localhost:8080
     secrets:
       - ticket-public-key
+    networks: [default, kafka]
     depends_on:
       redis:
         condition: service_healthy
       otel-lgtm:
         condition: service_healthy
-      kafka-topics:
+      kafka-init:
         condition: service_completed_successfully
       seaweedfs-buckets:
         condition: service_completed_successfully
@@ -205,15 +220,18 @@ services:
       NOTIFIER_SECRET_KEY: ${NOTIFIER_SECRET_KEY:?}
       # SaleCompleted and CoinsCredited in, DeliveryDead out.
       KAFKA_BROKERS: kafka:9092
+      KAFKA_USERNAME: notifier
+      KAFKA_PASSWORD: ${KAFKA_NOTIFIER_PASSWORD:?}
       # The only host allowed to resolve to a private address (and to use http): the local test
       # receiver below. Empty in AWS (ADR 0014).
       NOTIFIER_ALLOWED_PRIVATE_HOSTS: webhook-receiver
+    networks: [default, kafka]
     depends_on:
       otel-lgtm:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      kafka-topics:
+      kafka-init:
         condition: service_completed_successfully
     healthcheck: *go-healthcheck
 
@@ -273,12 +291,15 @@ services:
       OTEL_SERVICE_NAME: auth
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=auth-relay-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
       KAFKA_BROKERS: kafka:9092
+      KAFKA_USERNAME: auth
+      KAFKA_PASSWORD: ${KAFKA_AUTH_PASSWORD:?}
+    networks: [default, kafka]
     depends_on:
       otel-lgtm:
         condition: service_healthy
       auth-migrate:
         condition: service_completed_successfully
-      kafka-topics:
+      kafka-init:
         condition: service_completed_successfully
     healthcheck:
       # The relay loop touches this file on every pass, even while Kafka is down.
@@ -340,8 +361,6 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-      kafka-topics:
-        condition: service_completed_successfully
       seaweedfs-buckets:
         condition: service_completed_successfully
     healthcheck: *py-healthcheck
@@ -387,16 +406,17 @@ services:
       dockerfile: services/assets/Dockerfile
     command: ["python", "manage.py", "consume_rounds"]
     environment:
-      <<: [*app-env, *assets-env]
+      <<: [*app-env, *assets-env, *assets-kafka-env]
       SERVICE_INSTANCE_ID: assets-consumer-1
       OTEL_SERVICE_NAME: assets
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-consumer-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+    networks: [default, kafka]
     depends_on:
       otel-lgtm:
         condition: service_healthy
       assets-migrate:
         condition: service_completed_successfully
-      kafka-topics:
+      kafka-init:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -416,16 +436,17 @@ services:
       dockerfile: services/assets/Dockerfile
     command: ["python", "manage.py", "relay_outbox"]
     environment:
-      <<: [*app-env, *assets-env]
+      <<: [*app-env, *assets-env, *assets-kafka-env]
       SERVICE_INSTANCE_ID: assets-relay-1
       OTEL_SERVICE_NAME: assets
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-relay-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+    networks: [default, kafka]
     depends_on:
       otel-lgtm:
         condition: service_healthy
       assets-migrate:
         condition: service_completed_successfully
-      kafka-topics:
+      kafka-init:
         condition: service_completed_successfully
     healthcheck:
       # The relay loop touches this file on every pass, even while Kafka is down.
@@ -498,17 +519,20 @@ services:
       JWT_ISSUER: http://localhost:8080/api/auth
       # DrawingApproved and MatchFinished in, the outbox out.
       KAFKA_BROKERS: kafka:9092
+      KAFKA_USERNAME: marketplace
+      KAFKA_PASSWORD: ${KAFKA_MARKETPLACE_PASSWORD:?}
       # Stripe test mode (docs/setup.md). Empty is allowed: coin packs then answer 503.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       # Where Stripe Checkout sends the browser back to.
       PUBLIC_BASE_URL: http://localhost:8080
+    networks: [default, kafka]
     depends_on:
       otel-lgtm:
         condition: service_healthy
       postgres:
         condition: service_healthy
-      kafka-topics:
+      kafka-init:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
@@ -629,39 +653,49 @@ services:
 
   kafka:
     image: apache/kafka:4.2.2
+    # SCRAM-SHA-512 users and ACLs, deny by default (ADR 0013): infra/kafka/broker.sh writes the
+    # broker config and formats the storage with the admin credential on first start.
+    entrypoint: ["/bin/bash", "/etc/doodle-arena/kafka-broker.sh"]
     environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      # Topics are created explicitly (task 1.2), never by a typo in a producer.
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?}
+      KAFKA_ADVERTISED_HOST: kafka
+      # 9094 for host tools (tools/eventctl, the drills), as the dev-tools user.
+      KAFKA_EXTERNAL: "1"
       KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
     volumes:
       - kafka-data:/var/lib/kafka/data
+      - ./kafka/broker.sh:/etc/doodle-arena/kafka-broker.sh:ro
+      - ./kafka/log4j2.yaml:/etc/doodle-arena/kafka-log4j2.yaml:ro
+    # Only Kafka's clients share this network (ADR 0013): the gateway, auth, the AI service and
+    # the assets web process and worker can't reach the broker at all.
+    networks: [kafka]
     ports:
       - "127.0.0.1:9094:9094"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /tmp/admin.properties >/dev/null 2>&1"]
       interval: 5s
       timeout: 10s
       retries: 30
 
-  # One-shot job. Services that use Kafka depend on it with service_completed_successfully, so
-  # they start after the topics exist (and `compose up --wait` accepts the job exiting).
-  kafka-topics:
+  # One-shot job, as admin: topics, one user per service and the ACLs (infra/kafka/init.sh).
+  # Services that use Kafka depend on it with service_completed_successfully, so they start
+  # after their user and grants exist (and `compose up --wait` accepts the job exiting).
+  kafka-init:
     image: apache/kafka:4.2.2
-    entrypoint: ["/bin/bash", "/create-topics.sh"]
+    entrypoint: ["/bin/bash", "/init.sh"]
+    environment:
+      KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?}
+      KAFKA_GAME_SERVER_PASSWORD: ${KAFKA_GAME_SERVER_PASSWORD:?}
+      KAFKA_LOBBY_PASSWORD: ${KAFKA_LOBBY_PASSWORD:?}
+      KAFKA_ASSETS_PASSWORD: ${KAFKA_ASSETS_PASSWORD:?}
+      KAFKA_MARKETPLACE_PASSWORD: ${KAFKA_MARKETPLACE_PASSWORD:?}
+      KAFKA_NOTIFIER_PASSWORD: ${KAFKA_NOTIFIER_PASSWORD:?}
+      KAFKA_AUTH_PASSWORD: ${KAFKA_AUTH_PASSWORD:?}
+      KAFKA_METRICS_PASSWORD: ${KAFKA_METRICS_PASSWORD:?}
+      KAFKA_DEV_TOOLS_PASSWORD: ${KAFKA_DEV_TOOLS_PASSWORD:?}
     volumes:
-      - ./kafka/create-topics.sh:/create-topics.sh:ro
+      - ./kafka/init.sh:/init.sh:ro
+    networks: [kafka]
     depends_on:
       kafka:
         condition: service_healthy
@@ -684,7 +718,7 @@ services:
       timeout: 3s
       retries: 30
 
-  # One-shot job; the game servers and assets depend on it, like kafka-topics.
+  # One-shot job; the game servers and assets depend on it, like kafka-init.
   seaweedfs-buckets:
     image: chrislusf/seaweedfs:4.48
     entrypoint: ["/bin/sh", "/create-buckets.sh"]
@@ -706,11 +740,14 @@ services:
     environment:
       DEPLOYMENT_ENVIRONMENT: local
       OTLP_ENDPOINT: http://otel-lgtm:4318
+      KAFKA_USERNAME: kafka-metrics
+      KAFKA_PASSWORD: ${KAFKA_METRICS_PASSWORD:?}
     volumes:
       - ./observability/kafka-metrics/config.yaml:/etc/otelcol/config.yaml:ro
+    networks: [default, kafka]
     depends_on:
-      kafka:
-        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       otel-lgtm:
         condition: service_healthy
 
@@ -753,6 +790,10 @@ services:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:4317:4317"
       - "127.0.0.1:4318:4318"
+
+# Kafka's own network (ADR 0013), joined only by Kafka clients.
+networks:
+  kafka:
 
 volumes:
   postgres-data:
