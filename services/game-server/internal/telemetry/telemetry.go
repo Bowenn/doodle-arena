@@ -27,8 +27,9 @@ func Enabled() bool {
 
 // Setup installs global trace, metric and log providers that export over OTLP. Everything
 // comes from the standard OTEL_* environment: endpoint, protocol, service name, resource
-// attributes, sampler and export interval. The returned function flushes and stops the
-// exporters; call it during shutdown, after the server has drained.
+// attributes, sampler (Sampler unless OTEL_TRACES_SAMPLER is set) and export interval. The
+// returned function flushes and stops the exporters; call it during shutdown, after the server
+// has drained.
 func Setup(ctx context.Context) (shutdown func(context.Context) error, err error) {
 	if !Enabled() {
 		return func(context.Context) error { return nil }, nil
@@ -43,11 +44,12 @@ func Setup(ctx context.Context) (shutdown func(context.Context) error, err error
 	if err != nil {
 		return nil, fmt.Errorf("trace exporter: %w", err)
 	}
-	// Default sampler: parent-based, always on (OTEL_TRACES_SAMPLER can change it).
-	tracerProvider := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExporter),
-		sdktrace.WithResource(res),
-	)
+	opts := []sdktrace.TracerProviderOption{sdktrace.WithBatcher(traceExporter), sdktrace.WithResource(res)}
+	// The SDK reads OTEL_TRACES_SAMPLER itself; without it, Sampler (sampler.go).
+	if os.Getenv("OTEL_TRACES_SAMPLER") == "" {
+		opts = append(opts, sdktrace.WithSampler(Sampler()))
+	}
+	tracerProvider := sdktrace.NewTracerProvider(opts...)
 
 	metricExporter, err := otlpmetrichttp.New(ctx)
 	if err != nil {

@@ -147,7 +147,9 @@ func run(cfg config, logger *slog.Logger) error {
 		Addr: cfg.redisAddr, DialTimeout: 2 * time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second,
 	})
 	defer rdb.Close()
-	if err := redisotel.InstrumentTracing(rdb); err != nil {
+	// Without the arguments: a commit's carry the room's events and snapshot, a redeem's the
+	// join ticket.
+	if err := redisotel.InstrumentTracing(rdb, redisotel.WithDBStatement(false)); err != nil {
 		return fmt.Errorf("redis tracing: %w", err)
 	}
 	meter := otel.Meter("game-server")
