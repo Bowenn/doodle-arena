@@ -7,7 +7,8 @@
 #   - on the resource, service.name=web, one service.instance.id for every browser, and the
 #     deployment environment; a browser's own version or instance id would let one client
 #     create series without end;
-#   - on each point, only page, and only one of the web app's page names;
+#   - on each vital's point, only page, and only one of the web app's page names (web.ws.rtt
+#     has no attributes at all);
 #   - histograms only, with the web app's own bucket bounds, units and scope, and no exemplars
 #     (each of these could otherwise mint new series).
 # Browsers send deltas (each page load is its own short-lived process); deltatocumulative adds
@@ -61,8 +62,10 @@ processors:
         statements:
           - keep_keys(datapoint.attributes, ["page"])
           - set(datapoint.exemplars, [])
-          - set(datapoint.attributes["page"], "other") where not IsMatch(datapoint.attributes["page"], "^(lobby|room|gallery|market|my-drawings|wallet|developer|moderate|leaderboard)$")
-  # Four metrics times ten pages is 40 streams; anything past the cap is dropped, not tracked.
+          # The vitals carry a page; the round trip is always a room's, so it carries none.
+          - delete_key(datapoint.attributes, "page") where metric.name == "web.ws.rtt"
+          - set(datapoint.attributes["page"], "other") where metric.name != "web.ws.rtt" and not IsMatch(datapoint.attributes["page"], "^(lobby|room|gallery|market|my-drawings|wallet|developer|moderate|leaderboard)$")
+  # Three vitals times ten pages plus the round trip is 31 streams; anything past the cap is dropped, not tracked.
   delta_to_cumulative:
     max_stale: 10m
     max_streams: 100
