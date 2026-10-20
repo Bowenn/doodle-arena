@@ -34,6 +34,7 @@ build/
 # Node
 node_modules/
 dist/
+web/.lighthouseci/
 *.tsbuildinfo
 
 # Terraform (infra/terraform/): providers and local state stay local; the lock file is committed.
