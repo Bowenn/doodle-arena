@@ -123,7 +123,8 @@ func run(cfg config, logger *slog.Logger) error {
 		Addr: cfg.redisAddr, DialTimeout: 2 * time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second,
 	})
 	defer rdb.Close()
-	if err := redisotel.InstrumentTracing(rdb); err != nil {
+	// Without the arguments: a whole room record (JSON) per write adds bytes, not insight.
+	if err := redisotel.InstrumentTracing(rdb, redisotel.WithDBStatement(false)); err != nil {
 		return fmt.Errorf("redis tracing: %w", err)
 	}
 

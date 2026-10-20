@@ -130,6 +130,7 @@ Keep this list accurate:
 - The data host's IMDS hop limit is 1, so only otel-lgtm (on the host network) can use the instance role. Don't raise it: every bridged container could then read the data host's secrets.
 - macOS runs scripts with bash 3.2: no `declare -A`, no `mapfile`.
 - Go runtime images are distroless (no shell or curl), so the binary checks its own health: `/app healthcheck`.
+- otel-lgtm has no memory limit. When the Docker VM runs out of memory, its OOM killer stops Tempo or the collector inside the container and Grafana keeps running; the healthcheck then turns unhealthy. Look with `docker run --rm --privileged --pid=host alpine dmesg | grep -i oom`, and restart it with `docker restart doodle-arena-otel-lgtm-1`.
 - Loki (in otel-lgtm) stops accepting logs when its disk is over 90% full and answers "Ingester is shutting down". On CI, `stack.yml` frees runner disk first; locally, prune Docker if logs stop reaching Grafana.
 - Refresh tokens rotate on every use, and a reused one revokes the whole family. Any client must refresh single-flight (see `web/src/auth.ts`); two concurrent refreshes log the user out.
 - Testcontainers needs Docker's socket. `scripts/test.sh` sets `DOCKER_HOST` from the Docker context, because Docker Desktop may not create `/var/run/docker.sock`.

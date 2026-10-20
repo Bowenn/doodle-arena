@@ -724,10 +724,18 @@ services:
       # Read by the Discord contact point (infra/observability/grafana/alerting/). Without a
       # Discord webhook in .env, alerts go to the webhook-receiver test service instead.
       DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:-http://webhook-receiver:9000/hooks/alerts}
+      # The collector's memory limit, merged over the image's config (the file says why).
+      OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml
     # The image's own check (every backend ready, Loki included), run more often than its 30 s
     # default: every service waits for it, so records never queue up behind a starting Loki.
+    # After startup the image's check skips a backend that refuses connections, so a Tempo or
+    # collector killed later (the Docker VM's OOM killer) would still pass: both are required.
     healthcheck:
-      test: ["CMD", "/otel-lgtm/docker/healthcheck.sh"]
+      test:
+        - CMD-SHELL
+        - /otel-lgtm/docker/healthcheck.sh >/dev/null
+          && curl -fsS -o /dev/null http://127.0.0.1:3200/ready
+          && curl -fsS -o /dev/null http://127.0.0.1:13133/ready
       interval: 3s
       timeout: 5s
       retries: 60
@@ -739,6 +747,7 @@ services:
       - ./observability/grafana/alerting/contact-points.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-contact-points.yaml:ro
       - ./observability/grafana/alerting/policies.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-policies.yaml:ro
       - ./observability/grafana/alerting/rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-rules.yaml:ro
+      - ./observability/otelcol/memory-limiter.yaml:/etc/doodle-arena/otelcol-memory-limiter.yaml:ro
     ports:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:4317:4317"

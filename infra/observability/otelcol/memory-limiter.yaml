@@ -1,0 +1,21 @@
+# Merged over otel-lgtm's own collector config (/otel-lgtm/otelcol-config.yaml) through
+# OTELCOL_EXTRA_ARGS in infra/docker-compose.yml. The container has no memory limit, so the
+# collector's growth is bounded here: past the soft limit (limit_mib - spike_limit_mib) it
+# refuses new data with a retryable error and the services' exporters back off, instead of
+# filling the Docker VM while a backend (Tempo) is down and the export queue grows. A healthy
+# pipeline at 80 rooms uses about 150-300 MiB.
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+# The merge replaces lists, so each pipeline names both processors; memory_limiter goes first.
+service:
+  pipelines:
+    traces:
+      processors: [memory_limiter, batch]
+    metrics:
+      processors: [memory_limiter, batch]
+    logs:
+      processors: [memory_limiter, batch]

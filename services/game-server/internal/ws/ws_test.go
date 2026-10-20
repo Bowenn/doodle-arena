@@ -408,7 +408,13 @@ func TestSendLagIsRecordedForEveryWrite(t *testing.T) {
 	write(t, c, "ping", map[string]any{"t": 1})
 	next(t, c, "pong")
 
+	// The writer records a lag after its write returns, so the client can read the pong
+	// before the pong's lag is recorded: wait for it.
 	m, dp := sendLag(t, reader)
+	for deadline := time.Now().Add(2 * time.Second); dp.Count < 2 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+		m, dp = sendLag(t, reader)
+	}
 	if m.Unit != "ms" {
 		t.Fatalf("unit = %q, want ms", m.Unit)
 	}

@@ -38,6 +38,8 @@ Configuration is the standard `OTEL_*` environment, set once in `infra/docker-co
 
 `service.instance.id` names one process, not one container: gunicorn's workers and Celery's pool processes append their own suffix (`assets-1-w1`, `assets-worker-1-p0`), because each exports its own cumulative counters, and under one id Prometheus sees a single series that keeps resetting.
 
+otel-lgtm runs without a container memory limit, so when the Docker VM runs out of memory its OOM killer stops the biggest process inside, usually Tempo, then the collector, while Grafana and the rest keep running (`docker run --rm --privileged --pid=host alpine dmesg | grep -i oom` shows it). Two guards: the collector's `memory_limiter` (`infra/observability/otelcol/memory-limiter.yaml`, merged over the image's config through `OTELCOL_EXTRA_ARGS`) refuses data past 768 MiB instead of growing while Tempo is down, and the compose healthcheck requires Tempo's and the collector's `/ready` as well as the image's own check, which skips a backend that refuses connections. A dead Tempo or collector then shows as unhealthy in `make ps`; Compose doesn't restart it, `docker restart doodle-arena-otel-lgtm-1` does.
+
 Health checks and the Vite dev-server assets are not traced, except in marketplace: the Java agent has no simple path exclusion, so its container health check produces a small trace every few seconds until tail sampling arrives (Stage 6). Browser telemetry (Web Vitals, errors, fetch spans) comes with task 5.4. `make telemetry-check` proves the pipeline end to end: a request with a known trace id must show up in Tempo (gateway and auth spans) and in Loki (an auth log line with that `trace_id`), and every service must export metrics. CI runs it in `stack.yml`.
 
 ## 2. Logging
@@ -160,7 +162,7 @@ The gateway (Nginx) exports traces but no metrics, so the overview shows the ser
 - Span attributes for ids use dots: `room.id`, `match.id`, `user.id`, `round.no` (log fields keep `room_id` and the like). Ids are fine on spans, never on metrics.
 - Sampling:
   - Keep every trace for purchases, Stripe webhooks and rewards.
-  - Sample game traffic. Trace rounds and room lifecycle events, not individual strokes.
+  - Sample game traffic. Trace rounds and room lifecycle events, not individual strokes. A room commits every step (each stroke and guess) to Redis from its actor, outside any trace, so the game server's default sampler (`internal/telemetry/sampler.go`) drops a Redis client span that has no parent; Redis calls inside a trace (a join's ticket redeem, a takeover's reads) are still traced. The lobby uses the same sampler: its registry expiry and the reassigner's scan read Redis outside any trace every few seconds, and most of its traces were a single Redis `get`. Traced, those commits were one trace per stroke, about 97% of all spans at 80 rooms, and Tempo ran the Docker VM out of memory. Neither service's Redis spans carry `db.statement`: a commit's arguments are the room's events and snapshot, a redeem's the join ticket.
   - Stage 6: tail sampling in the collector keeps every trace that errored or was slow.
 
 ## 5. Alerting
