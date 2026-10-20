@@ -62,6 +62,8 @@ jobs:
         run: make pipeline-check
       - name: make kafka-acl-check (the broker refuses what each service must not do, ADR 0013)
         run: make kafka-acl-check
+      - name: make data-acl-check (Redis and SeaweedFS refuse other services' keys and buckets)
+        run: make data-acl-check
       - name: make alerts-check (dashboards, alert rules and the contact point load and evaluate)
         run: make alerts-check
       # The load test's script must keep working: two rooms for a minute, thresholds included.
