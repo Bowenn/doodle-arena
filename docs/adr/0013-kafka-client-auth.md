@@ -190,3 +190,19 @@ Rejected: B for now (certificate operations in every environment, better done to
 - **Still trusted:** an authenticated producer's content. A compromised or buggy game server can still publish wrong results, so the marketplace keeps its contract checks. Locally the traffic is unencrypted; that is accepted for a single-host bridge network and fixed by `SASL_SSL` in AWS.
 - **Watch:** the `admin` credential is all-powerful; only the init job and humans use it, and an `admin` login outside the init job is worth an alert once dashboards exist (5.1).
 - Interview angle: authorization per topic and per consumer group, why consumer-group hijacking is as dangerous as forged events, why the mechanism (SCRAM, mTLS, IAM) is swappable while the ACLs stay, and why a topic ACL makes a per-event signature unnecessary.
+
+## Implementation notes (task 5.5)
+
+- **The first credential.** `infra/kafka/broker.sh` replaces the image's start script: it writes `server.properties` and formats the storage once with `kafka-storage.sh format --add-scram` for `admin` (KIP-900). The `CONTROLLER` listener can't use SCRAM, because the credentials live in the metadata log the controller serves. So it is SASL/PLAIN with a static `admin` user, on `localhost` only. No `ANONYMOUS` super user exists anywhere. The data moved to `/var/lib/kafka/data/kraft`, so a volume formatted before this task is left alone instead of starting without an admin.
+- **More principals than the table above.**
+  - `notifier`: reads `market.sales.v1`, `market.wallet.v1` and `auth.users.v1` in groups `notifier` and `notifier-auth`, and writes `notifier.dlq.v1`.
+  - `auth`: the `auth-relay` writes `auth.users.v1`.
+  - `kafka-metrics`: Describe on every topic and group, and on the cluster, for broker-side lag.
+  - `dev-tools`: Read on every topic, Write on `game.rounds.v1` and `game.matches.v1`, and Read on groups starting with `dev-tools-`. It exists only locally and in CI; in AWS its password is unset, so `init.sh` skips it.
+  - The list is `GRANTS` in `infra/kafka/init.sh`.
+- **`make pipeline-check` moved** out of the assets web container, which no longer has Kafka. It runs as a one-off container of `assets-consumer`'s with the `dev-tools` credential, the one user besides the game server that may write `game.rounds.v1`.
+- **AWS.** Terraform's `tls` provider makes a CA and the broker's certificate (`infra/terraform/stack/kafka.tf`; names `data.doodle.internal`, `kafka`, `localhost`). The data host writes the key to a file at boot; tasks get the CA in `KAFKA_CA_PEM` and their password from SSM. The broker's own inter-broker client needs the CA too: it checks its SSL settings at startup. This was found with a local `SASL_SSL` broker before any AWS run. All three client libraries were checked over TLS with the CA as a PEM string: each one connects with the right CA and refuses an unrelated one.
+- **Telemetry.**
+  - The broker logs every denial at INFO on stdout (`kafka.authorizer.logger`: principal, operation, resource; `make logs s=kafka`).
+  - Clients log their produce and consume errors as before; Kafka itself never prints a password (`sasl.jaas.config = [hidden]`).
+  - The marketplace's Java agent already exports `kafka_consumer_failed_authentication_total` and `kafka_producer_failed_authentication_total`. The Go and Python clients have no such counter yet; it's a follow-up, together with the `admin`-login alert.

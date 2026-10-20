@@ -152,6 +152,8 @@ Two more sources besides the table: the Go services' runtime metrics (`go_gorout
 
 k6's built-ins (`k6_vus`, `k6_http_req_duration`, `k6_ws_msgs_sent` and the like) come along. A load test's virtual users are rooms, never metric attributes.
 
+Kafka's authorizer (ADR 0013, task 5.5) logs each denied request on the broker's stdout (principal, operation, resource; `make logs s=kafka`), which is where a service missing an ACL, or something probing, shows up. The marketplace's Java agent counts its own failed logins (`kafka_consumer_failed_authentication_total`, `kafka_producer_failed_authentication_total`).
+
 Kafka consumer lag per consumer group comes from the broker, not the clients (task 5.1): a `kafka-metrics` container (`otel/opentelemetry-collector-contrib`, the same version as the collector inside otel-lgtm) runs the `kafka_metrics` receiver every 30 s and pushes OTLP to otel-lgtm. It reports `kafka.consumer_group.lag_sum` per `group` and `topic` (Prometheus: `kafka_consumer_group_lag_sum`), for every consumer whatever its language. A collector of its own rather than an edit of otel-lgtm's bundled collector config, so upgrading that image never means re-syncing a copied file. Once Kafka requires SASL (ADR 0013, task 5.5), it needs a read-only Kafka user of its own.
 
 Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into Grafana's "Doodle Arena" folder (task 5.1). They're read-only in the UI: change the JSON, and Grafana picks it up within 30 seconds.
