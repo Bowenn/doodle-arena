@@ -37,6 +37,10 @@ spring:
       # Commit a record's offset only after the listener returned, so after its transaction committed.
       ack-mode: record
       auto-startup: ${KAFKA_LISTENERS_ENABLED:true}
+      # A refused login or a missing ACL (ADR 0013) is retried, not fatal: Spring Kafka stops the
+      # container on one by default. In AWS, ECS can start the marketplace before the data host's
+      # kafka-init has created its user and grants (the lobby was refused for 2 s that way).
+      auth-exception-retry-interval: 10s
   flyway:
     # Migrations run at startup; Flyway's advisory lock keeps two starting instances apart.
     locations: classpath:db/migration
