@@ -292,10 +292,14 @@ async def main(mode, players):
     ok = True
     for b in bots:
         took = f"{b.resumed_at - t0:.1f} s" if b.resumed_at else "never"
+        # What the player felt: from the socket closing until the new server's first message. A
+        # killed server drops everyone at once; a draining one keeps its rooms running until
+        # each is moved, so a drain's players are only cut off for this long.
+        cut = f"{b.resumed_at - b.dropped_at:.1f} s" if b.resumed_at and b.dropped_at else "n/a"
         print(
             f"  {b.user}: now on {b.server}, drops {b.drops}, "
             f"full welcomes after the drop {b.welcomes}, "
-            f"resumed after {took}, seq gaps/duplicates {b.gaps()}"
+            f"resumed after {took} (disconnected for {cut}), seq gaps/duplicates {b.gaps()}"
         )
         ok &= bool(b.resumed_at) and b.server != owner and not b.gaps()
     for b in drawers:
@@ -304,7 +308,13 @@ async def main(mode, players):
         print(f"  drawer {b.user}: your_word {len(words)} times")
         ok &= len(words) >= 2
     worst = max((b.resumed_at or 1e9) - t0 for b in bots)
-    print(f"recovery (slowest bot): {worst:.1f} s" if ok else "FAILED")
+    worst_cut = max((b.resumed_at or 1e9) - (b.dropped_at or t0) for b in bots)
+    print(
+        f"recovery (slowest bot): {worst:.1f} s after the {mode}, "
+        f"disconnected for {worst_cut:.1f} s"
+        if ok
+        else "FAILED"
+    )
     if mode == "pause":
         logs = subprocess.run(
             ["docker", "logs", "--since", "30s", f"doodle-arena-{owner}-1"],
