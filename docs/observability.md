@@ -177,7 +177,7 @@ Starting rules (tune the thresholds after the first load test):
 | ReconciliationStale | `market.ledger.imbalance` missing for 5 minutes (the job stopped or can't read the database; the two invariant alerts above are blind) | warning |
 | OutboxStuck | `game.outbox.pending > 0` for 10 minutes (Kafka or S3 down, or an entry that can't be published; rewards and drawings are waiting) | warning |
 | OwnershipViolation | `market.ownership.violations > 0` | critical |
-| SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
+| SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes. Blind to a server whose CPU is pinned: the metric ends when an event is queued, before the socket write (task 5.3 saw pongs wait seconds while it read under 0.1 ms); a send-lag metric is a follow-up | warning |
 | HighErrorRate | Server errors (HTTP 5xx; gRPC `UNKNOWN`, `DEADLINE_EXCEEDED`, `INTERNAL`, `UNAVAILABLE`, `DATA_LOSS`) above 1% of requests for 5 minutes, per service, when the service had at least 20 requests in those 5 minutes | warning |
 | ConsumerLagGrowing | A consumer group's lag (`kafka_consumer_group_lag_sum`) above 0 and higher than 10 minutes earlier, for 5 minutes | warning |
 | AuthOutboxStuck | `auth.outbox.lag` above 60 s for 5 minutes (Kafka down, or `auth-relay` stopped: a credential revocation isn't reaching the notifier, so a thief's webhooks keep running) | critical |
