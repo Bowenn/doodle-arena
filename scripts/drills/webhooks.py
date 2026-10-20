@@ -41,9 +41,31 @@ from google.protobuf.timestamp_pb2 import Timestamp
 GW = "http://localhost:8080"
 RECEIVER = "http://localhost:9000"
 KAFKA = os.environ.get("KAFKA_BROKERS", "localhost:9094")
+
+
+def dev_tools_password() -> str:
+    """The dev-tools Kafka user's password (ADR 0013), from the environment or ENV_FILE (.env)."""
+    if password := os.environ.get("KAFKA_DEV_TOOLS_PASSWORD"):
+        return password
+    env_file = Path(os.environ.get("ENV_FILE", ROOT / ".env"))
+    if env_file.is_file():
+        for line in env_file.read_text().splitlines():
+            if line.startswith("KAFKA_DEV_TOOLS_PASSWORD="):
+                return line.split("=", 1)[1]
+    sys.exit(f"no KAFKA_DEV_TOOLS_PASSWORD in {env_file}: run make up, or set ENV_FILE")
+
+
 # Compose publishes Kafka on 127.0.0.1 only and the broker advertises "localhost", which
-# librdkafka may resolve to ::1 first: stay on IPv4.
-KAFKA_CONF = {"bootstrap.servers": KAFKA, "broker.address.family": "v4"}
+# librdkafka may resolve to ::1 first: stay on IPv4. dev-tools may write game.matches.v1 and
+# read every topic, with groups named dev-tools-*.
+KAFKA_CONF = {
+    "bootstrap.servers": KAFKA,
+    "broker.address.family": "v4",
+    "security.protocol": "SASL_PLAINTEXT",
+    "sasl.mechanism": "SCRAM-SHA-512",
+    "sasl.username": "dev-tools",
+    "sasl.password": dev_tools_password(),
+}
 
 
 def http(
@@ -117,7 +139,7 @@ def find_dead_letter(delivery_id: str) -> Any:
     consumer = Consumer(
         {
             **KAFKA_CONF,
-            "group.id": "webhooks-drill-" + uuid.uuid4().hex,
+            "group.id": "dev-tools-webhooks-" + uuid.uuid4().hex,
             "enable.auto.commit": False,
         }
     )
