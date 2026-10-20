@@ -10,6 +10,7 @@ import pytest
 import redis
 from celery import signals
 from celery.contrib.testing.worker import start_worker
+from django.conf import settings
 
 from config.celery import app
 from config.jobs import oldest_age_seconds
@@ -52,23 +53,41 @@ def test_a_worker_runs_a_task_from_the_broker(broker: redis.Redis) -> None:
     finally:
         signals.task_success.disconnect(on_success, sender=ping)
     assert results == ["pong"]
-    assert broker.llen("assets") == 0
+    assert broker.llen(settings.CELERY_KEY_PREFIX + "assets") == 0
 
 
 def test_oldest_age_is_the_wait_of_the_oldest_message(broker: redis.Redis) -> None:
     queue = "age-test"
-    assert oldest_age_seconds(broker, queue, time.time()) == 0.0
+    # Every key Celery writes carries kombu's global prefix (the assets Redis user's).
+    key = settings.CELERY_KEY_PREFIX + queue
+    assert oldest_age_seconds(broker, key, time.time()) == 0.0
 
     sent = time.time()
     ping.apply_async(queue=queue)
     ping.apply_async(queue=queue)
 
-    age = oldest_age_seconds(broker, queue, sent + 30)
+    age = oldest_age_seconds(broker, key, sent + 30)
     assert 29 <= age <= 30
-    assert broker.llen(queue) == 2
+    assert broker.llen(key) == 2
+    assert broker.llen(queue) == 0
 
 
 def test_a_message_without_sent_at_counts_as_zero(broker: redis.Redis) -> None:
     broker.lpush("legacy", b'{"headers": {}}')
 
     assert oldest_age_seconds(broker, "legacy", time.time()) == 0.0
+
+
+def test_the_broker_url_gets_the_redis_user() -> None:
+    from config.settings import with_credentials
+
+    assert with_credentials("redis://redis:6379/1", "", "") == "redis://redis:6379/1"
+    assert (
+        with_credentials("redis://redis:6379/1", "assets", "p@ss/word")
+        == "redis://assets:p%40ss%2Fword@redis:6379/1"
+    )
+    # A URL that already names a user is replaced, not doubled.
+    assert (
+        with_credentials("redis://old:x@redis:6379/1", "assets", "s")
+        == "redis://assets:s@redis:6379/1"
+    )

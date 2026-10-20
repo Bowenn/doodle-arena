@@ -122,6 +122,8 @@ func run(cfg config, logger *slog.Logger) error {
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr: cfg.redisAddr, DialTimeout: 2 * time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second,
+		// The lobby Redis user (task 5.5): it may touch lobby:* only. Empty in tests.
+		Username: os.Getenv("REDIS_USERNAME"), Password: os.Getenv("REDIS_PASSWORD"),
 	})
 	defer rdb.Close()
 	// Without the arguments: a whole room record (JSON) per write adds bytes, not insight.

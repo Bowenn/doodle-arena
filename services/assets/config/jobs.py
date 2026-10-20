@@ -19,8 +19,9 @@ from opentelemetry.metrics import CallbackOptions, Observation
 log = logging.getLogger(__name__)
 
 
-def oldest_age_seconds(client: redis.Redis, queue: str, now: float) -> float:
-    raw = client.lindex(queue, -1)
+def oldest_age_seconds(client: redis.Redis, key: str, now: float) -> float:
+    """The wait of the oldest message in the queue stored at key (kombu's prefix included)."""
+    raw = client.lindex(key, -1)
     if raw is None:
         return 0.0
     try:
@@ -30,7 +31,7 @@ def oldest_age_seconds(client: redis.Redis, queue: str, now: float) -> float:
         return 0.0  # a message sent without the header (an older producer)
 
 
-def register_queue_age_gauge(broker_url: str, queues: list[str]) -> None:
+def register_queue_age_gauge(broker_url: str, queues: list[str], key_prefix: str = "") -> None:
     client: redis.Redis = redis.Redis.from_url(
         broker_url, socket_timeout=1, socket_connect_timeout=1
     )
@@ -39,7 +40,7 @@ def register_queue_age_gauge(broker_url: str, queues: list[str]) -> None:
         now = time.time()
         for queue in queues:
             try:
-                age = oldest_age_seconds(client, queue, now)
+                age = oldest_age_seconds(client, key_prefix + queue, now)
             except redis.RedisError as e:
                 log.warning(
                     "could not read the queue backlog", extra={"queue": queue, "error": str(e)}

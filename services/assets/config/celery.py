@@ -50,7 +50,8 @@ def start_pool_process_telemetry(**kwargs: Any) -> None:
     )
     # One process per worker reports the queue gauge, so the series isn't written twice.
     if telemetry.enabled() and current_process_index(base=0) == 0:
-        jobs.register_queue_age_gauge(app.conf.broker_url, [app.conf.task_default_queue])
+        prefix = app.conf.broker_transport_options.get("global_keyprefix", "")
+        jobs.register_queue_age_gauge(app.conf.broker_url, [app.conf.task_default_queue], prefix)
 
 
 @signals.beat_init.connect

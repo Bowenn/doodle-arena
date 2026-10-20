@@ -6,6 +6,7 @@ The service has two processes from one image: gunicorn serves the REST API and t
 
 import socket
 from pathlib import Path
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from pydantic_settings import BaseSettings
 
@@ -30,6 +31,9 @@ class Env(BaseSettings):
     jwt_issuer: str = "http://localhost:8080/api/auth"
     # The Celery broker: assets' own logical Redis database (design doc, section 5).
     celery_broker_url: str = "redis://redis:6379/1"
+    # The assets Redis user (task 5.5), added to the broker URL; empty in tests.
+    redis_username: str = ""
+    redis_password: str = ""
     # Kafka: assets consumes game.rounds.v1 (design doc 6.2).
     kafka_brokers: str = "kafka:9092"
     # Object storage: SeaweedFS locally, S3 in AWS. The stroke logs are the game server's bucket
@@ -146,11 +150,30 @@ ADMIN_SIGN_IN_URL = "/moderate"
 # Celery (config/celery.py reads every CELERY_* setting). Delivery is at least once: a task is
 # acknowledged after it finishes, and one whose worker died is redelivered, so every task must
 # be idempotent. A drawing's state lives in Postgres, so there is no result backend.
-CELERY_BROKER_URL = env.celery_broker_url
+
+
+def with_credentials(url: str, username: str, password: str) -> str:
+    """The broker URL with the Redis user in it (kept out of CELERY_BROKER_URL itself, so the
+    URL can be plain configuration and the password a secret)."""
+    if not username:
+        return url
+    parts = urlsplit(url)
+    host = parts.netloc.rsplit("@", 1)[-1]
+    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{host}"
+    return urlunsplit(parts._replace(netloc=netloc))
+
+
+CELERY_BROKER_URL = with_credentials(env.celery_broker_url, env.redis_username, env.redis_password)
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Every key and pub/sub channel Celery uses starts with this, the only prefix the assets Redis
+# user may touch (infra/redis/start.sh).
+CELERY_KEY_PREFIX = "assets:"
 # Unacknowledged messages come back after this long. It must exceed the longest task and the
 # longest retry countdown, or the Redis transport delivers the task twice.
-CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": 3600}
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": 3600,
+    "global_keyprefix": CELERY_KEY_PREFIX,
+}
 CELERY_TASK_DEFAULT_QUEUE = "assets"
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
