@@ -13,6 +13,8 @@ locals {
     "kafka-admin-password", "kafka-game-server-password", "kafka-lobby-password",
     "kafka-assets-password", "kafka-marketplace-password", "kafka-notifier-password",
     "kafka-auth-password", "kafka-metrics-password",
+    # Redis (task 5.5): the admin user and one ACL user per service and key prefix.
+    "redis-admin-password", "redis-lobby-password", "redis-game-server-password", "redis-assets-password",
   ])
 }
 

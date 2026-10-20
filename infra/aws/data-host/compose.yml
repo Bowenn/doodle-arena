@@ -33,13 +33,20 @@ services:
   redis:
     image: redis:8.10.2-trixie
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    # One ACL user per service and key prefix, the default user off (infra/redis/start.sh).
+    entrypoint: ["sh", "/etc/doodle-arena/redis-start.sh"]
+    environment:
+      REDIS_ADMIN_PASSWORD: ${REDIS_ADMIN_PASSWORD:?}
+      REDIS_LOBBY_PASSWORD: ${REDIS_LOBBY_PASSWORD:?}
+      REDIS_GAME_SERVER_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
+      REDIS_ASSETS_PASSWORD: ${REDIS_ASSETS_PASSWORD:?}
     volumes:
       - redis-data:/data
+      - ./redis/start.sh:/etc/doodle-arena/redis-start.sh:ro
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_ADMIN_PASSWORD\" redis-cli --user admin ping | grep -q PONG"]
       interval: 2s
       timeout: 3s
       retries: 30

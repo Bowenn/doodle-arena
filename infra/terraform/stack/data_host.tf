@@ -23,6 +23,11 @@ locals {
     KAFKA_NOTIFIER_PASSWORD    = "stack/kafka-notifier-password"
     KAFKA_AUTH_PASSWORD        = "stack/kafka-auth-password"
     KAFKA_METRICS_PASSWORD     = "stack/kafka-metrics-password"
+    # Redis (task 5.5): one ACL user per service and key prefix.
+    REDIS_ADMIN_PASSWORD       = "stack/redis-admin-password"
+    REDIS_LOBBY_PASSWORD       = "stack/redis-lobby-password"
+    REDIS_GAME_SERVER_PASSWORD = "stack/redis-game-server-password"
+    REDIS_ASSETS_PASSWORD      = "stack/redis-assets-password"
   }
   # Read with the instance role too: the broker's TLS key and the CA, written to files at boot.
   data_host_secrets = concat(values(local.data_host_env), ["stack/kafka-server-pem", "stack/kafka-ca-pem"])
@@ -35,6 +40,7 @@ locals {
     { for f in fileset("${local.repo}/infra/observability", "**") : "observability/${f}" => "${local.repo}/infra/observability/${f}" },
     { for f in fileset("${local.repo}/infra/postgres/init", "*") : "postgres/init/${f}" => "${local.repo}/infra/postgres/init/${f}" },
     { for f in fileset("${local.repo}/infra/kafka", "*") : "kafka/${f}" => "${local.repo}/infra/kafka/${f}" },
+    { "redis/start.sh" = "${local.repo}/infra/redis/start.sh" },
     { "mongo/create-users.js" = "${local.repo}/infra/mongo/create-users.js" },
   )
 }
