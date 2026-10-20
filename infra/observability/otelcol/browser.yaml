@@ -1,0 +1,48 @@
+# Browser telemetry (task 5.4), merged over otel-lgtm's own collector config like
+# memory-limiter.yaml (OTELCOL_EXTRA_ARGS). Browsers reach it through the gateway's
+# /otlp/v1/metrics route only, on a receiver of its own (4319), so nothing a browser sends can
+# enter the services' pipelines. Anyone can post to a public endpoint, so this pipeline keeps
+# what the web app sends and nothing else:
+#   - only metrics named web.* (web.vitals.lcp, .inp, .cls and web.ws.rtt, observability.md);
+#   - on the resource, service.name=web, one service.instance.id for every browser, and the
+#     deployment environment; a browser's own version or instance id would let one client
+#     create series without end;
+#   - on each point, only page, and only one of the web app's page names.
+# Browsers send deltas (each page load is its own short-lived process); deltatocumulative adds
+# every browser's deltas into one cumulative series per metric and page, as Prometheus expects.
+receivers:
+  otlp/browser:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4319
+        # A page sends a few histograms on page hide: a small body is plenty.
+        max_request_body_size: 65536
+
+processors:
+  filter/browser:
+    error_mode: ignore
+    metrics:
+      metric:
+        - not IsMatch(name, "^web\\.(vitals\\.(lcp|inp|cls)|ws\\.rtt)$")
+  transform/browser:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["deployment.environment"])
+          - set(attributes["deployment.environment"], "unknown") where not IsMatch(attributes["deployment.environment"], "^(local|aws)$")
+          - set(attributes["service.name"], "web")
+          - set(attributes["service.instance.id"], "browser")
+      - context: datapoint
+        statements:
+          - keep_keys(attributes, ["page"])
+          - set(attributes["page"], "other") where not IsMatch(attributes["page"], "^(lobby|room|gallery|market|my-drawings|wallet|developer|moderate|leaderboard)$")
+  deltatocumulative:
+    max_stale: 10m
+
+service:
+  pipelines:
+    metrics/browser:
+      receivers: [otlp/browser]
+      processors: [memory_limiter, filter/browser, transform/browser, deltatocumulative, batch]
+      exporters: [otlp_http/metrics]
