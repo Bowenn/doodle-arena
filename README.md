@@ -1,152 +1,249 @@
 # Doodle Arena
 
-A real-time multiplayer draw-and-guess game where every finished drawing becomes a unique item that players can trade for coins in a player marketplace.
+A real-time multiplayer draw-and-guess game. Every finished drawing becomes a unique item that players own and can trade for coins in a player marketplace.
 
-It's a portfolio project for backend internship interviews, so depth, correctness and explainability matter more than features or polish. Three parts are built deep and measured:
+It's a portfolio project for backend internship interviews, so depth, correctness and explainability matter more than features or polish. It focuses on three parts. The first two are built deep, measured and documented; the third is next:
 
-1. **Game-server reliability:** one owner per room, reconnect without missing events, failover when a server dies.
-2. **Marketplace correctness:** a double-entry coin ledger, atomic ownership transfer, idempotent payments.
-3. **Scale:** a live-stream room where thousands of viewers watch one drawer.
+1. **Game-server reliability:** one owner per room, resume without missing events, failover when a server dies, and a drain when it stops.
+2. **Marketplace correctness:** a double-entry coin ledger, ownership that moves with the coins in one transaction, idempotent payments.
+3. **Scale** (Stage 6, next): a live-stream room where thousands of viewers watch one drawer.
 
 ## Status
 
-**Milestones M1 (foundations), M2 (game core) and M3 (drawing lifecycle) are done.** Today the stack gives you:
+Milestones M1 to M5 are done: the game, the drawing pipeline, the economy, and production readiness. It runs locally in Docker Compose and in AWS (ECS on Fargate, one EC2 data host) with Terraform. Stage 6, scale and depth, is next. The [roadmap](docs/roadmap.md) has every task and its evidence.
 
-- **A playable game:** rooms and quick play in the lobby, live rounds over WebSockets with an authoritative game server, two drawers on one canvas from four players, hints, scoring and a weekly leaderboard.
-- **Reliability:** one owner per room with a lease and fencing tokens, resume without missing events, and failover to the other game server within about 6.5 s of a kill (the [evidence log](docs/roadmap.md#evidence-log) has the measurements).
-- **Every service** runs in Docker Compose behind one Nginx gateway, and CI checks each one (lint, tests, Docker build).
-- **Google sign-in** works: RS256 access tokens with JWKS, and rotating refresh tokens with reuse detection.
-- **Contracts:** shared protobuf contracts for Kafka events and gRPC, with generated code for Go, Java and Python.
-- **Drawings:** every finished round becomes a drawing, rendered, stored by content hash, moderated by the AI stub (or a moderator in the Django admin at `/admin/`), announced on Kafka, and shown in the web app's gallery with a replay.
-- **Telemetry:** traces, metrics and logs from every service in Grafana, with logs linked to their traces.
+What that means in practice:
 
-The marketplace was built in Stage 4 of the [roadmap](docs/roadmap.md): the double-entry coin ledger (Postgres-enforced invariants, a reconciliation job with its gauges), minting (every approved drawing gets an owner and an ownership history), listings with idempotent purchases that move coins and ownership in one transaction, royalties for co-authors, match rewards paid from `MatchFinished`, Stripe coin packs (test mode), and signed webhooks for developers (API keys, retries, a dead-letter queue). The web app has a wallet, the market, "My drawings" and developer settings.
+- **A playable game:**
+  - rooms and quick play;
+  - live rounds over WebSockets, run by an authoritative game server;
+  - two drawers on one canvas;
+  - hints, scoring and a weekly leaderboard.
+- **Drawings:** every finished round is rendered, stored by content hash, moderated, minted as an owned item, and shown in a gallery with a replay.
+- **An economy:**
+  - a coin ledger whose entries always sum to zero;
+  - listings and purchases;
+  - royalties for co-authors;
+  - match rewards;
+  - Stripe coin packs (test mode);
+  - signed webhooks for developers.
+- **Security:**
+  - Google sign-in with RS256 tokens and rotating refresh tokens;
+  - short-lived join tickets for WebSockets;
+  - per-service credentials enforced in every store: Postgres roles, Redis ACL users, an S3 identity per bucket, and Kafka users with per-topic ACLs.
+- **Operations:**
+  - traces, metrics and logs from every service in Grafana;
+  - dashboards and alert rules as code, with alerts to Discord, and runbooks;
+  - load tests, failover drills, Lighthouse.
 
 ## Architecture
 
 ```mermaid
-flowchart TB
+flowchart LR
   web["Web app<br/>React + Canvas"] --> gw["Gateway<br/>Nginx"]
-  gw --> auth["Auth<br/>FastAPI"]
-  gw --> lobby["Lobby<br/>Go"]
-  gw --> game["Game servers<br/>Go, 2+"]
-  gw --> assets["Assets<br/>Django + Celery"]
-  gw --> market["Marketplace<br/>Spring Boot"]
-  gw --> notifier["Notifier<br/>Go"]
-  lobby <-->|gRPC| game
-  game -->|events| kafka[("Kafka")]
-  assets <-->|events| kafka
-  market <-->|events| kafka
+  gw --> auth["auth<br/>Python, FastAPI"]
+  gw --> lobby["lobby<br/>Go"]
+  gw -->|WebSocket| game["game-server ×2<br/>Go"]
+  gw --> assets["assets<br/>Django + Celery"]
+  gw --> market["marketplace<br/>Java, Spring Boot"]
+  gw --> notifier["notifier<br/>Go"]
+  lobby <-->|gRPC: allocate, heartbeat| game
+  assets -->|moderate| ai["ai<br/>FastAPI"]
+
+  game -->|RoundFinished, MatchFinished| kafka[("Kafka")]
+  kafka --> assets
+  assets -->|DrawingApproved| kafka
+  kafka --> market
+  kafka --> lobby
+  market -->|sales, coins| kafka
+  auth -->|CredentialsRevoked| kafka
   kafka --> notifier
-  kafka -->|matches| lobby
-  assets -->|HTTP| ai["AI service<br/>FastAPI"]
+
+  game --- redis[("Redis<br/>rooms, leases")]
+  lobby --- redis
+  game -->|stroke logs| s3[("S3<br/>round-logs, drawings")]
+  assets --- s3
+  auth --- pg[("Postgres<br/>a database per service")]
+  assets --- pg
+  market --- pg
+  notifier --- pg
+  assets --- mongo[("MongoDB<br/>replays")]
 ```
 
-The gateway and every service send traces, metrics and logs over OTLP to one collector. Locally that's the `grafana/otel-lgtm` container: Grafana with Tempo, Loki and Prometheus.
+- **Each service owns its data.** It reaches another service's data only through Kafka events, gRPC or HTTP. The one exception is deliberate: assets reads the stroke logs the game server wrote (a claim check).
+- **The game server is authoritative.** A room is one actor goroutine. It writes every event to a Redis stream under a lease with a fencing token before broadcasting it, so another server can take the room over exactly where it stopped.
+- **Money moves in Postgres transactions.** A purchase moves coins and ownership together, and an idempotency key makes a retry a no-op. The events after it leave through an outbox.
+- **Telemetry:** every service, the gateway and the browser send traces, metrics and logs over OTLP to one collector, with Grafana, Tempo, Loki and Prometheus behind it.
 
-| Service | Stack | Job | Route |
-|---|---|---|---|
-| gateway | Nginx | Reverse proxy, rate limits, tracing | `localhost:8080` |
-| auth | Python, FastAPI | Google OAuth 2.0 with PKCE, JWT, refresh rotation | `/api/auth/` |
-| lobby | Go | Rooms, quick play, game-server registry, allocation, weekly leaderboard | `/api/lobby/` |
-| game-server | Go, 2 instances | Rounds, guessing, per-room event log, failover | `/ws/<server_id>/rooms/<room_id>` |
-| assets | Python, Django + Celery | Render, store and moderate drawings; replays | `/api/assets/`, `/admin/` |
-| marketplace | Java, Spring Boot | Coin ledger, ownership, listings, Stripe | `/api/market/` |
-| notifier | Go | Signed outgoing webhooks with retries | `/api/notifier/` |
-| ai | Python, FastAPI | Moderation (a stub for now) | internal |
-| web | TypeScript, React | The game UI | `/` |
+The [design doc](docs/design-doc.md) explains every choice; the [ADRs](docs/adr/) record the decisions.
 
-Data stores: PostgreSQL (one database per service), Redis, MongoDB, Kafka (KRaft), and S3-compatible object storage (SeaweedFS locally). The [design doc](docs/design-doc.md) explains every choice.
+### Terms used below
 
-## Quick start
+- **Actor:** each room runs in one goroutine that owns all of its state; everything else sends it messages. No locks around room state.
+- **Lease and fencing token:**
+  - A game server holds a short Redis lease on each room it runs, renewed every 1.5 s.
+  - Taking a room over increments the room's fencing token.
+  - Every write checks the token, so a server that lost the room (a zombie) can't write after the takeover.
+- **Outbox:** an event saved in the same database transaction as the change it announces. A separate loop then publishes it to Kafka, so an event is never lost and never sent for a change that didn't happen.
+- **Claim check:** the event carries a pointer to the stroke log in S3, not the strokes themselves.
+- **Mint:** create the owned item for an approved drawing, with its first entry in the ownership history.
+- **Resume:** a reconnecting player gets the events after the last `seq` it saw, not the whole room again.
+- **Drain:** what a server does when it stops on purpose: no new rooms, its rooms move to other servers, then it exits.
 
-**You need:** Docker (with at least 8 GB for its VM), Go 1.27, JDK 25, `uv`, Node 24 and the Buf CLI. [docs/setup.md](docs/setup.md) has the exact versions. Only Docker is needed to *run* the stack; the rest is for tests.
+### Three flows
 
-1. **Optional, for sign-in:** create a Google OAuth client.
-   - In Google Cloud Console → APIs & Services → Credentials, create an OAuth client of type "Web application".
-   - Authorized redirect URI: `http://localhost:8080/api/auth/google/callback`.
-   - Authorized JavaScript origin: `http://localhost:8080`.
-   - Put the credentials in `.env`, never in a commit:
+1. **A round becomes an owned drawing.**
+   - The game server uploads the round's stroke log to S3 and publishes `RoundFinished`.
+   - assets renders the image, has it moderated (by the AI service, or a moderator in the Django admin), stores it, and publishes `DrawingApproved` or `DrawingRejected` through its outbox.
+   - The marketplace mints an approved one: the first drawer owns it, every drawer is recorded as an author (royalties on later sales), and the ownership history starts.
+2. **A purchase.**
+   - In one Postgres transaction, the marketplace locks the listing, then the balance rows in a fixed order, so two purchases can't deadlock.
+   - It writes ledger entries that sum to zero, splits the royalties, and moves the ownership.
+   - `SaleCompleted` goes into the outbox in the same transaction; the notifier delivers it as a signed webhook.
+   - The request's `Idempotency-Key` is stored under a `UNIQUE` constraint, so a retry returns the first result instead of buying twice.
+3. **A game server goes away.**
+   - **Killed:** every player of that server is cut off. The lobby sees the heartbeats stop (6 s) and moves the rooms to the other server, which restores each one from Redis. The players' clients ask the lobby where the room is now and resume.
+   - **Stopped (a deploy):** the server drains. It tells the lobby at once and keeps its rooms playing until each one has moved. Its players are cut off only for the reconnect itself.
 
-     ```bash
-     cp .env.example .env    # then set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env
-     ```
+### Measured
+
+| What | Number | Where |
+|---|---|---|
+| A server stopped in AWS under an 80-room load | players disconnected for 0.5 to 2.0 s with the drain, against 16 to 17.5 s before it (41 rooms moved within 6.8 s) | [performance](docs/performance.md#2-failover-under-load) |
+| A server killed, local | players disconnected for 5 to 8 s (the 6-second detection, then the move) | [performance](docs/performance.md#2-failover-under-load) |
+| Stroke fan-out in AWS, 10 rooms | p95 24 ms; a 0.25-vCPU game server holds about 20 to 40 rooms | [performance](docs/performance.md#1-the-game-under-load-task-53) |
+| Lighthouse in AWS (mobile) | performance 1.00, LCP 1.2 s, CLS 0 | [performance](docs/performance.md#3-the-web-app-task-54) |
+| A cold AWS stack | about 9 minutes up, 5 down | [performance](docs/performance.md#4-aws-sessions) |
+
+## Run it locally
+
+**You need** Docker with at least 8 GB for its VM. That's all for running the stack. The tests and drills also need Go 1.27, JDK 25, `uv`, Node 24 and the Buf CLI ([docs/setup.md](docs/setup.md) has the exact versions).
+
+1. **Optional, for sign-in:** create a Google OAuth client of type "Web application".
+   - Redirect URI: `http://localhost:8080/api/auth/google/callback`.
+   - JavaScript origin: `http://localhost:8080`.
+   - Run `cp .env.example .env`, then set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`, never in a commit.
 
    Without it everything else works, and sign-in returns 503.
-2. **Start the stack.** The first run builds every image and fills `.env` with random local passwords:
+2. **Start the stack.** The first run builds every image. It also creates `.env` if it's missing, and fills every `change-me` in it with a random password; values you set are kept:
 
    ```bash
    make up
    ```
 
-3. **Check it:**
+3. **Check it.** Each check prints one `ok` line per step and ends with a pass line:
 
    ```bash
-   make smoke              # every service's /healthz through the gateway, plus the rate limit
-   make telemetry-check    # one request's trace and logs reach Grafana
+   make smoke
    ```
-
-4. **Open it:**
-   - The app: http://localhost:8080 ("Sign in with Google" if you did step 1).
-   - Grafana: http://localhost:3000. In Explore, pick Tempo to search traces, and use "Related logs" to jump to a span's logs.
-5. **Stop it:**
 
    ```bash
-   make down
+   make telemetry-check
    ```
 
-   Data stays in Docker volumes until you remove them.
+4. **Open it:** the app at http://localhost:8080 and Grafana at http://localhost:3000 (dashboards in the "Doodle Arena" folder).
+5. **Stop it** with `make down`. Data stays in Docker volumes.
 
-## Everyday commands
+To play without Google, `node scripts/drills/web-seats.mts` plays a bot-only match with the web app's own client (Node 24).
+
+## Run it in AWS
+
+This one-time step creates the state bucket, ECR and the SSM parameters ([docs/setup.md](docs/setup.md), "AWS"):
+
+```bash
+make aws-bootstrap
+```
+
+Then, for each session (it costs money from up to down, about $0.35 to 0.45 an hour):
+
+```bash
+make aws-push
+```
+
+```bash
+DOMAIN=icanfly.click make aws-up
+```
+
+```bash
+DOMAIN=icanfly.click make aws-down
+```
+
+While the stack is up:
+- `make aws-grafana` opens Grafana on `localhost:3300` through Session Manager.
+- `DOMAIN=icanfly.click make aws-check` runs the checks against AWS.
+- The load balancer is open to everyone; `ALLOWED_CIDRS=<ip>/32` narrows it.
+
+## Commands
 
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Start or stop the local stack |
-| `make smoke` | Health of every service through the gateway, plus the rate limit |
-| `make telemetry-check` | Trace, logs and metrics reach Grafana |
-| `make test [s=<service>]` | Tests with the host toolchains; integration tests use Testcontainers |
-| `make lint [s=<service>]` | Linters and type checks (`s=ci` lints the GitHub Actions workflows) |
-| `make proto` | Lint `proto/` and regenerate Go, Java and Python code |
-| `make logs s=<service>`, `make ps` | Follow a service's logs, list containers |
-| `./scripts/fake-events.sh` | Publish a fake finished round and match to Kafka |
-| `uv run --project services/auth --with websockets python scripts/drills/failover.py kill\|pause [n]` | Failover drill: bots play, the room's game server is killed or paused, and the drill measures the resume |
-| `node scripts/drills/web-seats.mts [room_id]` | Extra players running the web app's own client in Node; with no room id, a bot-only match (dev tokens from `mint_tokens.py`) |
+| `make up` / `make down` / `make ps` / `make logs s=<service>` | The local stack |
+| `make test [s=<service>]` / `make lint [s=<service>]` | Tests and linters with the host toolchains, as CI runs them (integration tests use Testcontainers) |
+| `make smoke` | Every service's health through the gateway, plus the rate limit |
+| `make telemetry-check` / `make alerts-check` | A request's trace and logs reach Grafana / every dashboard, alert rule and the contact point load and evaluate |
+| `make pipeline-check` | A round becomes an approved, stored, announced drawing |
+| `make kafka-acl-check` / `make data-acl-check` | Kafka, Redis and S3 refuse what each service must not do |
+| `make loadtest` / `make loadtest-smoke` | k6: up to 80 four-player rooms over 12 minutes / two rooms for a minute |
+| `make lighthouse` | Lighthouse against the production web image (or AWS with `GATEWAY`) |
+| `make proto` | Lint `proto/` and regenerate the Go, Java and Python code |
+| `uv run --project services/auth --with websockets python scripts/drills/failover.py kill\|pause\|stop` | Bots play while the room's server is killed, frozen or stopped; reports the resume |
+
+CLAUDE.md, the project's working notes for humans and its coding agent, lists every command and drill with its options, and the known gotchas.
+
+## Where to start reading
+
+| To understand | Read |
+|---|---|
+| A room: one actor, write before broadcast | `services/game-server/internal/room/actor.go`, `room/game.go` |
+| Leases, fencing and takeover | `services/game-server/internal/roomstore/roomstore.go` (its Lua scripts), ADR 0007 |
+| Failover and drain in the lobby | `services/lobby/internal/rooms/reassign.go` |
+| A purchase (locks, ledger, ownership, outbox in one transaction) | `services/marketplace/src/main/java/com/doodlearena/marketplace/listing/PurchaseService.java`, then `ledger/LedgerService.java` |
+| Idempotency keys | `services/marketplace/src/main/java/com/doodlearena/marketplace/idempotency/IdempotencyService.java`, ADR 0012 |
+| The drawing pipeline | `services/assets/drawings/consumer.py`, `pipeline.py`, `relay.py` |
+| Token verification | `libs/go/authn/authn.go`, ADR 0001 |
+| Kafka users and ACLs | `infra/kafka/init.sh`, ADR 0013 |
 
 ## Repository layout
 
 ```text
 services/   gateway, auth, lobby, game-server, assets, marketplace, notifier, ai
-proto/      Shared contracts (gRPC and Kafka events) and generated code in proto/gen/
+libs/go/    Go packages the Go services share: authn, logging, kafkaauth, redistest
+proto/      gRPC services and Kafka event schemas; generated code in proto/gen/
 web/        React + TypeScript web app
-infra/      docker-compose.yml and container setup scripts
-scripts/    make targets: dev-up, test, lint, smoke, telemetry-check, proto
+infra/      docker-compose.yml, store setup (Kafka, Redis, SeaweedFS, Postgres), observability
+            as code, the AWS data host, Terraform
+scripts/    what make runs: dev-up, test, lint, the checks, AWS, drills
+loadtest/   k6 scenarios
 tools/      eventctl: publish and decode Kafka events
-docs/       Design doc, roadmap, ADRs, observability, setup, interview notes
+fixtures/   shared test cases (JWTs) used by more than one language
+docs/       design doc, roadmap, ADRs, observability, performance, runbooks, setup, interview notes
 ```
 
 ## How we work
 
-- **One roadmap task at a time,** each on a branch `stage-<n>/<task-id>-<short-name>` with one commit per working step. Tasks start with a plan that a human approves; in Claude Code that's `/milestone <task-id>`.
+- **One roadmap task at a time,** on a branch `stage-<n>/<task-id>-<short-name>`, with one commit per working step. Each task starts with a plan a human approves.
 - **Contracts first:** change `proto/` and run `make proto` before the code that uses it. CI fails on breaking changes and on stale generated code.
-- **CI runs the same scripts as `make`.** Each service has its own path-filtered workflow, and the whole stack boots in CI when it changes.
-- **Humans own the architecture.** Decisions are recorded as ADRs in [docs/adr/](docs/adr/).
+- **CI runs the same scripts as `make`.** Each service has its own path-filtered workflow, and the whole stack boots in CI with every check when infrastructure changes.
+- **Humans own the architecture.** Decisions are ADRs in [docs/adr/](docs/adr/) and rows in the design doc's decision log.
 
 ## Documentation
 
 | Document | What's in it |
 |---|---|
 | [docs/design-doc.md](docs/design-doc.md) | Architecture, services, data ownership, contracts, key flows, decision log |
-| [docs/roadmap.md](docs/roadmap.md) | Stages, tasks, milestone exit criteria, evidence log |
-| [docs/observability.md](docs/observability.md) | Log format, metric names, tracing rules, alerts |
+| [docs/roadmap.md](docs/roadmap.md) | Stages, tasks, milestone criteria, the evidence log of every measurement |
+| [docs/performance.md](docs/performance.md) | The current measured numbers and how they changed |
+| [docs/observability.md](docs/observability.md) | Log format, metric names, tracing rules, alerts, dashboards |
+| [docs/runbooks/](docs/runbooks/) | What to do when each alert fires |
 | [docs/adr/](docs/adr/) | Architecture decision records |
-| [docs/setup.md](docs/setup.md) | Tools, versions, accounts and secrets |
+| [docs/setup.md](docs/setup.md) | Tools, versions, accounts and secrets; AWS |
 | [docs/keyword-coverage.md](docs/keyword-coverage.md) | Which interview skill each part of the system covers |
 | [docs/interview-notes.md](docs/interview-notes.md) | Talking points collected after each task |
-| [proto/README.md](proto/README.md) | Contract rules and where generated code lands |
 
 ## Troubleshooting
 
-- **Port 5432 is busy:** the stack's Postgres listens on host port **15432**, so a Postgres installed on your machine doesn't clash.
+- **Port 5432 is busy:** the stack's Postgres listens on host port **15432**.
 - **Google shows `redirect_uri_mismatch`:** the OAuth client must list exactly `http://localhost:8080/api/auth/google/callback`.
-- **Logs stop reaching Grafana:** Loki refuses writes when Docker's disk is over 90% full. It answers "Ingester is shutting down". Free space with `docker system prune`.
+- **Logs stop reaching Grafana:** Loki refuses writes when Docker's disk is over 90% full ("Ingester is shutting down"). `docker system prune` frees space.
+- **A service is refused by Kafka or Redis:** each store has a user per service. `make logs s=kafka | grep "is Denied"`, or Redis's `ACL LOG`, says which grant is missing (CLAUDE.md, "Gotchas").
 - **Testcontainers can't find Docker:** `make test` sets `DOCKER_HOST` from your Docker context. If you run `pytest` or `go test` directly, export it yourself.

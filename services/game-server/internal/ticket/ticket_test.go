@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/redistest"
+	"github.com/Bowenn/gap-project_private/libs/go/redistest"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"

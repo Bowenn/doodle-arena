@@ -38,6 +38,7 @@ services/
   notifier/      Go: signed outgoing webhooks with retries and a dead-letter queue
   ai/            Python, FastAPI: moderation (stub first), guesser and hints later
   analytics/     Java, Flink (Stage 6): live top guesses, wash-trading detection
+libs/go/         Go packages the Go services share: authn, logging, kafkaauth, redistest
 proto/           Protobuf: gRPC services and Kafka event schemas (shared contracts)
 web/             TypeScript, React + Canvas
 infra/           docker-compose, observability config, Terraform (Stage 5)

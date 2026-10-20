@@ -1,6 +1,7 @@
 # The build context is the repository root; send only what the notifier build needs.
 *
 !proto/gen/go
+!libs/go
 !services/notifier
 services/notifier/bin
 services/notifier/coverage.out

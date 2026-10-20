@@ -31,7 +31,8 @@ jobs:
     name: make up and make smoke
     # Not ubuntu-24.04: its kernel is now in the 6.19 to 7.0.13 range, where MongoDB 8.0 refuses
     # to start (SERVER-121912; MongoDB's 8.0 release notes). Move back once the runner's kernel
-    # is 7.0.14 or newer, or a MongoDB 8.0 patch supports it.
+    # is 7.0.14 or newer, or a MongoDB 8.0 patch supports it. Checked 2026-10-20 (task 5.5): no
+    # MongoDB release fixes it yet (the bundled TCMalloc); Docker Desktop's 7.0.14 kernel is fine.
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     env:

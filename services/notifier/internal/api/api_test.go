@@ -18,9 +18,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
+	"github.com/Bowenn/gap-project_private/libs/go/authn"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/api"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/authn"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/pgtest"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
@@ -70,7 +70,7 @@ func newServer(t *testing.T) (*httptest.Server, *api.API) {
 	_, _ = rand.Read(k)
 	box, _ := secretbox.New(hex.EncodeToString(k))
 	a := &api.API{
-		Store: pgtest.Store(t), Keys: keys{}, Tokens: authn.NewVerifier(issuer, authn.StaticKeys{"k1": &signingKey.PublicKey}),
+		Store: pgtest.Store(t), Keys: keys{}, Tokens: authn.NewVerifier(issuer, authn.StaticKeys{"k1": &signingKey.PublicKey}, authn.RequireIssuedAt()),
 		Box: box, Policy: ssrf.NewPolicy("webhook-receiver"),
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now,
 	}

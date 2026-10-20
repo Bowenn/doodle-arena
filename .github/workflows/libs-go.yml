@@ -1,0 +1,38 @@
+# The shared Go packages (libs/go: authn, logging, kafkaauth, redistest): lint and test. The
+# services that use them run their own workflows on a change here too.
+name: libs-go
+
+on:
+  pull_request:
+    paths:
+      - libs/go/**
+      - .github/workflows/libs-go.yml
+      - .github/workflows/_go.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+  push:
+    branches: [master]
+    paths:
+      - libs/go/**
+      - .github/workflows/libs-go.yml
+      - .github/workflows/_go.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let every run on master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  go:
+    uses: ./.github/workflows/_go.yml
+    with:
+      service: libs-go
+      directory: libs/go

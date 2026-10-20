@@ -6,6 +6,7 @@ on:
     paths:
       - services/game-server/**
       - proto/gen/go/**
+      - libs/go/**
       - .github/workflows/game-server.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
@@ -17,6 +18,7 @@ on:
     paths:
       - services/game-server/**
       - proto/gen/go/**
+      - libs/go/**
       - .github/workflows/game-server.yml
       - .github/workflows/_go.yml
       - scripts/test.sh

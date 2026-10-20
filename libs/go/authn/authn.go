@@ -1,6 +1,8 @@
 // Package authn verifies the access tokens that the auth service issues (ADR 0001): RS256
 // only, against auth's JWKS, with iss, aud, exp and iat checked and 30 seconds of clock skew.
-// The shared cases in fixtures/jwt/ pin down exactly what is accepted.
+// The shared cases in fixtures/jwt/ pin down exactly what is accepted. One copy for every Go
+// service (task 5.5): the lobby and the notifier each had their own, and a bug fixed in one had
+// to be fixed again in the other.
 package authn
 
 import (
@@ -32,11 +34,11 @@ const Leeway = 30 * time.Second
 // error says why; it is for logs, never for the client.
 var ErrInvalidToken = errors.New("invalid access token")
 
-// Claims is what the notifier needs from a verified access token.
+// Claims is what a service needs from a verified access token.
 type Claims struct {
 	UserID string
-	// IssuedAt is the token's iat. The notifier refuses tokens issued at or before its user's
-	// credential revocation (ADR 0015).
+	// IssuedAt is the token's iat, zero if it has none (see RequireIssuedAt). The notifier
+	// refuses tokens issued at or before its user's credential revocation (ADR 0015).
 	IssuedAt time.Time
 	// Name is the display name (may be empty with tokens issued before the claim existed).
 	Name  string
@@ -50,13 +52,25 @@ type KeySource interface {
 
 // Verifier checks access tokens.
 type Verifier struct {
-	issuer string
-	keys   KeySource
+	issuer          string
+	keys            KeySource
+	requireIssuedAt bool
 }
 
+// Option changes what a Verifier accepts.
+type Option func(*Verifier)
+
+// RequireIssuedAt refuses tokens without iat: a service that compares iat with something (the
+// notifier, with credential revocations) must never see a token without one.
+func RequireIssuedAt() Option { return func(v *Verifier) { v.requireIssuedAt = true } }
+
 // NewVerifier returns a verifier for tokens from issuer, signed by keys from keys.
-func NewVerifier(issuer string, keys KeySource) *Verifier {
-	return &Verifier{issuer: issuer, keys: keys}
+func NewVerifier(issuer string, keys KeySource, opts ...Option) *Verifier {
+	v := &Verifier{issuer: issuer, keys: keys}
+	for _, o := range opts {
+		o(v)
+	}
+	return v
 }
 
 type tokenClaims struct {
@@ -89,10 +103,14 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Claims, error) {
 	if c.Roles == nil {
 		return Claims{}, fmt.Errorf("%w: roles is required", ErrInvalidToken)
 	}
-	if c.IssuedAt == nil {
+	claims := Claims{UserID: c.Subject, Name: c.Name, Roles: c.Roles}
+	switch {
+	case c.IssuedAt != nil:
+		claims.IssuedAt = c.IssuedAt.Time
+	case v.requireIssuedAt:
 		return Claims{}, fmt.Errorf("%w: iat is required", ErrInvalidToken)
 	}
-	return Claims{UserID: c.Subject, IssuedAt: c.IssuedAt.Time, Name: c.Name, Roles: c.Roles}, nil
+	return claims, nil
 }
 
 // StaticKeys is a fixed key set, for tests.

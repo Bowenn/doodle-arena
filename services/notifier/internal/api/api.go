@@ -16,8 +16,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Bowenn/gap-project_private/libs/go/authn"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/authn"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"

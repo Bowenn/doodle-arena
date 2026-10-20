@@ -1,15 +1,17 @@
 # syntax=docker/dockerfile:1
 # The build context is the repository root, so the build can use the generated contracts in
-# proto/gen/go (go.mod replaces that module with ../../proto/gen/go). Dockerfile.dockerignore,
-# next to this file, sends only those two folders to the builder.
+# proto/gen/go and the shared Go packages in libs/go (go.mod replaces both with ../../ paths).
+# Dockerfile.dockerignore, next to this file, sends only those and the service to the builder.
 FROM golang:1.27.2-trixie AS build
 # Which command to build: notifier, or webhook-receiver (the local test endpoint for drills).
 ARG CMD=notifier
 WORKDIR /src/services/notifier
 COPY proto/gen/go/go.mod proto/gen/go/go.sum /src/proto/gen/go/
+COPY libs/go/go.mod libs/go/go.sum /src/libs/go/
 COPY services/notifier/go.mod services/notifier/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY proto/gen/go /src/proto/gen/go
+COPY libs/go /src/libs/go
 COPY services/notifier ./
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/${CMD}

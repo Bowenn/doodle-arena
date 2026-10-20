@@ -6,6 +6,7 @@ on:
     paths:
       - tools/eventctl/**
       - proto/gen/go/**
+      - libs/go/**
       - .github/workflows/eventctl.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
@@ -16,6 +17,7 @@ on:
     paths:
       - tools/eventctl/**
       - proto/gen/go/**
+      - libs/go/**
       - .github/workflows/eventctl.yml
       - .github/workflows/_go.yml
       - scripts/test.sh

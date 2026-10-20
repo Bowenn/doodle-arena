@@ -19,13 +19,13 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/plugin/kotel"
 
+	"github.com/Bowenn/gap-project_private/libs/go/authn"
+	"github.com/Bowenn/gap-project_private/libs/go/kafkaauth"
+	"github.com/Bowenn/gap-project_private/libs/go/logging"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/api"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/authn"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/delivery"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/events"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/kafkaauth"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/logging"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/server"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
@@ -135,7 +135,8 @@ func run(cfg config, logger *slog.Logger) error {
 	}
 	routes := (&api.API{
 		Store: st, Keys: apikeys.NewVerifier(cfg.authInternalURL),
-		Tokens: authn.NewVerifier(cfg.jwtIssuer, jwks),
+		// iat is compared with credential revocations (ADR 0015), so a token must carry one.
+		Tokens: authn.NewVerifier(cfg.jwtIssuer, jwks, authn.RequireIssuedAt()),
 		Box:    box, Policy: policy,
 		Log: logger, Now: time.Now,
 	}).Register

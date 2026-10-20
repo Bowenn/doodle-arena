@@ -7,6 +7,7 @@ toolchain go1.27.2
 replace github.com/Bowenn/gap-project_private/proto/gen/go => ../../proto/gen/go
 
 require (
+	github.com/Bowenn/gap-project_private/libs/go v0.0.0-00010101000000-000000000000
 	github.com/Bowenn/gap-project_private/proto/gen/go v0.0.0-00010101000000-000000000000
 	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.9
@@ -30,8 +31,10 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.33 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.15.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
 	google.golang.org/grpc v1.84.0 // indirect
 )
+
+replace github.com/Bowenn/gap-project_private/libs/go => ../../libs/go

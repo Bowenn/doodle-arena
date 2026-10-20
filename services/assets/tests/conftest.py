@@ -142,29 +142,49 @@ SEAWEEDFS_IMAGE = "chrislusf/seaweedfs:4.48"
 S3_KEY, S3_SECRET = "testkey", "testsecret"
 
 
-@pytest.fixture(scope="session")
-def mongo_url() -> Iterator[str]:
+def _mongo_answers(url: str, timeout: float) -> bool:
+    """Waits for a ping that sticks. The image starts a temporary server to create the root
+    user, stops it, then starts the real one; a connection in between is reset."""
     import pymongo
-    from testcontainers.community.mongodb import MongoDbContainer
 
-    with MongoDbContainer(MONGO_IMAGE) as m:
-        url = m.get_connection_url().rstrip("/") + "/assets?authSource=admin"
-        # The image starts a temporary server to create the root user, stops it, then starts the
-        # real one; a connection in between is reset. Wait for a ping that sticks.
-        client: pymongo.MongoClient[dict[str, Any]] = pymongo.MongoClient(
-            url, serverSelectionTimeoutMS=1000
-        )
-        deadline = time.monotonic() + 60
-        while True:
+    client: pymongo.MongoClient[dict[str, Any]] = pymongo.MongoClient(
+        url, serverSelectionTimeoutMS=1000
+    )
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
             try:
                 client.admin.command("ping")
-                break
+                return True
             except pymongo.errors.PyMongoError:
-                if time.monotonic() > deadline:
-                    raise
                 time.sleep(0.5)
+        return False
+    finally:
         client.close()
+
+
+@pytest.fixture(scope="session")
+def mongo_url() -> Iterator[str]:
+    from testcontainers.community.mongodb import MongoDbContainer
+
+    # Once (in seven runs of the suite, task 5.5's flake pass), mongod never answered and every
+    # test that needs it errored. A fresh container is tried before giving up, and the dead
+    # one's last log lines are printed, so the next failure says why.
+    for attempt in (1, 2):
+        m = MongoDbContainer(MONGO_IMAGE).start()
+        url = m.get_connection_url().rstrip("/") + "/assets?authSource=admin"
+        if _mongo_answers(url, timeout=60):
+            break
+        stdout, stderr = m.get_logs()
+        tail = (stdout + stderr).decode(errors="replace").splitlines()[-20:]
+        print(f"MongoDB container never answered (attempt {attempt} of 2):", *tail, sep="\n")
+        m.stop()
+        if attempt == 2:
+            raise RuntimeError("MongoDB never answered, in two containers")
+    try:
         yield url
+    finally:
+        m.stop()
 
 
 @pytest.fixture(scope="session")

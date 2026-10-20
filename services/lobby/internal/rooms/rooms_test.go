@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Bowenn/gap-project_private/libs/go/redistest"
 	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
-	"github.com/Bowenn/gap-project_private/services/lobby/internal/redistest"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/registry"
 	"github.com/Bowenn/gap-project_private/services/lobby/internal/ticket"
 	"go.opentelemetry.io/otel"
