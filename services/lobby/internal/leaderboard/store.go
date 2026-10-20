@@ -3,10 +3,16 @@
 //
 // Redis keys (the lobby owns lobby:*):
 //
-//	lobby:leaderboard:{week}  sorted set of user ids scored by their points that week, such
-//	                          as lobby:leaderboard:2026-W42. Expires WeekTTL after its last write.
-//	lobby:lb:seen:{match_id}  string, set once a match was counted. Expires SeenTTL later.
-//	lobby:names               hash of user id to display name, written on every join
+//	lobby:leaderboard:{<week>}                 sorted set of user ids scored by their points
+//	                                           that week, such as lobby:leaderboard:{2026-W42}.
+//	                                           Expires WeekTTL after its last write.
+//	lobby:leaderboard:{<week>}:seen:<match_id> string, set once a match was counted towards
+//	                                           that week. Expires SeenTTL later.
+//	lobby:names                                hash of user id to display name, written on every join
+//
+// The braces are literal: a Redis Cluster hash tag (task 5.5). The marker and the week's set
+// share {<week>}, so they live in one slot and applyScript can touch both in Redis Cluster
+// too. A match always counts towards the week it ended in, so a redelivery finds its marker.
 package leaderboard
 
 import (
@@ -34,9 +40,9 @@ const (
 	opTimeout = 2 * time.Second
 )
 
-func weekKey(week string) string { return "lobby:leaderboard:" + week }
+func weekKey(week string) string { return "lobby:leaderboard:{" + week + "}" }
 
-func seenKey(matchID string) string { return "lobby:lb:seen:" + matchID }
+func seenKey(week, matchID string) string { return weekKey(week) + ":seen:" + matchID }
 
 // Result is one player's score in a finished match.
 type Result struct {
@@ -115,7 +121,8 @@ func (s *Store) Apply(ctx context.Context, m Match) (bool, error) {
 			args = append(args, r.UserID, r.Score)
 		}
 	}
-	n, err := applyScript.Run(ctx, s.rdb, []string{seenKey(m.ID), weekKey(Week(m.EndedAt))}, args...).Int()
+	week := Week(m.EndedAt)
+	n, err := applyScript.Run(ctx, s.rdb, []string{seenKey(week, m.ID), weekKey(week)}, args...).Int()
 	if err != nil {
 		return false, fmt.Errorf("apply match %s: %w", m.ID, err)
 	}
