@@ -4,9 +4,13 @@
 //
 // Redis keys (the lobby owns lobby:*):
 //
-//	lobby:server:{server_id}  string, the last heartbeat as JSON, with a 6 s TTL
-//	lobby:servers             set of server ids that have sent a heartbeat; ids whose entry has
-//	                          expired are removed when the set is read
+//	lobby:{registry}:server:<server_id>  string, the last heartbeat as JSON, with a 6 s TTL
+//	lobby:{registry}:servers             set of server ids that have sent a heartbeat; ids whose
+//	                                     entry has expired are removed when the set is read
+//
+// {registry} is a Redis Cluster hash tag: Record writes a server's entry and the set in one
+// MULTI, and Servers reads the set and every entry, which Redis Cluster allows only within one
+// slot.
 package registry
 
 import (
@@ -25,9 +29,9 @@ import (
 // DefaultTTL is how long a server stays registered after its last heartbeat (3 missed beats).
 const DefaultTTL = 6 * time.Second
 
-const serversKey = "lobby:servers"
+const serversKey = "lobby:{registry}:servers"
 
-func serverKey(id string) string { return "lobby:server:" + id }
+func serverKey(id string) string { return "lobby:{registry}:server:" + id }
 
 // Phase is the coarse state of a room, as its game server reports it.
 type Phase string

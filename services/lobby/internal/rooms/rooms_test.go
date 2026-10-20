@@ -674,7 +674,7 @@ func TestReassignMovesTheRoomsOfADeadServer(t *testing.T) {
 	}
 	slices.Sort(ids)
 	// gs-1 dies (its registry entry expires); gs-2 is up.
-	if err := e.store.rdb.Del(t.Context(), "lobby:server:gs-1").Err(); err != nil {
+	if err := e.store.rdb.Del(t.Context(), "lobby:{registry}:server:gs-1").Err(); err != nil {
 		t.Fatal(err)
 	}
 	e.beat(t, "gs-2", 0, false)
@@ -825,7 +825,7 @@ func (e *env) deadServerWithRooms(t *testing.T, n int) []string {
 		}
 		ids[i] = r.ID
 	}
-	if err := e.store.rdb.Del(t.Context(), "lobby:server:gs-1").Err(); err != nil {
+	if err := e.store.rdb.Del(t.Context(), "lobby:{registry}:server:gs-1").Err(); err != nil {
 		t.Fatal(err)
 	}
 	e.alloc.calls, e.alloc.targets, e.alloc.maxInFlight = nil, nil, 0
