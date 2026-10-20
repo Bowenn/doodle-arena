@@ -1,7 +1,7 @@
 {
   "uid": "da-async-pipeline",
   "title": "Doodle Arena: async pipeline",
-  "description": "Kafka consumer lag, the four outboxes, the drawing pipeline (Celery, moderation) and webhooks.",
+  "description": "Kafka consumer lag, the four outboxes, the drawing pipeline (Celery, moderation) and webhooks. Kafka access (ADR 0013): failed logins, admin logins and ACL denials, from the broker.",
   "tags": [
     "doodle-arena"
   ],
@@ -749,6 +749,206 @@
       "gridPos": {
         "x": 12,
         "y": 43,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Kafka access",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 51,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Failed Kafka logins",
+      "description": "SASL logins the broker refused (a wrong or unknown user, a bad password), by listener, from the broker itself (infra/kafka/jmx.yaml): every client counts, ours or not. KafkaAuthFailures fires when these or ACL denials go on for 5 minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (listener) (increase(kafka_broker_authentication_failures_total[$__rate_interval]))",
+          "legendFormat": "{{listener}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Admin logins",
+      "description": "Logins of admin, the super user for humans, which exists only on the broker's localhost ADMIN listener (kafka-admin inside the broker container). Any is worth a look: KafkaAdminUsed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum (increase(kafka_broker_authentication_successes_total{listener=\"ADMIN\"}[$__rate_interval]))",
+          "legendFormat": "admin logins"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max (kafka_broker_authorization_denied_per_min{role=\"broker\"})",
+          "legendFormat": "authorizer: denied per minute (includes quiet metadata filtering)"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "ACL denials by principal",
+      "description": "Requests the broker refused, from its log (each denial names the principal, operation and resource). The authorizer's own denied-rate metric (panel above) also counts unauthorized topics it quietly leaves out of metadata answers, so it never reads zero; these are the real refusals.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (principal) (count_over_time({service_name=\"kafka\"} |= \"is Denied\" | regexp \"Principal = User:(?P<principal>[^ ]+) is Denied\" [$__auto]))",
+          "legendFormat": "{{principal}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 60,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 16,
+      "type": "logs",
+      "title": "Recent ACL denials",
+      "description": "The broker's denial log lines, newest first: principal, operation, host and resource.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service_name=\"kafka\"} |= \"is Denied\""
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 60,
         "w": 12,
         "h": 8
       }

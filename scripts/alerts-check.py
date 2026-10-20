@@ -43,7 +43,9 @@ def get(path: str, **params: str) -> dict:
 
 def query_error(datasource: str, expr: str) -> str | None:
     """None when the query runs; otherwise the data source's error."""
-    expr = expr.replace("$__rate_interval", "1m")
+    # Grafana's interval variables: $__rate_interval for Prometheus, $__auto for Loki.
+    for var in ("$__rate_interval", "$__auto", "$__interval"):
+        expr = expr.replace(var, "1m")
     try:
         if datasource == "prometheus":
             body = get("/api/datasources/proxy/uid/prometheus/api/v1/query", query=expr)
