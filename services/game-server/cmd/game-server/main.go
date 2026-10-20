@@ -34,6 +34,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"google.golang.org/grpc"
 )
 
@@ -58,6 +59,9 @@ type config struct {
 	kafkaBrokers   []string
 	s3             events.S3Config
 	roundLogs      string // bucket for stroke logs
+	// How long SIGTERM waits for the lobby to move this server's rooms away before closing the
+	// rest (task 5.5). Under ECS's stop timeout (60 s) and compose's stop_grace_period.
+	drainTimeout time.Duration
 }
 
 func loadConfig() config {
@@ -67,6 +71,10 @@ func loadConfig() config {
 	maxRooms, err := strconv.Atoi(envOr("MAX_ROOMS", "100"))
 	if err != nil || maxRooms < 1 {
 		maxRooms = 100
+	}
+	drainTimeout, err := time.ParseDuration(envOr("DRAIN_TIMEOUT", "45s"))
+	if err != nil || drainTimeout < 0 {
+		drainTimeout = 45 * time.Second
 	}
 	return config{
 		port:           envOr("PORT", "8080"),
@@ -89,7 +97,8 @@ func loadConfig() config {
 			PathStyle: envOr("S3_PATH_STYLE", "true") == "true",
 			AccessKey: os.Getenv("S3_ACCESS_KEY"), SecretKey: os.Getenv("S3_SECRET_KEY"),
 		},
-		roundLogs: envOr("ROUND_LOGS_BUCKET", "round-logs"),
+		roundLogs:    envOr("ROUND_LOGS_BUCKET", "round-logs"),
+		drainTimeout: drainTimeout,
 	}
 }
 
@@ -259,12 +268,16 @@ func run(cfg config, logger *slog.Logger) error {
 	case <-ctx.Done():
 	}
 
-	// SIGTERM: stop heartbeats (the lobby stops sending rooms here within 6 seconds), stop
-	// accepting connections, close the rooms (their sockets get 1001 and can reconnect), wait
-	// for the sockets, publish the queued events (what isn't published in time stays in the
-	// rooms' outboxes for the next owner, ADR 0009), then exit. Rooms aren't handed to another
-	// server: the lobby moves them by ordinary failover once the heartbeats stop (handing them
-	// over is roadmap task 5.5); a match cut short by shutdown publishes nothing.
+	// SIGTERM (a deploy, ECS stopping the task, docker stop) drains first (task 5.5): the
+	// server takes no new rooms and tells the lobby at once, and the lobby moves every room to
+	// another server, where it carries on from Redis; this server's copies stop with room_moved
+	// as they are fenced, and their players rejoin there. Until then everything keeps running.
+	drain(ctx, ctrl, sender, cfg.drainTimeout, logger)
+
+	// Then: stop heartbeats, stop accepting connections, close the rooms that are left (their
+	// sockets get 1001 and can reconnect; the lobby moves them by ordinary failover once the
+	// heartbeats stop), wait for the sockets, publish the queued events (what isn't published in
+	// time stays in the rooms' outboxes for the next owner, ADR 0009), then exit.
 	logger.Info("shutting down")
 	stopBeats()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -316,4 +329,26 @@ func healthcheck(port string) int {
 		return 1
 	}
 	return 0
+}
+
+// drain stops new rooms, tells the lobby at once and waits until the lobby has moved every room
+// away, or timeout (no other server can take them, or the lobby is down).
+func drain(ctx context.Context, ctrl *control.Server, sender *heartbeat.Sender, timeout time.Duration, logger *slog.Logger) {
+	_, span := otel.Tracer("game-server").Start(context.Background(), "game.server.drain")
+	defer span.End()
+	began := time.Now()
+	rooms := ctrl.Drain(ctx)
+	span.SetAttributes(attribute.Int("rooms.start", rooms))
+	sender.Now()
+	wctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	empty := ctrl.WaitEmpty(wctx, 100*time.Millisecond)
+	left := ctrl.Rooms()
+	span.SetAttributes(attribute.Int("rooms.left", left), attribute.Bool("drain.complete", empty))
+	if empty {
+		logger.Info("drain finished", "rooms", rooms, "duration_ms", time.Since(began).Milliseconds())
+		return
+	}
+	logger.Warn("drain timed out: closing the rooms left", "rooms", rooms, "rooms_left", left,
+		"duration_ms", time.Since(began).Milliseconds())
 }
