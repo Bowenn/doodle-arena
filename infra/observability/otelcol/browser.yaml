@@ -7,7 +7,9 @@
 #   - on the resource, service.name=web, one service.instance.id for every browser, and the
 #     deployment environment; a browser's own version or instance id would let one client
 #     create series without end;
-#   - on each point, only page, and only one of the web app's page names.
+#   - on each point, only page, and only one of the web app's page names;
+#   - histograms only, with the web app's own bucket bounds, units and scope, and no exemplars
+#     (each of these could otherwise mint new series).
 # Browsers send deltas (each page load is its own short-lived process); deltatocumulative adds
 # every browser's deltas into one cumulative series per metric and page, as Prometheus expects.
 receivers:
@@ -24,6 +26,17 @@ processors:
     metrics:
       metric:
         - not IsMatch(name, "^web\\.(vitals\\.(lcp|inp|cls)|ws\\.rtt)$")
+        # Only the histograms the web app sends (a sum or a gauge under the same name would be
+        # another series).
+        - type != METRIC_DATA_TYPE_HISTOGRAM
+      datapoint:
+        # Only the web app's own bucket bounds (web/src/telemetry.ts): other bounds would be
+        # new le series, without end. OTTL can't compare a slice with a list literal, so the
+        # bounds are compared as formatted text.
+        - metric.name == "web.vitals.lcp" and Format("%v", [explicit_bounds]) != "[500 1000 1500 2000 2500 3000 4000 6000 10000]"
+        - metric.name == "web.vitals.inp" and Format("%v", [explicit_bounds]) != "[25 50 100 150 200 300 500 1000 2000]"
+        - metric.name == "web.vitals.cls" and Format("%v", [explicit_bounds]) != "[0.01 0.025 0.05 0.1 0.15 0.25 0.5 1]"
+        - metric.name == "web.ws.rtt" and Format("%v", [explicit_bounds]) != "[5 10 25 50 100 250 500 1000 2500]"
   transform/browser:
     error_mode: ignore
     metric_statements:
@@ -33,16 +46,30 @@ processors:
           - set(attributes["deployment.environment"], "unknown") where not IsMatch(attributes["deployment.environment"], "^(local|aws)$")
           - set(attributes["service.name"], "web")
           - set(attributes["service.instance.id"], "browser")
+      # The rest of a stream's identity, fixed too: the scope, the unit (it becomes part of the
+      # Prometheus name) and exemplars.
+      - context: scope
+        statements:
+          - set(scope.name, "web")
+          - set(scope.version, "")
+          - delete_matching_keys(scope.attributes, ".*")
+      - context: metric
+        statements:
+          - set(metric.unit, "ms") where metric.name != "web.vitals.cls"
+          - set(metric.unit, "") where metric.name == "web.vitals.cls"
       - context: datapoint
         statements:
-          - keep_keys(attributes, ["page"])
-          - set(attributes["page"], "other") where not IsMatch(attributes["page"], "^(lobby|room|gallery|market|my-drawings|wallet|developer|moderate|leaderboard)$")
-  deltatocumulative:
+          - keep_keys(datapoint.attributes, ["page"])
+          - set(datapoint.exemplars, [])
+          - set(datapoint.attributes["page"], "other") where not IsMatch(datapoint.attributes["page"], "^(lobby|room|gallery|market|my-drawings|wallet|developer|moderate|leaderboard)$")
+  # Four metrics times ten pages is 40 streams; anything past the cap is dropped, not tracked.
+  delta_to_cumulative:
     max_stale: 10m
+    max_streams: 100
 
 service:
   pipelines:
     metrics/browser:
       receivers: [otlp/browser]
-      processors: [memory_limiter, filter/browser, transform/browser, deltatocumulative, batch]
+      processors: [memory_limiter, filter/browser, transform/browser, delta_to_cumulative, batch]
       exporters: [otlp_http/metrics]
