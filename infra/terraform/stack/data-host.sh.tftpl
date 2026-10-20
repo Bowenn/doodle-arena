@@ -15,6 +15,14 @@ chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
 mkdir -p /opt/doodle
 cd /opt/doodle
+
+# The OpenTelemetry agent for the Kafka broker (infra/kafka/Dockerfile has the same jar locally),
+# checked against Maven Central's digest.
+mkdir -p kafka-otel
+curl -fsSL -o kafka-otel/opentelemetry-javaagent.jar \
+  https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.32.0/opentelemetry-javaagent-2.32.0.jar
+echo "f787eb6c7f3d18e69a431e108a15278d25ee37f83d68b678f621e063f3988f82  kafka-otel/opentelemetry-javaagent.jar" | sha256sum -c
+chmod 644 kafka-otel/opentelemetry-javaagent.jar
 aws s3 cp --region ${region} "s3://${bundle_bucket}/${bundle_key}" bundle.zip
 unzip -o -q bundle.zip
 chmod +x kafka/*.sh redis/*.sh postgres/init/*.sh

@@ -84,26 +84,47 @@ services:
     image: apache/kafka:4.2.2
     restart: unless-stopped
     # The local broker (infra/kafka/broker.sh, ADR 0013) with SASL_SSL: SCRAM users, ACLs, deny
-    # by default, and TLS with the stack's own CA (infra/terraform/stack/kafka.tf).
+    # by default, and TLS with the stack's own CA (infra/terraform/stack/kafka.tf). Locally
+    # infra/kafka/Dockerfile bakes these files and the OpenTelemetry agent into an image; here they
+    # are mounted into the official one, with the agent jar the boot script downloaded and checked
+    # (data-host.sh.tftpl), because Amazon Linux's Docker has no buildx for Compose builds.
     entrypoint: ["/bin/bash", "/etc/doodle-arena/kafka-broker.sh"]
     environment:
       KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?}
+      KAFKA_INIT_PASSWORD: ${KAFKA_INIT_PASSWORD:?}
+      KAFKA_BROKER_PASSWORD: ${KAFKA_BROKER_PASSWORD:?}
       # Clients in the VPC reach the broker by the data host's name in the private zone.
       KAFKA_ADVERTISED_HOST: ${DATA_HOST_NAME:?}
       KAFKA_INTERNAL_PROTOCOL: SASL_SSL
       KAFKA_TLS_DIR: /etc/doodle-arena/kafka-tls
       KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      # The agent: logs and the JMX metrics in infra/kafka/jmx.yaml only (as locally).
+      OTEL_SERVICE_NAME: kafka
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=kafka-1,deployment.environment=aws
+      # otel-lgtm is on the host network, reached through the bridge's gateway.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+      OTEL_TRACES_EXPORTER: none
+      OTEL_INSTRUMENTATION_COMMON_DEFAULT_ENABLED: "false"
+      OTEL_INSTRUMENTATION_LOG4J_APPENDER_ENABLED: "true"
+      OTEL_JMX_CONFIG: /etc/doodle-arena/kafka-jmx.yaml
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - kafka-data:/var/lib/kafka/data
       - ./kafka/broker.sh:/etc/doodle-arena/kafka-broker.sh:ro
       - ./kafka/log4j2.yaml:/etc/doodle-arena/kafka-log4j2.yaml:ro
+      - ./kafka/jmx.yaml:/etc/doodle-arena/kafka-jmx.yaml:ro
+      - ./kafka/admin.sh:/usr/local/bin/kafka-admin:ro
+      - ./kafka-otel/opentelemetry-javaagent.jar:/opt/otel/opentelemetry-javaagent.jar:ro
       - ./kafka-tls:/etc/doodle-arena/kafka-tls:ro
     ports:
       - "9092:9092"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /tmp/admin.properties >/dev/null 2>&1"]
+      test: ["CMD", "bash", "/tmp/healthcheck.sh"]
       interval: 5s
-      timeout: 10s
+      timeout: 20s
       retries: 30
 
   kafka-init:
@@ -113,6 +134,8 @@ services:
       KAFKA_SECURITY_PROTOCOL: SASL_SSL
       KAFKA_CA_FILE: /etc/doodle-arena/kafka-tls/ca.pem
       KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?}
+      KAFKA_INIT_PASSWORD: ${KAFKA_INIT_PASSWORD:?}
+      KAFKA_BROKER_PASSWORD: ${KAFKA_BROKER_PASSWORD:?}
       KAFKA_GAME_SERVER_PASSWORD: ${KAFKA_GAME_SERVER_PASSWORD:?}
       KAFKA_LOBBY_PASSWORD: ${KAFKA_LOBBY_PASSWORD:?}
       KAFKA_ASSETS_PASSWORD: ${KAFKA_ASSETS_PASSWORD:?}

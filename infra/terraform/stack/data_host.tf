@@ -16,6 +16,8 @@ locals {
     DISCORD_ALERT_WEBHOOK_URL = "discord/alert-webhook-url"
     # Kafka (ADR 0013): kafka-init sets each service's password; kafka-metrics uses its own.
     KAFKA_ADMIN_PASSWORD       = "stack/kafka-admin-password"
+    KAFKA_INIT_PASSWORD        = "stack/kafka-init-password"
+    KAFKA_BROKER_PASSWORD      = "stack/kafka-broker-password"
     KAFKA_GAME_SERVER_PASSWORD = "stack/kafka-game-server-password"
     KAFKA_LOBBY_PASSWORD       = "stack/kafka-lobby-password"
     KAFKA_ASSETS_PASSWORD      = "stack/kafka-assets-password"

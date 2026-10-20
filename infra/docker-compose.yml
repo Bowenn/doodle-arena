@@ -680,32 +680,46 @@ services:
     restart: "no"
 
   kafka:
-    image: apache/kafka:4.2.2
     # SCRAM-SHA-512 users and ACLs, deny by default (ADR 0013): infra/kafka/broker.sh writes the
-    # broker config and formats the storage with the admin credential on first start.
-    entrypoint: ["/bin/bash", "/etc/doodle-arena/kafka-broker.sh"]
+    # broker config and formats the storage with the first credentials on first start. The image
+    # (infra/kafka/Dockerfile) adds the OpenTelemetry agent: the broker's logs (each denial with
+    # its principal) and its failed-login and denied-request metrics go to otel-lgtm.
+    build:
+      context: ./kafka
     environment:
       KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?}
+      KAFKA_INIT_PASSWORD: ${KAFKA_INIT_PASSWORD:?}
+      KAFKA_BROKER_PASSWORD: ${KAFKA_BROKER_PASSWORD:?}
       KAFKA_ADVERTISED_HOST: kafka
       # 9094 for host tools (tools/eventctl, the drills), as the dev-tools user.
       KAFKA_EXTERNAL: "1"
       KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      # The agent sends only logs and the JMX metrics in infra/kafka/jmx.yaml: no traces, and no
+      # instrumentation besides the log4j appender (the broker isn't an application to trace).
+      OTEL_SERVICE_NAME: kafka
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=kafka-1,deployment.environment=local
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+      OTEL_TRACES_EXPORTER: none
+      OTEL_INSTRUMENTATION_COMMON_DEFAULT_ENABLED: "false"
+      OTEL_INSTRUMENTATION_LOG4J_APPENDER_ENABLED: "true"
+      OTEL_JMX_CONFIG: /etc/doodle-arena/kafka-jmx.yaml
     volumes:
       - kafka-data:/var/lib/kafka/data
-      - ./kafka/broker.sh:/etc/doodle-arena/kafka-broker.sh:ro
-      - ./kafka/log4j2.yaml:/etc/doodle-arena/kafka-log4j2.yaml:ro
     # Only Kafka's clients share this network (ADR 0013): the gateway, auth, the AI service and
-    # the assets web process and worker can't reach the broker at all.
-    networks: [kafka]
+    # the assets web process and worker can't reach the broker at all. kafka-otlp joins only the
+    # broker and otel-lgtm, so the broker's telemetry gets out without widening that.
+    networks: [kafka, kafka-otlp]
     ports:
       - "127.0.0.1:9094:9094"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /tmp/admin.properties >/dev/null 2>&1"]
+      test: ["CMD", "bash", "/tmp/healthcheck.sh"]
       interval: 5s
-      timeout: 10s
+      timeout: 20s
       retries: 30
 
-  # One-shot job, as admin: topics, one user per service and the ACLs (infra/kafka/init.sh).
+  # One-shot job, as kafka-init: topics, one user per service and the ACLs (infra/kafka/init.sh).
   # Services that use Kafka depend on it with service_completed_successfully, so they start
   # after their user and grants exist (and `compose up --wait` accepts the job exiting).
   kafka-init:
@@ -713,6 +727,8 @@ services:
     entrypoint: ["/bin/bash", "/init.sh"]
     environment:
       KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?}
+      KAFKA_INIT_PASSWORD: ${KAFKA_INIT_PASSWORD:?}
+      KAFKA_BROKER_PASSWORD: ${KAFKA_BROKER_PASSWORD:?}
       KAFKA_GAME_SERVER_PASSWORD: ${KAFKA_GAME_SERVER_PASSWORD:?}
       KAFKA_LOBBY_PASSWORD: ${KAFKA_LOBBY_PASSWORD:?}
       KAFKA_ASSETS_PASSWORD: ${KAFKA_ASSETS_PASSWORD:?}
@@ -798,6 +814,7 @@ services:
     # default: every service waits for it, so records never queue up behind a starting Loki.
     # After startup the image's check skips a backend that refuses connections, so a Tempo or
     # collector killed later (the Docker VM's OOM killer) would still pass: both are required.
+    networks: [default, kafka-otlp]
     healthcheck:
       test:
         - CMD-SHELL
@@ -822,9 +839,11 @@ services:
       - "127.0.0.1:4317:4317"
       - "127.0.0.1:4318:4318"
 
-# Kafka's own network (ADR 0013), joined only by Kafka clients.
+# Kafka's own network (ADR 0013), joined only by Kafka clients, and the broker's way to the
+# collector.
 networks:
   kafka:
+  kafka-otlp:
 
 volumes:
   postgres-data:

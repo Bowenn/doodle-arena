@@ -10,7 +10,7 @@ locals {
     "notifier-db-password", "mongo-root-password", "mongo-assets-password", "django-secret-key",
     "oauth-state-secret", "notifier-secret-key", "grafana-admin-password",
     # Kafka (ADR 0013, kafka.tf): the admin super user and one SCRAM user per service.
-    "kafka-admin-password", "kafka-game-server-password", "kafka-lobby-password",
+    "kafka-admin-password", "kafka-init-password", "kafka-broker-password", "kafka-game-server-password", "kafka-lobby-password",
     "kafka-assets-password", "kafka-marketplace-password", "kafka-notifier-password",
     "kafka-auth-password", "kafka-metrics-password",
     # Redis (task 5.5): the admin user and one ACL user per service and key prefix.

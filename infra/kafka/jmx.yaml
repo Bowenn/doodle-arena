@@ -1,0 +1,33 @@
+# JMX rules for the OpenTelemetry Java agent in the broker (infra/kafka/Dockerfile): the two
+# signals of ADR 0013's follow-up, named in docs/observability.md. Every client, ours or not,
+# is counted here: the broker sees each failed login and each refused request.
+rules:
+  # SASL logins per listener: failed ones (a wrong or unknown user, a bad password) and successful. Three
+  # network processors per listener, so the processor stays an attribute; sum over it.
+  - bean: kafka.server:type=socket-server-metrics,listener=*,networkProcessor=*
+    metricAttribute:
+      listener: param(listener)
+      processor: param(networkProcessor)
+    mapping:
+      failed-authentication-total:
+        metric: kafka.broker.authentication.failures
+        type: counter
+        unit: "{login}"
+        desc: Failed SASL logins
+      # On listener ADMIN these are admin's logins (humans only): KafkaAdminUsed.
+      successful-authentication-total:
+        metric: kafka.broker.authentication.successes
+        type: counter
+        unit: "{login}"
+        desc: Successful SASL logins
+  # Requests StandardAuthorizer refused (no ACL allows them), per minute, as the broker and
+  # the controller each measure it. The denial itself, with its principal, is in the logs.
+  - bean: kafka.server:type=plugins,config=authorizer.class.name,class=StandardAuthorizer,role=*
+    metricAttribute:
+      role: param(role)
+    mapping:
+      authorization-denied-rate-per-minute:
+        metric: kafka.broker.authorization.denied
+        type: gauge
+        unit: "{request}/min"
+        desc: Requests the authorizer refused, per minute

@@ -136,6 +136,9 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `auth.outbox.lag` | Gauge (s) | – (age of the oldest outbox event Kafka hasn't confirmed; 0 when drained) | auth (relay) |
 | `notifier.endpoints.disabled` | Counter | – (endpoints disabled because auth revoked their owner's credentials) | notifier |
 | `authn.jwks.fetches` | Counter | `reason` = max_age (the cached set was 10 minutes old, or older), unknown_kid; `result` = success, failed (the last good set stays in use for up to an hour) | lobby, notifier, assets (web) |
+| `kafka.broker.authentication.failures` | Counter | `listener` = INTERNAL (the services), EXTERNAL (host tools), CONTROLLER, ADMIN; `processor` (the broker's network thread, 0 to 5; sum over it). Failed SASL logins, from the broker's JMX through the OpenTelemetry agent (infra/kafka/jmx.yaml): every client counts, ours or not. Prometheus: `kafka_broker_authentication_failures_total` | kafka (broker) |
+| `kafka.broker.authentication.successes` | Counter | as above; on `listener=ADMIN`, the logins of `admin` (humans only). Prometheus: `kafka_broker_authentication_successes_total` | kafka (broker) |
+| `kafka.broker.authorization.denied` | Gauge ({request}/min) | `role` = broker, controller. The authorizer's denied requests per minute. It also counts unauthorized topics quietly left out of metadata answers, so it never reads zero on a healthy stack: the alert uses the logged denials instead. Prometheus: `kafka_broker_authorization_denied_per_min` | kafka (broker) |
 | `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram (ms; CLS has no unit) | `page` = lobby, room, gallery, market, my-drawings, wallet, developer, moderate, leaderboard, other (Largest Contentful Paint, Interaction to Next Paint and Cumulative Layout Shift of real users' page loads; Prometheus: `web_vitals_lcp_milliseconds`, `web_vitals_inp_milliseconds`, `web_vitals_cls`) | web (browser) |
 | `web.ws.rtt` | Histogram (ms) | – (the room's WebSocket `ping` until `pong`, every 5 s; Prometheus: `web_ws_rtt_milliseconds`) | web (browser) |
 
@@ -152,7 +155,7 @@ Two more sources besides the table: the Go services' runtime metrics (`go_gorout
 
 k6's built-ins (`k6_vus`, `k6_http_req_duration`, `k6_ws_msgs_sent` and the like) come along. A load test's virtual users are rooms, never metric attributes.
 
-Kafka's authorizer (ADR 0013, task 5.5) logs each denied request on the broker's stdout (principal, operation, resource; `make logs s=kafka`), which is where a service missing an ACL, or something probing, shows up. The marketplace's Java agent counts its own failed logins (`kafka_consumer_failed_authentication_total`, `kafka_producer_failed_authentication_total`).
+The broker runs the OpenTelemetry Java agent (infra/kafka/Dockerfile, task 5.5): its logs reach Loki as `service.name=kafka`, among them each request the authorizer denied (principal, operation, resource), and JMX rules (infra/kafka/jmx.yaml) export the three `kafka.broker.*` metrics below. Counting at the broker covers every client, ours or not; a client-side counter would miss the one that matters, a client that isn't ours. Traces and the agent's other instrumentation are off. The marketplace's own Java agent also counts its failed logins (`kafka_consumer_failed_authentication_total`, `kafka_producer_failed_authentication_total`).
 
 Kafka consumer lag per consumer group comes from the broker, not the clients (task 5.1): a `kafka-metrics` container (`otel/opentelemetry-collector-contrib`, the same version as the collector inside otel-lgtm) runs the `kafka_metrics` receiver every 30 s and pushes OTLP to otel-lgtm. It reports `kafka.consumer_group.lag_sum` per `group` and `topic` (Prometheus: `kafka_consumer_group_lag_sum`), for every consumer whatever its language. A collector of its own rather than an edit of otel-lgtm's bundled collector config, so upgrading that image never means re-syncing a copied file. Once Kafka requires SASL (ADR 0013, task 5.5), it needs a read-only Kafka user of its own.
 
@@ -207,6 +210,8 @@ Starting rules (tune the thresholds after the first load test):
 | StripeSignatureFailures | More than 5 invalid signatures in 10 minutes (a wrong secret or forged requests) | warning |
 | RefreshTokenReuse | More than 3 `auth.refreshes{result=reuse_detected}` in 10 minutes (stolen tokens, or a client that refreshes concurrently) | warning |
 | GameServerDown | `lobby.servers.healthy` below the expected count (2, the local stack's game servers) for 1 minute | critical |
+| KafkaAuthFailures | Every minute for 5 minutes: failed Kafka logins (`kafka.broker.authentication.failures`) or logged ACL denials (the broker's `is Denied` lines in Loki) above 0 (a service missing a credential or a grant, or someone probing; a one-off like CI's `make kafka-acl-check` doesn't last 5 minutes) | warning |
+| KafkaAdminUsed | Any login on the broker's ADMIN listener in 5 minutes (`kafka.broker.authentication.successes{listener=ADMIN}`): `admin`, the super user for humans, used from inside the broker container | warning |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`; task 5.2, not a Grafana rule) | critical |
 
 ### How the alerts are built (task 5.1)

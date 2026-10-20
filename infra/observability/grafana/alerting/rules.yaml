@@ -549,3 +549,72 @@ groups:
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/high-error-rate.md
           __dashboardUid__: da-overview
           __panelId__: "4"
+  - orgId: 1
+    name: kafka
+    folder: Doodle Arena
+    interval: 1m
+    rules:
+      - uid: kafka-auth-failures
+        title: KafkaAuthFailures
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "sum(increase(kafka_broker_authentication_failures_total[1m])) or vector(0)"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: loki
+            model:
+              refId: B
+              expr: "sum(count_over_time({service_name=\"kafka\"} |= \"is Denied\" [1m])) or vector(0)"
+              queryType: instant
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 0 || $B > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: kafka
+        annotations:
+          summary: "Kafka has refused logins or requests every minute for 5 minutes (last minute: {{ $values.A }} failed logins, {{ $values.B }} denials): a service missing a credential or an ACL, or someone trying."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/kafka-auth-failures.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "13"
+      - uid: kafka-admin-used
+        title: KafkaAdminUsed
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "sum(increase(kafka_broker_authentication_successes_total{listener=\"ADMIN\"}[5m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+          service: kafka
+        annotations:
+          summary: "Someone used Kafka's admin super user in the last 5 minutes ({{ $values.A }} logins on the localhost ADMIN listener). It's for humans only: make sure it was you."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/kafka-admin-used.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "14"
