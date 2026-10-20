@@ -66,6 +66,7 @@ type Handler struct {
 	cfg         Config
 	connections metric.Int64UpDownCounter
 	slow        metric.Int64Counter
+	sendLag     metric.Float64Histogram
 	tracer      trace.Tracer
 
 	base   context.Context
@@ -90,8 +91,18 @@ func NewHandler(cfg Config) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The room's broadcast ends when a message is queued; this is the rest of its way out.
+	// When the CPU is pinned, writers wait to be scheduled and this grows while the broadcast
+	// stays fast (task 5.3's AWS load test).
+	sendLag, err := cfg.Meter.Float64Histogram("game.ws.send_lag",
+		metric.WithDescription("Time from queueing a message to a socket until the socket write returns"),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000))
+	if err != nil {
+		return nil, err
+	}
 	base, cancel := context.WithCancel(context.Background())
-	return &Handler{cfg: cfg, connections: conns, slow: slow, tracer: otel.Tracer("game-server"), base: base, cancel: cancel}, nil
+	return &Handler{cfg: cfg, connections: conns, slow: slow, sendLag: sendLag, tracer: otel.Tracer("game-server"), base: base, cancel: cancel}, nil
 }
 
 // Shutdown stops accepting work and waits for every socket to finish (rooms close theirs
@@ -219,6 +230,8 @@ func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, l
 	pc := newPlayerConn(h.base, c, t.UserID, func() {
 		h.slow.Add(context.Background(), 1)
 		log.WarnContext(ctx, "slow client disconnected", "user_id", t.UserID)
+	}, func(lag time.Duration) {
+		h.sendLag.Record(context.Background(), float64(lag)/float64(time.Millisecond))
 	})
 	switch err := rm.Join(ctx, pc, t.Name, hello.LastSeq); {
 	case errors.Is(err, room.ErrRoomFull):
@@ -276,20 +289,27 @@ func (h *Handler) readLoop(ctx context.Context, c *websocket.Conn, pc *playerCon
 type playerConn struct {
 	uid        string
 	ws         *websocket.Conn
-	out        chan []byte
+	out        chan outMsg
 	ctx        context.Context
 	cancel     context.CancelFunc
 	onSlow     func()
+	onSent     func(lag time.Duration) // after each write that succeeded
 	once       sync.Once
 	code       websocket.StatusCode
 	reason     string
 	writerDone chan struct{}
 }
 
-func newPlayerConn(base context.Context, c *websocket.Conn, uid string, onSlow func()) *playerConn {
+// outMsg is a queued message and when it was queued.
+type outMsg struct {
+	b      []byte
+	queued time.Time
+}
+
+func newPlayerConn(base context.Context, c *websocket.Conn, uid string, onSlow func(), onSent func(time.Duration)) *playerConn {
 	ctx, cancel := context.WithCancel(base)
-	pc := &playerConn{uid: uid, ws: c, out: make(chan []byte, sendQueue), ctx: ctx, cancel: cancel,
-		onSlow: onSlow, code: closeGoingAway, reason: "server shutting down", writerDone: make(chan struct{})}
+	pc := &playerConn{uid: uid, ws: c, out: make(chan outMsg, sendQueue), ctx: ctx, cancel: cancel,
+		onSlow: onSlow, onSent: onSent, code: closeGoingAway, reason: "server shutting down", writerDone: make(chan struct{})}
 	go pc.writer()
 	return pc
 }
@@ -301,7 +321,7 @@ func (pc *playerConn) UserID() string { return pc.uid }
 func (pc *playerConn) Send(b []byte) {
 	select {
 	case <-pc.ctx.Done():
-	case pc.out <- b:
+	case pc.out <- outMsg{b: b, queued: time.Now()}:
 	default:
 		pc.slowClose()
 	}
@@ -339,16 +359,21 @@ func (pc *playerConn) writer() {
 			return
 		}
 		select {
-		case b := <-pc.out:
+		case m := <-pc.out:
 			// Not derived from pc.ctx: if a write's context is cancelled, the library drops
 			// the connection without a close frame, and the client would never see the code.
 			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-			err := pc.ws.Write(ctx, websocket.MessageText, b)
+			err := pc.ws.Write(ctx, websocket.MessageText, m.b)
 			cancel()
-			if errors.Is(err, context.DeadlineExceeded) {
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
 				pc.slowClose()
-			} else if err != nil {
+			case err != nil:
 				pc.closeWith(websocket.StatusNormalClosure, "")
+			default:
+				// The wait in the queue (writers not scheduled, or behind a slow write) plus
+				// the write itself.
+				pc.onSent(time.Since(m.queued))
 			}
 		case <-pc.ctx.Done():
 			// After a shutdown the base context ends first: the code stays "going away".

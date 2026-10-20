@@ -13,6 +13,7 @@ import (
 type Metrics struct {
 	roomsActive metric.Int64UpDownCounter
 	broadcastMS metric.Float64Histogram
+	inputLagMS  metric.Float64Histogram
 	guesses     metric.Int64Counter
 	reconnects  metric.Int64Counter
 	takeovers   metric.Int64Counter
@@ -32,6 +33,14 @@ func NewMetrics(m metric.Meter) (*Metrics, error) {
 		metric.WithDescription("Time to marshal a room event and queue it to every local socket (not the network write)"),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250)); err != nil {
+		return nil, err
+	}
+	// The way in, as game.ws.send_lag is the way out: when the CPU is pinned, inputs wait
+	// here for seconds behind earlier steps' Redis commits (task 5.3's capped load test).
+	if mt.inputLagMS, err = m.Float64Histogram("game.room.input_lag",
+		metric.WithDescription("Time from a socket handing a player's message to its room until the room's actor starts on it"),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000)); err != nil {
 		return nil, err
 	}
 	if mt.guesses, err = m.Int64Counter("game.guesses",
@@ -89,6 +98,10 @@ func (m *Metrics) roomClosed(ctx context.Context, mode string) {
 
 func (m *Metrics) broadcast(ctx context.Context, eventType string, d time.Duration) {
 	m.broadcastMS.Record(ctx, float64(d)/float64(time.Millisecond), metric.WithAttributes(attribute.String("event_type", eventType)))
+}
+
+func (m *Metrics) inputLag(ctx context.Context, d time.Duration) {
+	m.inputLagMS.Record(ctx, float64(d)/float64(time.Millisecond))
 }
 
 func (m *Metrics) guess(ctx context.Context, result string) {

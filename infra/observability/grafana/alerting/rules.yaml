@@ -267,7 +267,16 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: "histogram_quantile(0.99, sum by (le) (rate(game_broadcast_duration_milliseconds_bucket[5m]))) >= 0"
+              # Input and send lag, not game.broadcast.duration: the broadcast ends when a
+              # message is queued, so it read under 0.2 ms while a pinned server made players
+              # wait seconds (task 5.3). Input lag is the way in (the room's inbox), send lag the
+              # way out (the socket's queue); one instance per lag, labelled lag=input or
+              # lag=send. Only while the servers write more than 10 messages a second, so one
+              # slow phone on a near-idle stack isn't an incident.
+              expr: >-
+                (label_replace(histogram_quantile(0.95, sum by (le) (rate(game_room_input_lag_milliseconds_bucket[5m]))) >= 0, "lag", "input", "", "")
+                or label_replace(histogram_quantile(0.95, sum by (le) (rate(game_ws_send_lag_milliseconds_bucket[5m]))) >= 0, "lag", "send", "", ""))
+                and on() (sum(rate(game_ws_send_lag_milliseconds_count[5m])) > 10)
               instant: true
           - refId: C
             datasourceUid: __expr__
@@ -275,7 +284,7 @@ groups:
               refId: C
               type: threshold
               expression: A
-              conditions: [{evaluator: {type: gt, params: [150]}}]
+              conditions: [{evaluator: {type: gt, params: [250]}}]
         noDataState: OK
         execErrState: Error
         for: 5m
@@ -283,10 +292,10 @@ groups:
           severity: warning
           service: game-server
         annotations:
-          summary: "Broadcast p99 is {{ $values.A }} ms: players see strokes and guesses late."
+          summary: "{{ $labels.lag }} lag p95 is {{ $values.A }} ms: players see strokes, guesses and pongs late."
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/slow-broadcasts.md
           __dashboardUid__: da-game-server
-          __panelId__: "3"
+          __panelId__: "13"
       - uid: outbox-stuck
         title: OutboxStuck
         condition: C

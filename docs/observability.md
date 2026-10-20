@@ -75,7 +75,9 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 |---|---|---|---|
 | `game.ws.connections` | UpDownCounter | – | game-server |
 | `game.rooms.active` | UpDownCounter | `mode` | game-server |
-| `game.broadcast.duration` | Histogram (ms) | `event_type` (time to marshal an event and queue it to every local socket, after the step's commit to Redis; it doesn't include the network write) | game-server |
+| `game.broadcast.duration` | Histogram (ms) | `event_type` (time to marshal an event and queue it to every local socket, after the step's commit to Redis; it doesn't include the network write: `game.ws.send_lag` does) | game-server |
+| `game.room.input_lag` | Histogram (ms) | – (from a socket handing a player's message to its room until the room's actor starts on it: the wait in the room's inbox, 256 deep, including any time the socket's reader was blocked on a full inbox. Each step ends with a Redis commit, so when the CPU is pinned inputs queue here for seconds; task 5.3) | game-server |
+| `game.ws.send_lag` | Histogram (ms) | – (from queueing a message to a socket until the socket write returns: the wait in its send queue, for a CPU or behind a slow write, plus the write itself. Recorded by the socket's writer goroutine for every message written; one that is never written, because the socket closed first, isn't counted. It rises when a server falls behind, which `game.broadcast.duration` can't see; task 5.3) | game-server |
 | `game.guesses` | Counter | `result` = correct, wrong, rate_limited | game-server |
 | `game.reconnects` | Counter | `result` = resumed (missed events replayed), snapshot (a full `welcome`), failed (a join with `last_seq` that the room refused or never reached, for example a full room or one that just stopped) | game-server |
 | `game.room.takeovers` | Counter | – (rooms this server restored from another owner's state) | game-server |
@@ -124,12 +126,12 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram | `page` | web |
 | `web.ws.rtt` | Histogram (ms) | – | web |
 
-Two more sources besides the table: the Go services' runtime metrics (`go_goroutine_count`, `go_memory_used_bytes`, `go_memory_allocated_bytes_total`, from OpenTelemetry's Go runtime instrumentation; the Go services export no process CPU, so CPU comes from CloudWatch's `AWS/ECS` metrics in AWS), and k6 during a load test (task 5.3): `loadtest/rooms.js` sends its metrics over OTLP with `service.name=k6`, all prefixed `k6_`. Its own are in milliseconds:
+Two more sources besides the table: the Go services' runtime metrics (`go_goroutine_count`, `go_memory_used_bytes`, `go_memory_allocated_bytes_total`, from OpenTelemetry's Go runtime instrumentation, and, from the game server only, `go_schedule_duration_seconds`: how long runnable goroutines waited for a CPU, the runtime's own histogram, which tells a pinned CPU apart from a slow network when `game.ws.send_lag` rises; the Go services export no process CPU, so CPU comes from CloudWatch's `AWS/ECS` metrics in AWS), and k6 during a load test (task 5.3): `loadtest/rooms.js` sends its metrics over OTLP with `service.name=k6`, all prefixed `k6_`. Its own are in milliseconds:
 
 | Metric | Type | What |
 |---|---|---|
 | `k6_stroke_fanout` | Histogram (ms) | A drawer's stroke batch until each other player in the room has it. The send time rides in the `stroke_id` (all four players live in one k6 process, one clock), so no protocol change was needed. Includes the client's network path |
-| `k6_ws_rtt` | Histogram (ms) | `ping` until `pong`, answered without the room: the network and the gateway alone, to tell them apart from the game server |
+| `k6_ws_rtt` | Histogram (ms) | `ping` until `pong`, answered without the room: the network, the gateway and the socket's send queue (`game.ws.send_lag` is the queue's share), to tell them apart from the room |
 | `k6_guess_result` | Histogram (ms) | A guess until its `guess_result` |
 | `k6_join`, `k6_welcome` | Histogram (ms) | `POST /join` until the ticket; connect until `welcome` |
 | `k6_room_errors`, `k6_ws_closed` | Counter | A room that failed (tagged `step`), a socket the server closed (tagged `code`) |
@@ -142,10 +144,10 @@ Kafka consumer lag per consumer group comes from the broker, not the clients (ta
 Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into Grafana's "Doodle Arena" folder (task 5.1). They're read-only in the UI: change the JSON, and Grafana picks it up within 30 seconds.
 
 1. Service overview (`da-overview`): firing alerts, recent error and warning logs from Loki, request rate, server-error share and p95 latency per service (HTTP and gRPC servers together), auth sign-ins and refreshes, and the lobby.
-2. Game server (`da-game-server`): connections, rooms, broadcast latency, guesses, reconnects, takeovers, and the event outbox.
+2. Game server (`da-game-server`): connections, rooms, broadcast latency, input and send lag, scheduler latency, guesses, reconnects, takeovers, and the event outbox.
 3. Marketplace (`da-marketplace`): the three invariant gauges and the outbox lag as stats, purchases and conflicts, lock waits, idempotent replays, Stripe webhooks, rewards and minting.
 4. Async pipeline (`da-async-pipeline`): Kafka consumer lag, the outbox lags, Celery job age, the drawing pipeline and moderation, webhook deliveries, the queue age and the dead-letter queue.
-5. Load test (`da-load-test`, task 5.3): what k6 applies and what players feel, next to the game servers' broadcast latency, rooms, connections and Go runtime, and, in AWS, ECS CPU from CloudWatch. The panels to watch while `make loadtest` runs, and to screenshot for the README.
+5. Load test (`da-load-test`, task 5.3): what k6 applies and what players feel, next to the game servers' broadcast latency, input and send lag, scheduler latency, rooms, connections and Go runtime, and, in AWS, ECS CPU from CloudWatch. The panels to watch while `make loadtest` runs, and to screenshot for the README.
 
 The gateway (Nginx) exports traces but no metrics, so the overview shows the services behind it, not the gateway itself.
 
@@ -177,7 +179,7 @@ Starting rules (tune the thresholds after the first load test):
 | ReconciliationStale | `market.ledger.imbalance` missing for 5 minutes (the job stopped or can't read the database; the two invariant alerts above are blind) | warning |
 | OutboxStuck | `game.outbox.pending > 0` for 10 minutes (Kafka or S3 down, or an entry that can't be published; rewards and drawings are waiting) | warning |
 | OwnershipViolation | `market.ownership.violations > 0` | critical |
-| SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes. Blind to a server whose CPU is pinned: the metric ends when an event is queued, before the socket write (task 5.3 saw pongs wait seconds while it read under 0.1 ms); a send-lag metric is a follow-up | warning |
+| SlowBroadcasts | p95 of `game.room.input_lag` or of `game.ws.send_lag` above 250 ms for 5 minutes (one alert per lag, labelled `lag` = input or send), while the game servers write more than 10 messages a second (a near-idle stack with one slow phone isn't an incident). Input lag is the way into a room, send lag the way out; together they are most of what players feel. 250 ms from a local run with both game servers capped at 0.25 CPU (evidence log, 2026-10-19): healthy, input lag p95 stays under 1 ms; at 40 rooms its 5-minute p95 sat at 0.8 to 1.9 s, tracking k6's stroke fan-out, and the alert fired 5 minutes after it crossed. Send lag rarely gets there when the server is the cause (its 5-minute p95 peaked at 195 ms), but it's the signal for slow clients or a slow gateway. Until task 5.3 it watched `game.broadcast.duration`, which ends when an event is queued: in the AWS load test pongs waited seconds while it read under 0.1 ms. That metric stays on the dashboards to diagnose the room actor itself. p95 rather than p99, because one client on a slow network can be more than 1% of a small stack's messages; a server that falls behind moves them all | warning |
 | HighErrorRate | Server errors (HTTP 5xx; gRPC `UNKNOWN`, `DEADLINE_EXCEEDED`, `INTERNAL`, `UNAVAILABLE`, `DATA_LOSS`) above 1% of requests for 5 minutes, per service, when the service had at least 20 requests in those 5 minutes | warning |
 | ConsumerLagGrowing | A consumer group's lag (`kafka_consumer_group_lag_sum`) above 0 and higher than 10 minutes earlier, for 5 minutes | warning |
 | AuthOutboxStuck | `auth.outbox.lag` above 60 s for 5 minutes (Kafka down, or `auth-relay` stopped: a credential revocation isn't reaching the notifier, so a thief's webhooks keep running) | critical |

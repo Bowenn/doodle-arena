@@ -126,6 +126,7 @@ type (
 	clientIn struct {
 		conn Conn
 		msg  protocol.ClientMsg
+		at   time.Time // when the socket handed it over, for game.room.input_lag
 	}
 	tickIn   struct{}
 	probeIn  struct{ done chan struct{} }
@@ -250,7 +251,8 @@ func (r *Room) Join(ctx context.Context, conn Conn, name string, lastSeq int64) 
 // Input passes a client message to the room. It blocks while the inbox is full, which slows
 // down only the sending socket.
 func (r *Room) Input(ctx context.Context, conn Conn, msg protocol.ClientMsg) error {
-	return r.enqueue(ctx, clientIn{conn: conn, msg: msg})
+	// Stamped before the send: time blocked on a full inbox is part of the wait.
+	return r.enqueue(ctx, clientIn{conn: conn, msg: msg, at: r.clock.Now()})
 }
 
 // Leave reports that conn has closed.
@@ -415,6 +417,7 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 		delete(r.conns, uid)
 		delete(r.traces, uid)
 	case clientIn:
+		r.metrics.inputLag(ctx, now.Sub(in.at))
 		uid := in.conn.UserID()
 		if r.conns[uid] != in.conn {
 			return

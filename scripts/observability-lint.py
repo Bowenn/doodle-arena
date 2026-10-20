@@ -37,6 +37,7 @@ PROMQL_WORDS = {
     "sum", "max", "min", "avg", "count", "abs", "rate", "increase", "delta", "deriv", "by", "without",
     "on", "ignoring", "and", "or", "unless", "vector", "histogram_quantile", "last_over_time",
     "max_over_time", "absent_over_time", "offset", "group_left", "group_right", "clamp_max", "le",
+    "label_replace",
 }
 RUNBOOK_SECTIONS = ("## What it means", "## Check", "## Fix", "## Afterwards")
 

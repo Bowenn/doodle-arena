@@ -54,7 +54,10 @@ func Setup(ctx context.Context) (shutdown func(context.Context) error, err error
 		return nil, errors.Join(fmt.Errorf("metric exporter: %w", err), tracerProvider.Shutdown(ctx))
 	}
 	meterProvider := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)),
+		// The producer adds go.schedule.duration: how long runnable goroutines wait for a CPU.
+		// It tells a pinned CPU apart from slow networks when game.ws.send_lag rises.
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter,
+			sdkmetric.WithProducer(runtime.NewProducer()))),
 		sdkmetric.WithResource(res),
 	)
 
