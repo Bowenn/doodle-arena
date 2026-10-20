@@ -55,6 +55,7 @@ Keep this list accurate:
 - `make telemetry-check`: one request with a known trace id must reach Tempo and Loki, and every service must export metrics (Grafana: `http://localhost:3000`).
 - `make alerts-check`: Grafana loaded every dashboard, alert rule and the Discord contact point from `infra/observability/`, every panel query runs, and every rule evaluates without an error (CI's stack job runs it). Dashboards: `http://localhost:3000/dashboards`, folder Doodle Arena.
 - `make loadtest` (k6, `loadtest/rooms.js`: up to 80 four-player rooms over 12 minutes) and `make loadtest-smoke` (2 rooms, a minute; CI's stack job). `GATEWAY=https://icanfly.click make loadtest` runs it against AWS (the stack's key comes from SSM). Watch the "Doodle Arena: load test" dashboard. In a worktree, set `DRILL_JWT_KEY` like the drills.
+- `make lighthouse`: Lighthouse (`@lhci/cli`, mobile, 3 runs of `/` and `/gallery`; `web/lighthouserc.json` asserts performance, LCP and CLS) against the production web image run locally; `GATEWAY=https://icanfly.click make lighthouse` audits AWS. Needs Google Chrome. Numbers go to `docs/performance.md`.
 - `make pipeline-check`: one `RoundFinished` in, then an approved drawing, its image and its `DrawingApproved` out (CI's stack job runs it). Needs the AI stub to approve; in a worktree, set `ENV_FILE` to the main checkout's `.env`.
 - `make test` runs every service's tests with the host toolchains; `make test s=<service>` runs one.
 - `make lint [s=<service>]` (`s=ci` lints the GitHub Actions workflows, `s=secrets` scans the git history with gitleaks, `s=observability` checks dashboards, alert rules and runbooks against `docs/observability.md`, `s=terraform` checks `infra/terraform/` offline: fmt, validate, tflint), `make logs s=<service>` (`s=game-server` follows both instances, `s=assets` the web process, the consumer, the Celery worker, the outbox relay and beat, `s=auth` the web process and its outbox relay), `make ps`.
@@ -114,7 +115,7 @@ Keep this list accurate:
 - Start each task with `/milestone <task-id>`, for example `/milestone 2.3`. It plans first and waits for approval before writing code.
 - Use plan mode for anything that touches marketplace money paths, room ownership in the game server, or `proto/`.
 - When two designs are both reasonable, present both with their trade-offs and ask.
-- Record measured numbers (load tests, failover times) in the evidence log at the end of `docs/roadmap.md`.
+- Record measured numbers (load tests, failover times, Lighthouse) in the evidence log at the end of `docs/roadmap.md`, and update the current numbers in `docs/performance.md`.
 
 ## Gotchas
 
@@ -133,4 +134,5 @@ Keep this list accurate:
 - otel-lgtm has no memory limit. When the Docker VM runs out of memory, its OOM killer stops Tempo or the collector inside the container and Grafana keeps running; the healthcheck then turns unhealthy. Look with `docker run --rm --privileged --pid=host alpine dmesg | grep -i oom`, and restart it with `docker restart doodle-arena-otel-lgtm-1`.
 - Loki (in otel-lgtm) stops accepting logs when its disk is over 90% full and answers "Ingester is shutting down". On CI, `stack.yml` frees runner disk first; locally, prune Docker if logs stop reaching Grafana.
 - Refresh tokens rotate on every use, and a reused one revokes the whole family. Any client must refresh single-flight (see `web/src/auth.ts`); two concurrent refreshes log the user out.
+- OTTL can't compare a slice to a list literal (`explicit_bounds != [..]` is always true) and doesn't parse an index on it: compare `Format("%v", [explicit_bounds])` with a string, as `infra/observability/otelcol/browser.yaml` does. Test a collector rule with crafted OTLP payloads and a debug exporter before trusting it.
 - Testcontainers needs Docker's socket. `scripts/test.sh` sets `DOCKER_HOST` from the Docker context, because Docker Desktop may not create `/var/run/docker.sock`.

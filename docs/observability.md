@@ -7,7 +7,7 @@ Logging, monitoring, tracing and alerting for every service. `CLAUDE.md` has the
 ```mermaid
 flowchart LR
   svc["Services<br/>Go, Java, Python"] --> col["OpenTelemetry Collector"]
-  webapp["Web app<br/>Web Vitals, errors"] --> col
+  webapp["Web app<br/>Web Vitals, WebSocket round trip"] -->|"/otlp/v1/metrics<br/>through the gateway"| col
   col --> prom["Prometheus<br/>metrics"]
   col --> tempo["Tempo<br/>traces"]
   col --> loki["Loki<br/>logs"]
@@ -40,7 +40,18 @@ Configuration is the standard `OTEL_*` environment, set once in `infra/docker-co
 
 otel-lgtm runs without a container memory limit, so when the Docker VM runs out of memory its OOM killer stops the biggest process inside, usually Tempo, then the collector, while Grafana and the rest keep running (`docker run --rm --privileged --pid=host alpine dmesg | grep -i oom` shows it). Two guards: the collector's `memory_limiter` (`infra/observability/otelcol/memory-limiter.yaml`, merged over the image's config through `OTELCOL_EXTRA_ARGS`) refuses data past 768 MiB instead of growing while Tempo is down, and the compose healthcheck requires Tempo's and the collector's `/ready` as well as the image's own check, which skips a backend that refuses connections. A dead Tempo or collector then shows as unhealthy in `make ps`; Compose doesn't restart it, `docker restart doodle-arena-otel-lgtm-1` does. The AWS data host (`infra/aws/data-host/compose.yml`) has the same two guards; docs/setup.md ("AWS") says how to look at it there.
 
-Health checks and the Vite dev-server assets are not traced, except in marketplace: the Java agent has no simple path exclusion, so its container health check produces a small trace every few seconds until tail sampling arrives (Stage 6). Browser telemetry (Web Vitals, errors, fetch spans) comes with task 5.4. `make telemetry-check` proves the pipeline end to end: a request with a known trace id must show up in Tempo (gateway and auth spans) and in Loki (an auth log line with that `trace_id`), and every service must export metrics. CI runs it in `stack.yml`.
+Health checks and the Vite dev-server assets are not traced, except in marketplace: the Java agent has no simple path exclusion, so its container health check produces a small trace every few seconds until tail sampling arrives (Stage 6). Browser telemetry is below. `make telemetry-check` proves the pipeline end to end: a request with a known trace id must show up in Tempo (gateway and auth spans) and in Loki (an auth log line with that `trace_id`), and every service must export metrics. CI runs it in `stack.yml`.
+
+### Browser telemetry (task 5.4)
+
+The web app reports real users' Core Web Vitals and the room's WebSocket round trip as OpenTelemetry metrics. Errors and fetch spans are Stage 6.
+
+- `web/src/rum.ts` loads with the app and is tiny. It names the page (`lobby`, `room`, `gallery`, `market`, `my-drawings`, `wallet`, `developer`, `moderate`, `leaderboard`, else `other`: a route, never an id) and queues up to 50 round trips. After the page's load event it imports `web/src/telemetry.ts`: the OpenTelemetry metrics SDK and `web-vitals`, 28 KB gzipped, so measuring the page doesn't slow its first paint.
+- Each page load is a short-lived process, so it exports **deltas**, every 60 s and when the page is hidden (`visibilitychange`, `pagehide`; the exporter uses `sendBeacon`, which outlives the page). The vitals are final only then.
+- The browser posts to `/otlp/v1/metrics` on the gateway: POST only, 64 KB at most, 2 requests a second per address with a burst of 10, no access log or span. The gateway forwards it to a receiver of its own on the collector (`otlp/browser`, port 4319; locally `otel-lgtm:4319`, in AWS `data.doodle.internal:4319`, open only to the gateway's security group), so nothing a browser sends reaches the services' pipelines.
+- Anyone can post to a public endpoint, so the browser pipeline (`infra/observability/otelcol/browser.yaml`, merged over otel-lgtm's config like `memory-limiter.yaml`) keeps exactly what the web app sends: the four metric names, histograms only, the web app's own bucket bounds; resource attributes reduced to `service.name=web`, one `service.instance.id=browser` and `deployment.environment` (`local`, `aws`, else `unknown`); one scope; fixed units; no exemplars; and on each vital's point only `page`, from the list above or else `other` (`web.ws.rtt` has no attributes). A metric or point that breaks a rule is dropped, a value outside a list is replaced, so a client can't create new series.
+- `delta_to_cumulative` then adds every browser's deltas into one cumulative series per metric and page, as Prometheus expects (at most 100 streams; one that's idle for 10 minutes is forgotten).
+- Lighthouse is the lab-side check: `make lighthouse` (`scripts/lighthouse.sh`, `web/lighthouserc.json`), against the production image locally or the AWS stack with `GATEWAY`. It isn't a CI gate; its numbers are in `docs/performance.md`.
 
 ## 2. Logging
 
@@ -125,8 +136,8 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `auth.outbox.lag` | Gauge (s) | – (age of the oldest outbox event Kafka hasn't confirmed; 0 when drained) | auth (relay) |
 | `notifier.endpoints.disabled` | Counter | – (endpoints disabled because auth revoked their owner's credentials) | notifier |
 | `authn.jwks.fetches` | Counter | `reason` = max_age (the cached set was 10 minutes old, or older), unknown_kid; `result` = success, failed (the last good set stays in use for up to an hour) | lobby, notifier, assets (web) |
-| `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram | `page` | web |
-| `web.ws.rtt` | Histogram (ms) | – | web |
+| `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram (ms; CLS has no unit) | `page` = lobby, room, gallery, market, my-drawings, wallet, developer, moderate, leaderboard, other (Largest Contentful Paint, Interaction to Next Paint and Cumulative Layout Shift of real users' page loads; Prometheus: `web_vitals_lcp_milliseconds`, `web_vitals_inp_milliseconds`, `web_vitals_cls`) | web (browser) |
+| `web.ws.rtt` | Histogram (ms) | – (the room's WebSocket `ping` until `pong`, every 5 s; Prometheus: `web_ws_rtt_milliseconds`) | web (browser) |
 
 Two more sources besides the table: the Go services' runtime metrics (`go_goroutine_count`, `go_memory_used_bytes`, `go_memory_allocated_bytes_total`, from OpenTelemetry's Go runtime instrumentation, and, from the game server only, `go_schedule_duration_seconds`: how long runnable goroutines waited for a CPU, the runtime's own histogram, which tells a pinned CPU apart from a slow network when `game.ws.send_lag` rises; the Go services export no process CPU, so CPU comes from CloudWatch's `AWS/ECS` metrics in AWS), and k6 during a load test (task 5.3): `loadtest/rooms.js` sends its metrics over OTLP with `service.name=k6`, all prefixed `k6_`. Its own are in milliseconds:
 
@@ -232,5 +243,5 @@ Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.dupli
 
 - Stage 1: the stack runs, every service exports traces, metrics and logs over OTLP, and logs carry `trace_id` and `span_id` (task 1.5).
 - Stages 2–4: a task isn't done until its metrics from section 3 exist.
-- Stage 5: dashboards, alert rules, runbooks and the Discord contact point (task 5.1), the AWS budget alarm (task 5.2).
+- Stage 5: dashboards, alert rules, runbooks and the Discord contact point (task 5.1), the AWS budget alarm (task 5.2), browser telemetry and Lighthouse (task 5.4).
 - Stage 6: SLOs, tail sampling, deploy markers. The kill test doubles as a fire drill: the right alert must fire, and its runbook must fix the problem.
