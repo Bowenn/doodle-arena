@@ -1,18 +1,21 @@
 #!/bin/bash
 # The Kafka broker with SCRAM-SHA-512 users and ACLs (ADR 0013), in place of the image's own
-# start script: it writes server.properties, formats the storage once with the admin's SCRAM
-# credential (KIP-900: the first credential has to exist before anyone can authenticate), then
-# starts the broker. kafka-init creates the services' users and ACLs as admin.
+# start script: it writes server.properties, formats the storage once with the first SCRAM
+# credentials (KIP-900: they have to exist before anyone can authenticate), then starts the
+# broker. Three super users, so each one's use can be told apart in the authorizer's log:
+#   broker      the broker itself: its controller heartbeats and inter-broker requests
+#   kafka-init  the init job, which creates the services' users and ACLs (infra/kafka/init.sh)
+#   admin       humans only: any request it makes raises KafkaAdminUsed (docs/observability.md)
 #
 # Listeners:
 #   INTERNAL    9092  SASL over the Kafka network (SASL_SSL in AWS, KAFKA_INTERNAL_PROTOCOL)
 #   EXTERNAL    9094  SASL_PLAINTEXT on 127.0.0.1 for host tools (local only, KAFKA_EXTERNAL=1)
-#   CONTROLLER  9093  the KRaft quorum, on localhost only: SASL/PLAIN with a static admin user,
+#   CONTROLLER  9093  the KRaft quorum, on localhost only: SASL/PLAIN with a static broker user,
 #                     because SCRAM credentials live in the metadata log the controller serves
-# Anything without an ACL is denied; admin is the only super user.
+# Anything without an ACL is denied.
 set -euo pipefail
 
-: "${KAFKA_ADMIN_PASSWORD:?}"
+: "${KAFKA_ADMIN_PASSWORD:?}" "${KAFKA_INIT_PASSWORD:?}" "${KAFKA_BROKER_PASSWORD:?}"
 : "${KAFKA_ADVERTISED_HOST:=kafka}"
 : "${KAFKA_INTERNAL_PROTOCOL:=SASL_PLAINTEXT}"
 : "${KAFKA_EXTERNAL:=0}"
@@ -28,8 +31,8 @@ if [[ "$KAFKA_EXTERNAL" == 1 ]]; then
   advertised+=",EXTERNAL://localhost:9094"
   protocols+=",EXTERNAL:SASL_PLAINTEXT"
 fi
-scram_admin="org.apache.kafka.common.security.scram.ScramLoginModule required username=\"admin\" password=\"${KAFKA_ADMIN_PASSWORD}\";"
-plain_admin="org.apache.kafka.common.security.plain.PlainLoginModule required username=\"admin\" password=\"${KAFKA_ADMIN_PASSWORD}\" user_admin=\"${KAFKA_ADMIN_PASSWORD}\";"
+scram_broker="org.apache.kafka.common.security.scram.ScramLoginModule required username=\"broker\" password=\"${KAFKA_BROKER_PASSWORD}\";"
+plain_broker="org.apache.kafka.common.security.plain.PlainLoginModule required username=\"broker\" password=\"${KAFKA_BROKER_PASSWORD}\" user_broker=\"${KAFKA_BROKER_PASSWORD}\";"
 
 umask 077
 cat > "$CONFIG" <<EOF
@@ -45,15 +48,15 @@ log.dirs=${DATA}
 
 sasl.enabled.mechanisms=SCRAM-SHA-512
 sasl.mechanism.inter.broker.protocol=SCRAM-SHA-512
-listener.name.internal.scram-sha-512.sasl.jaas.config=${scram_admin}
-listener.name.external.scram-sha-512.sasl.jaas.config=${scram_admin}
+listener.name.internal.scram-sha-512.sasl.jaas.config=${scram_broker}
+listener.name.external.scram-sha-512.sasl.jaas.config=${scram_broker}
 sasl.mechanism.controller.protocol=PLAIN
 listener.name.controller.sasl.enabled.mechanisms=PLAIN
-listener.name.controller.plain.sasl.jaas.config=${plain_admin}
+listener.name.controller.plain.sasl.jaas.config=${plain_broker}
 
 authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
 allow.everyone.if.no.acl.found=false
-super.users=User:admin
+super.users=User:broker;User:kafka-init;User:admin
 
 offsets.topic.replication.factor=1
 transaction.state.log.replication.factor=1
@@ -63,11 +66,21 @@ group.initial.rebalance.delay.ms=0
 auto.create.topics.enable=false
 EOF
 
-# The admin client config for the healthcheck (kafka-init writes its own).
+# The healthcheck (kafka-init writes its own client config): ApiVersions as the broker, or as
+# admin on a volume from before the broker user existed, until kafka-init adds it. ApiVersions
+# needs no authorization, so the fallback logs nothing that KafkaAdminUsed counts.
 cat > /tmp/admin.properties <<EOF
 security.protocol=${KAFKA_INTERNAL_PROTOCOL}
 sasl.mechanism=SCRAM-SHA-512
-sasl.jaas.config=${scram_admin}
+sasl.jaas.config=${scram_broker}
+EOF
+sed 's/username="broker" password="[^"]*"/username="admin" password="'"${KAFKA_ADMIN_PASSWORD}"'"/' /tmp/admin.properties > /tmp/admin-fallback.properties
+cat > /tmp/healthcheck.sh <<'EOF'
+#!/bin/bash
+for config in /tmp/admin.properties /tmp/admin-fallback.properties; do
+  /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config "$config" >/dev/null 2>&1 && exit 0
+done
+exit 1
 EOF
 
 # AWS: the broker's key and certificate (one PEM file, the key in PKCS#8) from the stack's own
@@ -81,14 +94,20 @@ ssl.keystore.location=${KAFKA_TLS_DIR}/server.pem
 ssl.truststore.type=PEM
 ssl.truststore.location=${KAFKA_TLS_DIR}/ca.pem
 EOF
-  printf 'ssl.truststore.type=PEM\nssl.truststore.location=%s/ca.pem\n' "$KAFKA_TLS_DIR" >> /tmp/admin.properties
+  for f in /tmp/admin.properties /tmp/admin-fallback.properties; do
+    printf 'ssl.truststore.type=PEM\nssl.truststore.location=%s/ca.pem\n' "$KAFKA_TLS_DIR" >> "$f"
+  done
 fi
 
 # Format once. The data now lives under kraft/: a volume formatted before ADR 0013 has no admin
 # credential, so it's left alone instead (delete the old files under /var/lib/kafka/data by hand).
+# A volume formatted before the broker and kafka-init users existed (task 5.5) has only admin:
+# kafka-init adds the two once, as admin.
 if [[ ! -f "$DATA/meta.properties" ]]; then
   /opt/kafka/bin/kafka-storage.sh format --config "$CONFIG" --cluster-id "$KAFKA_CLUSTER_ID" \
-    --add-scram "SCRAM-SHA-512=[name=admin,password=${KAFKA_ADMIN_PASSWORD}]"
+    --add-scram "SCRAM-SHA-512=[name=admin,password=${KAFKA_ADMIN_PASSWORD}]" \
+    --add-scram "SCRAM-SHA-512=[name=kafka-init,password=${KAFKA_INIT_PASSWORD}]" \
+    --add-scram "SCRAM-SHA-512=[name=broker,password=${KAFKA_BROKER_PASSWORD}]"
 fi
 
 export KAFKA_LOG4J_OPTS="-Dlog4j2.configurationFile=/etc/doodle-arena/kafka-log4j2.yaml"

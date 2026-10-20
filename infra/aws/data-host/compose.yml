@@ -88,6 +88,8 @@ services:
     entrypoint: ["/bin/bash", "/etc/doodle-arena/kafka-broker.sh"]
     environment:
       KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?}
+      KAFKA_INIT_PASSWORD: ${KAFKA_INIT_PASSWORD:?}
+      KAFKA_BROKER_PASSWORD: ${KAFKA_BROKER_PASSWORD:?}
       # Clients in the VPC reach the broker by the data host's name in the private zone.
       KAFKA_ADVERTISED_HOST: ${DATA_HOST_NAME:?}
       KAFKA_INTERNAL_PROTOCOL: SASL_SSL
@@ -101,9 +103,9 @@ services:
     ports:
       - "9092:9092"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 --command-config /tmp/admin.properties >/dev/null 2>&1"]
+      test: ["CMD", "bash", "/tmp/healthcheck.sh"]
       interval: 5s
-      timeout: 10s
+      timeout: 20s
       retries: 30
 
   kafka-init:
@@ -113,6 +115,8 @@ services:
       KAFKA_SECURITY_PROTOCOL: SASL_SSL
       KAFKA_CA_FILE: /etc/doodle-arena/kafka-tls/ca.pem
       KAFKA_ADMIN_PASSWORD: ${KAFKA_ADMIN_PASSWORD:?}
+      KAFKA_INIT_PASSWORD: ${KAFKA_INIT_PASSWORD:?}
+      KAFKA_BROKER_PASSWORD: ${KAFKA_BROKER_PASSWORD:?}
       KAFKA_GAME_SERVER_PASSWORD: ${KAFKA_GAME_SERVER_PASSWORD:?}
       KAFKA_LOBBY_PASSWORD: ${KAFKA_LOBBY_PASSWORD:?}
       KAFKA_ASSETS_PASSWORD: ${KAFKA_ASSETS_PASSWORD:?}
