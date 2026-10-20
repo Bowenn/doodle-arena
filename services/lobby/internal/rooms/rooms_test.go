@@ -913,3 +913,93 @@ func TestReassignStopsWhenTheLockIsLost(t *testing.T) {
 		t.Fatalf("calls %v, rooms left on gs-1 %v", e.alloc.calls, e.roomsOn(t, "gs-1"))
 	}
 }
+
+// reassignments returns the lobby.reassignments counter by "result/reason".
+func (e *env) reassignments(t *testing.T) map[string]int64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := e.reader.Collect(t.Context(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "lobby.reassignments" {
+				continue
+			}
+			for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+				result, _ := dp.Attributes.Value(attribute.Key("result"))
+				reason, _ := dp.Attributes.Value(attribute.Key("reason"))
+				out[result.AsString()+"/"+reason.AsString()] += dp.Value
+			}
+		}
+	}
+	return out
+}
+
+// A draining server (task 5.5: it is shutting down and waits for its rooms to leave) is alive
+// and still reports its rooms, but every one of them moves at once, to the other servers only.
+func TestReassignMovesEveryRoomOfADrainingServer(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	var ids []string
+	for range 3 {
+		r, err := e.svc.Create(t.Context(), "u-host", true, Settings{MaxPlayers: 4})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, r.ID)
+	}
+	slices.Sort(ids)
+	// gs-1 drains: its heartbeat still reports the rooms (they are young, inside the grace).
+	e.beat(t, "gs-1", 3, true, reported(ids)...)
+	e.beat(t, "gs-2", 0, false)
+	e.alloc.calls, e.alloc.targets = nil, nil
+
+	if err := e.svc.Reassign(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(e.alloc.targets, []string{"gs-2", "gs-2", "gs-2"}) {
+		t.Fatalf("AllocateRoom targets = %v, want all three on gs-2", e.alloc.targets)
+	}
+	for _, id := range ids {
+		if r, err := e.store.Get(t.Context(), id); err != nil || r.ServerID != "gs-2" {
+			t.Fatalf("room %s after the drain pass: %+v, %v", id, r, err)
+		}
+	}
+	if got := e.reassignments(t); got["moved/drain"] != 3 || got["moved/failover"] != 0 {
+		t.Fatalf("lobby.reassignments = %v, want 3 moved/drain", got)
+	}
+	// The draining server still reports the rooms until its copies stop; nothing moves twice.
+	e.alloc.calls = nil
+	e.beat(t, "gs-1", 3, true, reported(ids)...)
+	e.beat(t, "gs-2", 0, false, reported(ids)...)
+	if err := e.svc.Reassign(t.Context()); err != nil || len(e.alloc.calls) != 0 {
+		t.Fatalf("second pass: calls %v, err %v", e.alloc.calls, err)
+	}
+}
+
+// With no other server, a draining server's rooms stay where they are (counted as failed and
+// retried); the game server closes them at its drain deadline and they fail over later.
+func TestDrainWithNowhereToGoKeepsTheRooms(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	r, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.beat(t, "gs-1", 1, true, reported([]string{r.ID})...)
+	e.alloc.calls = nil
+	if err := e.svc.Reassign(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.alloc.calls) != 0 {
+		t.Fatalf("AllocateRoom calls = %v, want none (a draining server is never a target)", e.alloc.calls)
+	}
+	if got, _ := e.store.Get(t.Context(), r.ID); got.ServerID != "gs-1" {
+		t.Fatalf("room = %+v, want it still on gs-1", got)
+	}
+	if got := e.reassignments(t); got["failed/drain"] != 1 {
+		t.Fatalf("lobby.reassignments = %v, want 1 failed/drain", got)
+	}
+}
