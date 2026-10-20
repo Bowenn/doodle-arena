@@ -1,7 +1,7 @@
 {
   "uid": "da-game-server",
   "title": "Doodle Arena: game server",
-  "description": "Connections, rooms, broadcast latency, guesses, reconnects, takeovers and the event outbox.",
+  "description": "Connections, rooms, broadcast latency, send lag, scheduler latency, guesses, reconnects, takeovers and the event outbox.",
   "tags": [
     "doodle-arena"
   ],
@@ -160,7 +160,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Broadcast latency",
-      "description": "Marshal an event and queue it to every local socket, after the commit to Redis. SlowBroadcasts fires when p99 stays above 150 ms.",
+      "description": "Marshal an event and queue it to every local socket, after the commit to Redis. It ends before the socket write, so a pinned CPU shows in Send lag, not here; high here means the room actor itself is slow.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -264,6 +264,131 @@
       }
     },
     {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Send lag",
+      "description": "From queueing a message to a socket until its write returns: the wait for a CPU or behind a slow write, plus the write. SlowBroadcasts fires when p95 stays above 250 ms. Read it with Scheduler latency: both high means the CPU is pinned; send lag alone means slow clients.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(game_ws_send_lag_milliseconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (service_instance_id, le) (rate(game_ws_send_lag_milliseconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95 {{service_instance_id}}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(game_ws_send_lag_milliseconds_bucket[$__rate_interval])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Scheduler latency",
+      "description": "How long the game server's runnable goroutines waited for a CPU (Go runtime). Above a few milliseconds the server can't keep up, and send lag follows.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(go_schedule_duration_seconds_bucket{service_name=\"game-server\"}[$__rate_interval])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (service_instance_id, le) (rate(go_schedule_duration_seconds_bucket{service_name=\"game-server\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{service_instance_id}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
       "id": 101,
       "type": "row",
       "title": "Reliability",
@@ -271,7 +396,7 @@
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 17,
+        "y": 25,
         "w": 24,
         "h": 1
       }
@@ -320,7 +445,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 18,
+        "y": 26,
         "w": 12,
         "h": 8
       }
@@ -378,7 +503,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 18,
+        "y": 26,
         "w": 12,
         "h": 8
       }
@@ -427,7 +552,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 34,
         "w": 12,
         "h": 8
       }
@@ -476,7 +601,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 26,
+        "y": 34,
         "w": 12,
         "h": 8
       }
@@ -489,7 +614,7 @@
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 34,
+        "y": 42,
         "w": 24,
         "h": 1
       }
@@ -538,7 +663,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 43,
         "w": 12,
         "h": 8
       }
@@ -596,7 +721,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 35,
+        "y": 43,
         "w": 12,
         "h": 8
       }
@@ -645,7 +770,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 43,
+        "y": 51,
         "w": 12,
         "h": 8
       }
@@ -694,7 +819,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 43,
+        "y": 51,
         "w": 12,
         "h": 8
       }
