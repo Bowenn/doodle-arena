@@ -148,8 +148,17 @@ services:
       # changes need the admin password from SSM (/doodle-arena/stack/grafana-admin-password).
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
+      # The collector's memory limit, merged over the image's config (the file says why).
+      OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml
+    # As in infra/docker-compose.yml: the image's check skips a backend that refuses
+    # connections, so Tempo's and the collector's /ready are required too. Docker doesn't
+    # restart an unhealthy container; `docker ps` on the data host shows it (docs/setup.md).
     healthcheck:
-      test: ["CMD", "/otel-lgtm/docker/healthcheck.sh"]
+      test:
+        - CMD-SHELL
+        - /otel-lgtm/docker/healthcheck.sh >/dev/null
+          && curl -fsS -o /dev/null http://127.0.0.1:3200/ready
+          && curl -fsS -o /dev/null http://127.0.0.1:13133/ready
       interval: 5s
       timeout: 5s
       retries: 60
@@ -161,6 +170,7 @@ services:
       - ./observability/grafana/alerting/policies.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-policies.yaml:ro
       - ./observability/grafana/alerting/rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-rules.yaml:ro
       - ./grafana-cloudwatch.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/doodle-arena-cloudwatch.yaml:ro
+      - ./observability/otelcol/memory-limiter.yaml:/etc/doodle-arena/otelcol-memory-limiter.yaml:ro
 
 volumes:
   postgres-data:
