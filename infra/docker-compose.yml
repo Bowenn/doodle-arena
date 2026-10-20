@@ -47,7 +47,7 @@ x-assets-env: &assets-env
   DB_USER: assets
   DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
   # Redis logical database 1 belongs to assets' Celery (design doc, section 5).
-  CELERY_BROKER_URL: redis://redis:6379/1
+  REDIS_URL: redis://redis:6379/1
   # The assets Redis user: assets:* only (infra/redis/start.sh).
   REDIS_USERNAME: assets
   REDIS_PASSWORD: ${REDIS_ASSETS_PASSWORD:?}

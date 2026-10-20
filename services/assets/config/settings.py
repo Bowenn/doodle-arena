@@ -29,8 +29,10 @@ class Env(BaseSettings):
     # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
     auth_jwks_url: str = "http://auth:8080/api/auth/.well-known/jwks.json"
     jwt_issuer: str = "http://localhost:8080/api/auth"
-    # The Celery broker: assets' own logical Redis database (design doc, section 5).
-    celery_broker_url: str = "redis://redis:6379/1"
+    # The Celery broker: assets' own logical Redis database (design doc, section 5). Not named
+    # CELERY_BROKER_URL: Celery prefers that environment variable over its configuration, which
+    # would drop the Redis user added below.
+    redis_url: str = "redis://redis:6379/1"
     # The assets Redis user (task 5.5), added to the broker URL; empty in tests.
     redis_username: str = ""
     redis_password: str = ""
@@ -153,8 +155,8 @@ ADMIN_SIGN_IN_URL = "/moderate"
 
 
 def with_credentials(url: str, username: str, password: str) -> str:
-    """The broker URL with the Redis user in it (kept out of CELERY_BROKER_URL itself, so the
-    URL can be plain configuration and the password a secret)."""
+    """The broker URL with the Redis user in it (kept out of REDIS_URL itself, so the URL can be
+    plain configuration and the password a secret)."""
     if not username:
         return url
     parts = urlsplit(url)
@@ -163,7 +165,7 @@ def with_credentials(url: str, username: str, password: str) -> str:
     return urlunsplit(parts._replace(netloc=netloc))
 
 
-CELERY_BROKER_URL = with_credentials(env.celery_broker_url, env.redis_username, env.redis_password)
+CELERY_BROKER_URL = with_credentials(env.redis_url, env.redis_username, env.redis_password)
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 # Every key and pub/sub channel Celery uses starts with this, the only prefix the assets Redis
 # user may touch (infra/redis/start.sh).
