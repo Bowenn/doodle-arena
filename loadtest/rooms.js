@@ -65,6 +65,9 @@ function roomError(step, detail) {
 }
 
 export const options = {
+  // PIN_HOST=icanfly.click PIN_IP=<address> skips the local resolver, which may still cache a
+  // "no such name" from before the stack existed (a fresh stack's record is minutes old).
+  hosts: __ENV.PIN_HOST ? { [__ENV.PIN_HOST]: __ENV.PIN_IP } : {},
   scenarios: {
     rooms: SMOKE
       ? { executor: 'per-vu-iterations', vus: 2, iterations: 1, maxDuration: '2m' }

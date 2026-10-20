@@ -40,6 +40,20 @@ from pathlib import Path
 
 import websockets
 
+# PIN_HOST and PIN_IP skip the local resolver, which may still cache a "no such name" from
+# before a fresh AWS stack's record existed; TLS still checks the certificate for PIN_HOST.
+if os.environ.get("PIN_HOST"):
+    import socket
+
+    _getaddrinfo = socket.getaddrinfo
+
+    def _pinned(host, *args, **kwargs):
+        if host == os.environ["PIN_HOST"]:
+            host = os.environ["PIN_IP"]
+        return _getaddrinfo(host, *args, **kwargs)
+
+    socket.getaddrinfo = _pinned
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "services" / "auth"))
 from app.tokens import SigningKey, TokenIssuer  # noqa: E402

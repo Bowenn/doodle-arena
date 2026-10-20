@@ -42,4 +42,5 @@ else
   echo "No collector at $OTLP_ENDPOINT: k6's metrics stay in its summary only." >&2
 fi
 echo "==> k6 $profile: $rooms rooms at most, against $GATEWAY"
+# PIN_HOST and PIN_IP, when set, reach k6 too (loadtest/rooms.js).
 exec k6 run "${out[@]}" loadtest/rooms.js
