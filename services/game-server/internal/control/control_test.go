@@ -519,3 +519,69 @@ func TestManyTakeoversAtOnce(t *testing.T) {
 		return len(rooms) == 0
 	})
 }
+
+// A drain (task 5.5) ends when the lobby has moved every room: each new owner's takeover fences
+// the draining server's copy, which stops with room_moved, so its players rejoin on the new
+// owner. Until then the draining server keeps its rooms and takes no new ones.
+func TestDrainEndsWhenTheLobbyHasMovedEveryRoom(t *testing.T) {
+	rdb := redistest.New(t)
+	store := roomstore.New(rdb)
+	a, b := storedServer(t, "gs-1", store), storedServer(t, "gs-2", store)
+	ctx := t.Context()
+	for _, id := range []string{"r1", "r2"} {
+		if _, err := a.AllocateRoom(ctx, req(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	player := &conn{uid: "u1"}
+	if err := a.Room("r1").Join(ctx, player, "u1", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := a.Drain(ctx); n != 2 {
+		t.Fatalf("Drain() = %d rooms, want 2", n)
+	}
+	if _, err := a.AllocateRoom(ctx, req("r3")); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("new room while draining: err = %v, want FailedPrecondition", err)
+	}
+	short, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	if a.WaitEmpty(short, 10*time.Millisecond) {
+		t.Fatal("WaitEmpty returned true while the rooms still run here")
+	}
+
+	// The lobby's reassigner moves both rooms to gs-2.
+	for _, id := range []string{"r1", "r2"} {
+		if _, err := b.AllocateRoom(ctx, req(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait, cancelWait := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelWait()
+	if !a.WaitEmpty(wait, 10*time.Millisecond) {
+		t.Fatalf("gs-1 still runs %d rooms after both were taken over", a.Rooms())
+	}
+	if types, closed := player.state(); closed != protocol.CloseRoomMoved || !slices.Contains(types, "room_moved") {
+		t.Fatalf("the player on gs-1: close %d, messages %v; want room_moved", closed, types)
+	}
+	if rooms, _ := b.Status(); len(rooms) != 2 {
+		t.Fatalf("gs-2 runs %d rooms, want 2", len(rooms))
+	}
+}
+
+// With nowhere to move the rooms, the wait ends at its deadline (the shutdown then closes them).
+func TestDrainWaitEndsWithItsDeadline(t *testing.T) {
+	s := newServer(t, 10)
+	if _, err := s.AllocateRoom(t.Context(), req("r1")); err != nil {
+		t.Fatal(err)
+	}
+	s.Drain(t.Context())
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if s.WaitEmpty(ctx, 5*time.Millisecond) {
+		t.Fatal("WaitEmpty returned true with a room still running")
+	}
+	if _, draining := s.Status(); !draining {
+		t.Fatal("status doesn't report draining")
+	}
+}

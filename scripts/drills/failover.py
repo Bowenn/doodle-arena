@@ -17,10 +17,12 @@ kill:  docker kill on the owner. pause: docker pause for 9 s (the lobby reassign
 after 6 s without heartbeats), then unpause: the zombie's next lease renewal or write fails
 the fencing check, and its log says so.
 
-stop:  in AWS (task 5.3, ADR 0003), `aws ecs stop-task` on the owner's task: SIGTERM, as a deploy
-or a scale-in sends it (a crash like docker kill isn't possible on Fargate: the image has no
-shell). ECS starts a replacement. Set GATEWAY to the stack's URL; the tokens are signed with the
-stack's key, read from SSM into DRILL_JWT_PEM (mint_tokens.py shows how):
+stop:  SIGTERM, as a deploy or a scale-in sends it: the owner drains (task 5.5), the lobby moves
+its rooms to the other server, and the players get room_moved. Locally `docker stop` (then
+docker start again); in AWS (task 5.3, ADR 0003) `aws ecs stop-task` on the owner's task (a crash
+like docker kill isn't possible on Fargate: the image has no shell), and ECS starts a
+replacement. For AWS, set GATEWAY to the stack's URL; the tokens are signed with the stack's
+key, read from SSM into DRILL_JWT_PEM (mint_tokens.py shows how):
 
     GATEWAY=https://icanfly.click DRILL_JWT_PEM="$(aws ssm get-parameter ...)" \
         uv run --project services/auth --with websockets python scripts/drills/failover.py stop
@@ -242,8 +244,15 @@ async def main(mode, players):
         subprocess.run(
             ["docker", "kill", f"doodle-arena-{owner}-1"], check=True, capture_output=True
         )
-    elif mode == "stop":
+    elif mode == "stop" and GW.startswith("https://"):
         stop_ecs_task(owner)
+    elif mode == "stop":
+        # docker stop waits for the exit (up to 60 s, like ECS), so it runs in the background.
+        stopping = subprocess.Popen(
+            ["docker", "stop", "--time", "60", f"doodle-arena-{owner}-1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     else:
         subprocess.run(
             ["docker", "pause", f"doodle-arena-{owner}-1"], check=True, capture_output=True
@@ -283,10 +292,14 @@ async def main(mode, players):
     ok = True
     for b in bots:
         took = f"{b.resumed_at - t0:.1f} s" if b.resumed_at else "never"
+        # What the player felt: from the socket closing until the new server's first message. A
+        # killed server drops everyone at once; a draining one keeps its rooms running until
+        # each is moved, so a drain's players are only cut off for this long.
+        cut = f"{b.resumed_at - b.dropped_at:.1f} s" if b.resumed_at and b.dropped_at else "n/a"
         print(
             f"  {b.user}: now on {b.server}, drops {b.drops}, "
             f"full welcomes after the drop {b.welcomes}, "
-            f"resumed after {took}, seq gaps/duplicates {b.gaps()}"
+            f"resumed after {took} (disconnected for {cut}), seq gaps/duplicates {b.gaps()}"
         )
         ok &= bool(b.resumed_at) and b.server != owner and not b.gaps()
     for b in drawers:
@@ -295,7 +308,13 @@ async def main(mode, players):
         print(f"  drawer {b.user}: your_word {len(words)} times")
         ok &= len(words) >= 2
     worst = max((b.resumed_at or 1e9) - t0 for b in bots)
-    print(f"recovery (slowest bot): {worst:.1f} s" if ok else "FAILED")
+    worst_cut = max((b.resumed_at or 1e9) - (b.dropped_at or t0) for b in bots)
+    print(
+        f"recovery (slowest bot): {worst:.1f} s after the {mode}, "
+        f"disconnected for {worst_cut:.1f} s"
+        if ok
+        else "FAILED"
+    )
     if mode == "pause":
         logs = subprocess.run(
             ["docker", "logs", "--since", "30s", f"doodle-arena-{owner}-1"],
@@ -308,7 +327,21 @@ async def main(mode, players):
         )
         print(f"zombie {owner}: {fenced} fencing log lines")
         ok &= fenced > 0
-    if mode == "kill":
+    if mode == "stop" and not GW.startswith("https://"):
+        stopping.wait()
+        logs = subprocess.run(
+            ["docker", "logs", "--since", "90s", f"doodle-arena-{owner}-1"],
+            capture_output=True,
+            text=True,
+        ).stdout
+        drained = [
+            line
+            for line in logs.splitlines()
+            if '"drain finished"' in line or "drain timed out" in line
+        ]
+        print(f"{owner}: {drained[-1] if drained else 'no drain log line'}")
+        ok &= any('"drain finished"' in line for line in drained)
+    if mode in ("kill", "stop") and not GW.startswith("https://"):
         # docker start, not compose: compose would need the main checkout's .env (a worktree has
         # none), and failing quietly here left the stack with one game server.
         subprocess.run(

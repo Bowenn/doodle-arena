@@ -160,6 +160,9 @@ services:
     secrets:
       - ticket-public-key
     networks: [default, kafka]
+    # SIGTERM drains (task 5.5): the server waits up to DRAIN_TIMEOUT (45 s) for the lobby to
+    # move its rooms, so docker stop must wait longer than its 10-second default, like ECS (60 s).
+    stop_grace_period: 60s
     depends_on:
       redis:
         condition: service_healthy
@@ -198,6 +201,9 @@ services:
     secrets:
       - ticket-public-key
     networks: [default, kafka]
+    # SIGTERM drains (task 5.5): the server waits up to DRAIN_TIMEOUT (45 s) for the lobby to
+    # move its rooms, so docker stop must wait longer than its 10-second default, like ECS (60 s).
+    stop_grace_period: 60s
     depends_on:
       redis:
         condition: service_healthy

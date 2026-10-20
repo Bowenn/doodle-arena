@@ -384,16 +384,48 @@ func (s *Server) awaitStopped(ctx context.Context, e *entry) bool {
 // stopWait bounds how long AllocateRoom waits for a fenced room's actor to stop.
 const stopWait = 1500 * time.Millisecond
 
-// DrainServer stops new allocations. Rooms aren't handed over yet: on shutdown they close, and
-// the lobby moves them through ordinary failover (roadmap task 5.5).
+// DrainServer stops new allocations and hands the rooms over (task 5.5): see Drain.
 func (s *Server) DrainServer(ctx context.Context, _ *gamev1.DrainServerRequest) (*gamev1.DrainServerResponse, error) {
+	return &gamev1.DrainServerResponse{RoomsRemaining: uint32(s.Drain(ctx))}, nil
+}
+
+// Drain stops new allocations and returns how many rooms are left. The heartbeats then say the
+// server drains, and the lobby moves its rooms to other servers through the ordinary takeover
+// (ADR 0007): each new owner takes the lease by force, so this server's copy is fenced on its
+// next commit or lease renewal and stops with room_moved, and its players rejoin on the new
+// server from their last seq. Nothing else is handed over: the room's state is already in
+// Redis, and its unpublished outbox entries are queued again by the new owner (ADR 0009).
+func (s *Server) Drain(ctx context.Context) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	n := len(s.rooms) + len(s.starting)
 	if !s.draining {
-		s.log.InfoContext(ctx, "draining", "server_id", s.id, "rooms", len(s.rooms)+len(s.starting))
+		s.log.InfoContext(ctx, "drain started", "server_id", s.id, "rooms", n)
 	}
 	s.draining = true
-	return &gamev1.DrainServerResponse{RoomsRemaining: uint32(len(s.rooms) + len(s.starting))}, nil
+	return n
+}
+
+// Rooms is how many rooms this server runs or is starting.
+func (s *Server) Rooms() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.rooms) + len(s.starting)
+}
+
+// WaitEmpty waits until the server runs no rooms, checking every poll. It returns false if ctx
+// ends first.
+func (s *Server) WaitEmpty(ctx context.Context, poll time.Duration) bool {
+	t := time.NewTicker(poll)
+	defer t.Stop()
+	for s.Rooms() > 0 {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-t.C:
+		}
+	}
+	return true
 }
 
 // Room finds a running room (for the WebSocket handler).

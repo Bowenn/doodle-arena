@@ -56,11 +56,21 @@ type Sender struct {
 	status   Status
 	interval time.Duration
 	log      *slog.Logger
+	now      chan struct{} // Now's requests; one waiting is enough
 }
 
 // NewSender returns a sender that beats every interval.
 func NewSender(client lobbyv1.RegistryServiceClient, id Identity, status Status, interval time.Duration, log *slog.Logger) *Sender {
-	return &Sender{client: client, id: id, status: status, interval: interval, log: log}
+	return &Sender{client: client, id: id, status: status, interval: interval, log: log, now: make(chan struct{}, 1)}
+}
+
+// Now asks Run for a beat right away, without waiting for the next tick: a draining server
+// tells the lobby at once (task 5.5).
+func (s *Sender) Now() {
+	select {
+	case s.now <- struct{}{}:
+	default: // a beat is already asked for
+	}
 }
 
 // Run sends a heartbeat right away and then every interval, until ctx is done. A failed beat
@@ -83,6 +93,7 @@ func (s *Sender) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-s.now:
 		}
 	}
 }

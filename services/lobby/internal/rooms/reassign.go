@@ -42,7 +42,8 @@ const (
 var errLockLost = errors.New("reassigner lock lost")
 
 // Reassign makes one pass over every room the index knows: rooms of a server whose heartbeats
-// stopped, and rooms a live server no longer reports (it restarted, or the room ended), are
+// stopped, rooms of a server that drains (task 5.5: it is shutting down and waits for its rooms
+// to leave), and rooms a live server no longer reports (it restarted, or the room ended), are
 // allocated again, up to reassignWorkers at a time. The game server restores a room from
 // Redis, or answers NOT_FOUND for one that ended, which is then removed.
 func (s *Service) Reassign(ctx context.Context) error {
@@ -53,6 +54,7 @@ func (s *Service) Reassign(ctx context.Context) error {
 type move struct {
 	room      Room
 	hostAlive bool
+	reason    string // lobby.reassignments' reason: failover or drain
 }
 
 func (s *Service) reassignPass(ctx context.Context, startBy time.Time) error {
@@ -89,7 +91,7 @@ func (s *Service) reassignPass(ctx context.Context, startBy time.Time) error {
 			// Not the pass's start deadline: a room that started finishes, and records its move.
 			rctx, cancel := context.WithTimeout(ctx, roomTimeout)
 			defer cancel()
-			result, err := s.reassign(rctx, m.room, plan, m.hostAlive)
+			result, err := s.reassign(rctx, m, plan)
 			mu.Lock()
 			defer mu.Unlock()
 			if errors.Is(err, errLockLost) {
@@ -131,6 +133,7 @@ func (s *Service) findMoves(ctx context.Context) ([]registry.Server, []move, err
 			return nil, nil, err
 		}
 		srv, alive := live[host]
+		draining := alive && srv.Draining
 		for _, id := range ids {
 			r, err := s.store.Get(ctx, id)
 			if errors.Is(err, ErrRoomNotFound) || (err == nil && r.ServerID != host) {
@@ -141,12 +144,18 @@ func (s *Service) findMoves(ctx context.Context) ([]registry.Server, []move, err
 			if err != nil {
 				return nil, nil, err
 			}
+			if draining {
+				// Every room goes, reported or not: the server waits for them to leave. Its copy is
+				// fenced by the takeover, so the room never runs in two places.
+				moves = append(moves, move{room: r, hostAlive: true, reason: "drain"})
+				continue
+			}
 			if alive {
 				if _, reported := srv.Room(id); reported || s.now().Sub(r.placedAt()) <= reportGrace {
 					continue
 				}
 			}
-			moves = append(moves, move{room: r, hostAlive: alive})
+			moves = append(moves, move{room: r, hostAlive: alive, reason: "failover"})
 		}
 	}
 	return all, moves, nil
@@ -215,9 +224,11 @@ func (p *placement) add(serverID string, n int) {
 // reassign allocates one room again and returns its lobby.reassignments result, "deferred" when
 // its first server had no free slot before the pass's start deadline, or "" when another pass
 // moved it first, the lobby is stopping, or the lock was lost (errLockLost) before an attempt.
-func (s *Service) reassign(ctx context.Context, r Room, plan *placement, hostAlive bool) (string, error) {
+func (s *Service) reassign(ctx context.Context, m move, plan *placement) (string, error) {
+	r := m.room
 	ctx, span := s.tracer.Start(ctx, "lobby.reassign_room", trace.WithAttributes(
-		attribute.String("room.id", r.ID), attribute.String("from_server_id", r.ServerID), attribute.Bool("host_alive", hostAlive)))
+		attribute.String("room.id", r.ID), attribute.String("from_server_id", r.ServerID),
+		attribute.Bool("host_alive", m.hostAlive), attribute.String("reason", m.reason)))
 	defer span.End()
 	from := r.ServerID
 	req := &gamev1.AllocateRoomRequest{
@@ -260,18 +271,18 @@ func (s *Service) reassign(ctx context.Context, r Room, plan *placement, hostAli
 			}
 			if err != nil {
 				s.log.ErrorContext(ctx, "moved room not saved", "room_id", r.ID, "server_id", srv.ID, "err", err)
-				s.countReassign(ctx, "failed")
+				s.countReassign(ctx, "failed", m.reason)
 				return "failed", nil
 			}
-			s.countReassign(ctx, "moved")
-			s.log.InfoContext(ctx, "room reassigned", "room_id", r.ID, "from_server_id", from, "server_id", srv.ID)
+			s.countReassign(ctx, "moved", m.reason)
+			s.log.InfoContext(ctx, "room reassigned", "room_id", r.ID, "from_server_id", from, "server_id", srv.ID, "reason", m.reason)
 			return "moved", nil
 		case grpccodes.NotFound:
 			plan.add(srv.ID, -1)
 			if err := s.store.Remove(ctx, r); err != nil {
 				s.log.ErrorContext(ctx, "ended room not removed", "room_id", r.ID, "err", err)
 			}
-			s.countReassign(ctx, "ended")
+			s.countReassign(ctx, "ended", m.reason)
 			s.log.InfoContext(ctx, "room ended; removed", "room_id", r.ID, "from_server_id", from)
 			return "ended", nil
 		case grpccodes.ResourceExhausted, grpccodes.FailedPrecondition:
@@ -283,12 +294,12 @@ func (s *Service) reassign(ctx context.Context, r Room, plan *placement, hostAli
 		plan.add(srv.ID, -1)
 		s.log.WarnContext(ctx, "reassignment failed, trying the next server", "room_id", r.ID, "server_id", srv.ID, "err", err)
 	}
-	s.countReassign(ctx, "failed") // retried on the next pass
+	s.countReassign(ctx, "failed", m.reason) // retried on the next pass
 	return "failed", nil
 }
 
-func (s *Service) countReassign(ctx context.Context, result string) {
-	s.reassigns.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+func (s *Service) countReassign(ctx context.Context, result, reason string) {
+	s.reassigns.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result), attribute.String("reason", reason)))
 }
 
 // RunReassigner calls Reassign every ReassignEvery while this lobby instance holds the

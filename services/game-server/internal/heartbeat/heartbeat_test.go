@@ -96,3 +96,45 @@ func TestSenderBeatsUntilCancelled(t *testing.T) {
 		t.Fatalf("room_ids = %v", b.GetRoomIds())
 	}
 }
+
+// Now sends a beat without waiting for the interval: a draining server tells the lobby at once.
+func TestNowBeatsWithoutWaitingForTheInterval(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lobby := &fakeLobby{}
+	gs := grpc.NewServer()
+	lobbyv1.RegisterRegistryServiceServer(gs, lobby)
+	go func() { _ = gs.Serve(lis) }()
+	defer gs.Stop()
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	sender := NewSender(lobbyv1.NewRegistryServiceClient(conn), Identity{ServerID: "gs-1"}, fixedStatus{}, time.Hour,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go sender.Run(ctx)
+	waitFor := func(n int) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for lobby.count() < n {
+			if time.Now().After(deadline) {
+				t.Fatalf("%d heartbeats, want %d", lobby.count(), n)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitFor(1) // the first beat, right away
+	sender.Now()
+	sender.Now() // a second request while one waits adds nothing
+	waitFor(2)
+	time.Sleep(50 * time.Millisecond)
+	if got := lobby.count(); got > 3 {
+		t.Fatalf("%d heartbeats after two Now calls, want at most 3", got)
+	}
+}
