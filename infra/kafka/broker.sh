@@ -2,16 +2,20 @@
 # The Kafka broker with SCRAM-SHA-512 users and ACLs (ADR 0013), in place of the image's own
 # start script: it writes server.properties, formats the storage once with the first SCRAM
 # credentials (KIP-900: they have to exist before anyone can authenticate), then starts the
-# broker. Three super users, so each one's use can be told apart in the authorizer's log:
+# broker. Three super users, each with one job:
 #   broker      the broker itself: its controller heartbeats and inter-broker requests
 #   kafka-init  the init job, which creates the services' users and ACLs (infra/kafka/init.sh)
-#   admin       humans only: any request it makes raises KafkaAdminUsed (docs/observability.md)
+#   admin       humans only, and only inside this container, on the ADMIN listener: it has no
+#               SCRAM credential, so it can't log in over the network at all. Every admin login
+#               counts on that listener's successful-authentication metric and raises
+#               KafkaAdminUsed (docs/observability.md). Use it with kafka-admin (infra/kafka/admin.sh).
 #
 # Listeners:
 #   INTERNAL    9092  SASL over the Kafka network (SASL_SSL in AWS, KAFKA_INTERNAL_PROTOCOL)
 #   EXTERNAL    9094  SASL_PLAINTEXT on 127.0.0.1 for host tools (local only, KAFKA_EXTERNAL=1)
 #   CONTROLLER  9093  the KRaft quorum, on localhost only: SASL/PLAIN with a static broker user,
 #                     because SCRAM credentials live in the metadata log the controller serves
+#   ADMIN       9095  localhost only: SASL/PLAIN with a static admin user
 # Anything without an ACL is denied.
 set -euo pipefail
 
@@ -23,9 +27,9 @@ set -euo pipefail
 DATA=/var/lib/kafka/data/kraft
 CONFIG=/tmp/server.properties
 
-listeners="INTERNAL://:9092,CONTROLLER://localhost:9093"
-advertised="INTERNAL://${KAFKA_ADVERTISED_HOST}:9092"
-protocols="INTERNAL:${KAFKA_INTERNAL_PROTOCOL},CONTROLLER:SASL_PLAINTEXT"
+listeners="INTERNAL://:9092,CONTROLLER://localhost:9093,ADMIN://localhost:9095"
+advertised="INTERNAL://${KAFKA_ADVERTISED_HOST}:9092,ADMIN://localhost:9095"
+protocols="INTERNAL:${KAFKA_INTERNAL_PROTOCOL},CONTROLLER:SASL_PLAINTEXT,ADMIN:SASL_PLAINTEXT"
 if [[ "$KAFKA_EXTERNAL" == 1 ]]; then
   listeners+=",EXTERNAL://:9094"
   advertised+=",EXTERNAL://localhost:9094"
@@ -33,6 +37,7 @@ if [[ "$KAFKA_EXTERNAL" == 1 ]]; then
 fi
 scram_broker="org.apache.kafka.common.security.scram.ScramLoginModule required username=\"broker\" password=\"${KAFKA_BROKER_PASSWORD}\";"
 plain_broker="org.apache.kafka.common.security.plain.PlainLoginModule required username=\"broker\" password=\"${KAFKA_BROKER_PASSWORD}\" user_broker=\"${KAFKA_BROKER_PASSWORD}\";"
+plain_admin="org.apache.kafka.common.security.plain.PlainLoginModule required user_admin=\"${KAFKA_ADMIN_PASSWORD}\";"
 
 umask 077
 cat > "$CONFIG" <<EOF
@@ -53,6 +58,8 @@ listener.name.external.scram-sha-512.sasl.jaas.config=${scram_broker}
 sasl.mechanism.controller.protocol=PLAIN
 listener.name.controller.sasl.enabled.mechanisms=PLAIN
 listener.name.controller.plain.sasl.jaas.config=${plain_broker}
+listener.name.admin.sasl.enabled.mechanisms=PLAIN
+listener.name.admin.plain.sasl.jaas.config=${plain_admin}
 
 authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
 allow.everyone.if.no.acl.found=false
@@ -66,9 +73,10 @@ group.initial.rebalance.delay.ms=0
 auto.create.topics.enable=false
 EOF
 
-# The healthcheck (kafka-init writes its own client config): ApiVersions as the broker, or as
-# admin on a volume from before the broker user existed, until kafka-init adds it. ApiVersions
-# needs no authorization, so the fallback logs nothing that KafkaAdminUsed counts.
+# The healthcheck (kafka-init writes its own client config): ApiVersions as the broker, or, on a
+# volume from before the broker user existed, with the SCRAM admin credential that volume still
+# has, until kafka-init adds the broker user and deletes that credential. Both run on INTERNAL,
+# so neither counts as an admin login on the ADMIN listener.
 cat > /tmp/admin.properties <<EOF
 security.protocol=${KAFKA_INTERNAL_PROTOCOL}
 sasl.mechanism=SCRAM-SHA-512
@@ -99,16 +107,20 @@ EOF
   done
 fi
 
-# Format once. The data now lives under kraft/: a volume formatted before ADR 0013 has no admin
-# credential, so it's left alone instead (delete the old files under /var/lib/kafka/data by hand).
-# A volume formatted before the broker and kafka-init users existed (task 5.5) has only admin:
-# kafka-init adds the two once, as admin.
+# Format once. The data now lives under kraft/: a volume formatted before ADR 0013 has no
+# credential at all, so it's left alone instead (delete the old files under /var/lib/kafka/data
+# by hand). A volume formatted before task 5.5's follow-up has a SCRAM admin and neither broker
+# nor kafka-init: kafka-init migrates it once (infra/kafka/init.sh).
 if [[ ! -f "$DATA/meta.properties" ]]; then
   /opt/kafka/bin/kafka-storage.sh format --config "$CONFIG" --cluster-id "$KAFKA_CLUSTER_ID" \
-    --add-scram "SCRAM-SHA-512=[name=admin,password=${KAFKA_ADMIN_PASSWORD}]" \
     --add-scram "SCRAM-SHA-512=[name=kafka-init,password=${KAFKA_INIT_PASSWORD}]" \
     --add-scram "SCRAM-SHA-512=[name=broker,password=${KAFKA_BROKER_PASSWORD}]"
 fi
 
 export KAFKA_LOG4J_OPTS="-Dlog4j2.configurationFile=/etc/doodle-arena/kafka-log4j2.yaml"
+# The OpenTelemetry agent (infra/kafka/Dockerfile) for the broker's JVM only: KAFKA_OPTS is set
+# here, not in the image, because every Kafka CLI tool (the healthcheck among them) reads it.
+if [[ -f /opt/otel/opentelemetry-javaagent.jar && -n "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" ]]; then
+  export KAFKA_OPTS="-javaagent:/opt/otel/opentelemetry-javaagent.jar ${KAFKA_OPTS:-}"
+fi
 exec /opt/kafka/bin/kafka-server-start.sh "$CONFIG"

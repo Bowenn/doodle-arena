@@ -8,9 +8,10 @@
 # only locally and in CI, never in AWS. Removing a grant from this list doesn't revoke it on a
 # running broker: the ACLs are printed at the end to check, and kafka-acls.sh --remove does it.
 #
-# admin is never used here, so any admin request shows up as a human's (KafkaAdminUsed), with one
-# exception: a broker formatted before the kafka-init and broker users existed (task 5.5) has
-# only admin, and this job then creates those two users as admin, once, and says so.
+# admin is never used here: it exists only on the broker's localhost ADMIN listener, for humans
+# (infra/kafka/broker.sh). A broker formatted before that (task 5.5's follow-up) still has a
+# SCRAM admin credential and neither kafka-init nor broker: this job then creates those two with
+# it, once, deletes it, and says so.
 set -euo pipefail
 
 BOOTSTRAP="${KAFKA_BOOTSTRAP:-kafka:9092}"
@@ -33,7 +34,8 @@ EOF
 client_config kafka-init "$KAFKA_INIT_PASSWORD" /tmp/admin.properties
 
 if ! timeout 30 "$BIN/kafka-broker-api-versions.sh" "${ADMIN[@]}" >/dev/null 2>&1; then
-  echo "kafka-init can't log in: this broker predates the kafka-init and broker users; creating them as admin (once)"
+  echo "kafka-init can't log in: this broker predates the kafka-init and broker users;" \
+    "creating them with its SCRAM admin credential, then deleting that credential (once)"
   client_config admin "$KAFKA_ADMIN_PASSWORD" /tmp/bootstrap.properties
   for entry in "kafka-init:$KAFKA_INIT_PASSWORD" "broker:$KAFKA_BROKER_PASSWORD"; do
     "$BIN/kafka-configs.sh" --bootstrap-server "$BOOTSTRAP" --command-config /tmp/bootstrap.properties \
@@ -41,6 +43,14 @@ if ! timeout 30 "$BIN/kafka-broker-api-versions.sh" "${ADMIN[@]}" >/dev/null 2>&
       --add-config "SCRAM-SHA-512=[password=${entry#*:}]" >/dev/null
   done
   rm -f /tmp/bootstrap.properties
+fi
+# admin logs in only on the broker's localhost ADMIN listener (PLAIN): a SCRAM credential, left by
+# an older broker, would let it in over the network, so it goes.
+if "$BIN/kafka-configs.sh" "${ADMIN[@]}" --describe --entity-type users --entity-name admin 2>/dev/null |
+  grep -q SCRAM-SHA-512; then
+  "$BIN/kafka-configs.sh" "${ADMIN[@]}" --alter --entity-type users --entity-name admin \
+    --delete-config SCRAM-SHA-512 >/dev/null
+  echo "deleted admin's SCRAM credential: admin now logs in only on the ADMIN listener"
 fi
 
 TOPICS=(

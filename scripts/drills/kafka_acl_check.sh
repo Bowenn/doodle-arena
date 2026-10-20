@@ -58,12 +58,15 @@ marketplace="$(props marketplace "$KAFKA_MARKETPLACE_PASSWORD")"
 notifier="$(props notifier "$KAFKA_NOTIFIER_PASSWORD")"
 game_server="$(props game-server "$KAFKA_GAME_SERVER_PASSWORD")"
 wrong="$(props marketplace "not-the-password" wrong-password)"
+network_admin="$(props admin "$KAFKA_ADMIN_PASSWORD" network-admin)"
 
 echo "Kafka ACLs (ADR 0013):"
 expect_no_connection "a client with no credential is refused" \
   "$BIN/kafka-broker-api-versions.sh" --bootstrap-server "$BOOTSTRAP"
 expect "a wrong password is refused" "Authentication failed" \
   "$BIN/kafka-topics.sh" --bootstrap-server "$BOOTSTRAP" --command-config "$wrong" --list
+expect "admin can't log in over the network (only on the broker's localhost listener)" "Authentication failed" \
+  "$BIN/kafka-topics.sh" --bootstrap-server "$BOOTSTRAP" --command-config "$network_admin" --list
 expect "lobby can't write game.matches.v1 (mint coins)" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
   bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $lobby --topic game.matches.v1 --producer-property enable.idempotence=false"
 expect "notifier can't write game.matches.v1" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
