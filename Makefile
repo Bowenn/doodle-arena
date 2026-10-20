@@ -3,10 +3,10 @@
 
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check alerts-check aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check alerts-check loadtest loadtest-smoke aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | alerts-check | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | alerts-check | loadtest | loadtest-smoke | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
@@ -39,6 +39,13 @@ pipeline-check:
 
 alerts-check:
 	@python3 ./scripts/alerts-check.py
+
+# k6, many small rooms (task 5.3). GATEWAY=https://icanfly.click runs it against AWS.
+loadtest:
+	@./scripts/loadtest.sh full
+
+loadtest-smoke:
+	@./scripts/loadtest.sh smoke
 
 proto:
 	@./scripts/proto.sh

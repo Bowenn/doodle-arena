@@ -124,6 +124,19 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `web.vitals.lcp`, `web.vitals.inp`, `web.vitals.cls` | Histogram | `page` | web |
 | `web.ws.rtt` | Histogram (ms) | – | web |
 
+Two more sources besides the table: the Go services' runtime metrics (`go_goroutine_count`, `go_memory_used_bytes`, `go_memory_allocated_bytes_total`, from OpenTelemetry's Go runtime instrumentation; the Go services export no process CPU, so CPU comes from CloudWatch's `AWS/ECS` metrics in AWS), and k6 during a load test (task 5.3): `loadtest/rooms.js` sends its metrics over OTLP with `service.name=k6`, all prefixed `k6_`. Its own are in milliseconds:
+
+| Metric | Type | What |
+|---|---|---|
+| `k6_stroke_fanout` | Histogram (ms) | A drawer's stroke batch until each other player in the room has it. The send time rides in the `stroke_id` (all four players live in one k6 process, one clock), so no protocol change was needed. Includes the client's network path |
+| `k6_ws_rtt` | Histogram (ms) | `ping` until `pong`, answered without the room: the network and the gateway alone, to tell them apart from the game server |
+| `k6_guess_result` | Histogram (ms) | A guess until its `guess_result` |
+| `k6_join`, `k6_welcome` | Histogram (ms) | `POST /join` until the ticket; connect until `welcome` |
+| `k6_room_errors`, `k6_ws_closed` | Counter | A room that failed (tagged `step`), a socket the server closed (tagged `code`) |
+| `k6_rounds_completed`, `k6_matches_completed` | Counter | Rounds and matches the rooms finished |
+
+k6's built-ins (`k6_vus`, `k6_http_req_duration`, `k6_ws_msgs_sent` and the like) come along. A load test's virtual users are rooms, never metric attributes.
+
 Kafka consumer lag per consumer group comes from the broker, not the clients (task 5.1): a `kafka-metrics` container (`otel/opentelemetry-collector-contrib`, the same version as the collector inside otel-lgtm) runs the `kafka_metrics` receiver every 30 s and pushes OTLP to otel-lgtm. It reports `kafka.consumer_group.lag_sum` per `group` and `topic` (Prometheus: `kafka_consumer_group_lag_sum`), for every consumer whatever its language. A collector of its own rather than an edit of otel-lgtm's bundled collector config, so upgrading that image never means re-syncing a copied file. Once Kafka requires SASL (ADR 0013, task 5.5), it needs a read-only Kafka user of its own.
 
 Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into Grafana's "Doodle Arena" folder (task 5.1). They're read-only in the UI: change the JSON, and Grafana picks it up within 30 seconds.
@@ -132,7 +145,7 @@ Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into
 2. Game server (`da-game-server`): connections, rooms, broadcast latency, guesses, reconnects, takeovers, and the event outbox.
 3. Marketplace (`da-marketplace`): the three invariant gauges and the outbox lag as stats, purchases and conflicts, lock waits, idempotent replays, Stripe webhooks, rewards and minting.
 4. Async pipeline (`da-async-pipeline`): Kafka consumer lag, the outbox lags, Celery job age, the drawing pipeline and moderation, webhook deliveries, the queue age and the dead-letter queue.
-5. Load test (task 5.3): the panels used while k6 runs, so screenshots can go in the README.
+5. Load test (`da-load-test`, task 5.3): what k6 applies and what players feel, next to the game servers' broadcast latency, rooms, connections and Go runtime, and, in AWS, ECS CPU from CloudWatch. The panels to watch while `make loadtest` runs, and to screenshot for the README.
 
 The gateway (Nginx) exports traces but no metrics, so the overview shows the services behind it, not the gateway itself.
 
@@ -164,7 +177,7 @@ Starting rules (tune the thresholds after the first load test):
 | ReconciliationStale | `market.ledger.imbalance` missing for 5 minutes (the job stopped or can't read the database; the two invariant alerts above are blind) | warning |
 | OutboxStuck | `game.outbox.pending > 0` for 10 minutes (Kafka or S3 down, or an entry that can't be published; rewards and drawings are waiting) | warning |
 | OwnershipViolation | `market.ownership.violations > 0` | critical |
-| SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes | warning |
+| SlowBroadcasts | p99 of `game.broadcast.duration` above 150 ms for 5 minutes. Blind to a server whose CPU is pinned: the metric ends when an event is queued, before the socket write (task 5.3 saw pongs wait seconds while it read under 0.1 ms); a send-lag metric is a follow-up | warning |
 | HighErrorRate | Server errors (HTTP 5xx; gRPC `UNKNOWN`, `DEADLINE_EXCEEDED`, `INTERNAL`, `UNAVAILABLE`, `DATA_LOSS`) above 1% of requests for 5 minutes, per service, when the service had at least 20 requests in those 5 minutes | warning |
 | ConsumerLagGrowing | A consumer group's lag (`kafka_consumer_group_lag_sum`) above 0 and higher than 10 minutes earlier, for 5 minutes | warning |
 | AuthOutboxStuck | `auth.outbox.lag` above 60 s for 5 minutes (Kafka down, or `auth-relay` stopped: a credential revocation isn't reaching the notifier, so a thief's webhooks keep running) | critical |

@@ -62,6 +62,16 @@ jobs:
         run: make pipeline-check
       - name: make alerts-check (dashboards, alert rules and the contact point load and evaluate)
         run: make alerts-check
+      # The load test's script must keep working: two rooms for a minute, thresholds included.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+          enable-cache: false
+      - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
+        with:
+          k6-version: "2.3.0"
+      - name: make loadtest-smoke (k6, two four-player rooms through the gateway)
+        run: make loadtest-smoke
       - name: Disk usage after the run
         if: always()
         run: df -h /

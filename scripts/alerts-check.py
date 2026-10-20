@@ -63,13 +63,17 @@ def check_dashboards() -> list[str]:
         except urllib.error.HTTPError as e:
             problems.append(f"dashboard {d['uid']} isn't loaded (HTTP {e.code})")
             continue
-        queries = 0
+        queries = skipped = 0
         for p in d["panels"]:
             for t in p.get("targets", []):
+                # CloudWatch panels (AWS only) go through Grafana's own query API, not a proxy.
+                if t["datasource"]["uid"] not in ("prometheus", "loki"):
+                    skipped += 1
+                    continue
                 queries += 1
                 if err := query_error(t["datasource"]["uid"], t["expr"]):
                     problems.append(f"dashboard {d['uid']} panel {p['id']} ({p['title']}): {err}")
-        print(f"dashboard {d['uid']}: loaded, {queries} queries run")
+        print(f"dashboard {d['uid']}: loaded, {queries} queries run" + (f", {skipped} CloudWatch skipped" if skipped else ""))
     return problems
 
 

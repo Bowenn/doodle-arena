@@ -435,6 +435,8 @@ While the lobby moves a room, `join` answers 503 `ROOM_UNAVAILABLE` with `Retry-
 
 Target: players resume within 10 seconds. Measure this and record it in the evidence log.
 
+Measured under load (task 5.3): locally, a killed server's room resumed in 8.3 s at 80 rooms. In AWS, a stopped server's 41 rooms took 36 s to move: the lobby moves rooms one at a time in passes that stop at a 4-second deadline, and each `AllocateRoom` to a saturated server can take its full 2 seconds. So recovery time grows with the number of rooms a server held. Moving rooms in parallel (bounded) and handing rooms over on a graceful stop (`DrainServer`, task 5.5) are the fixes.
+
 ### 7.6 Drawing lifecycle
 
 1. `RoundFinished` triggers the assets pipeline (section 4.5).
@@ -560,6 +562,8 @@ Limits, besides the protocol's (section 6.4):
 | Points per round | 40,000 | `error {code: canvas_full}`; the stroke is dropped |
 | `stroke_id` | `[A-Za-z0-9_-]{1,32}`; `color` lowercase `#rrggbb` | `error {code: bad_request}` |
 | Rooms per server | `MAX_ROOMS`, 100 by default | `AllocateRoom` answers `RESOURCE_EXHAUSTED` |
+
+Measured capacity (task 5.3, evidence log): a game server with 0.25 vCPU (the AWS stack's size) holds about 20 four-player rooms with two drawers streaming strokes; past that its CPU is pinned and its sockets' send queues back up (pongs wait seconds). `MAX_ROOMS` (100) is therefore far above what that size can serve: the allocator's least-loaded choice spreads rooms, but nothing stops one server taking more than it can carry. Sizing `MAX_ROOMS` to the task's CPU, or allocating by load rather than counts, is a Stage 6 question.
 | Replay on resume | 200 events | A full `welcome` instead |
 
 Rules the actor applies that the protocol doesn't show: a player who joins during a match goes to the back of the draw order and draws in that match; drawers can't chat while choosing either; a heartbeat's `sockets` is the sum of connected players, not open sockets.

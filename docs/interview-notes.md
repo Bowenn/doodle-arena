@@ -353,4 +353,18 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Least privilege includes the metadata service.** An automated security review caught that an IMDS hop limit of 2 would let any container on the data host (Postgres, Kafka) fetch the instance role and read every secret. The hop limit stays at 1, and only Grafana, which needs CloudWatch, runs on the host network.
 - **Rejected:** public subnets with a public IP per task (the NAT gateway is cheaper per hour than 15 IPv4 addresses, and tasks stay unreachable from outside); Secrets Manager ($0.40 per secret per month, versus free SSM parameters); exposing Grafana publicly (it's reached through a Session Manager port forward). The weak spot: the data host is a single point of failure, and a teardown deletes all data, which suits demos and not much else.
 
+### Task 5.3: First measurements
+
+- **Measure where players are, and know what each number includes.** The k6 script plays real four-player rooms through the gateway. It times a stroke from the drawer's socket to the other players' sockets, putting the send time in the `stroke_id`, so no protocol change is needed. It also times ping round trips, which skip the room entirely. Comparing the two tells the network apart from the server. The server's own broadcast metric stayed under 0.1 ms even while players waited seconds, because it stops timing when an event is queued, before the socket write. A metric that can't see saturation would never fire its alert.
+- **Find the knee, and name it.** In AWS, a game server with 0.25 vCPU pinned its CPU at about 20 rooms. Stroke fan-out went from 24 ms (p95, 10 rooms) to seconds at 80 rooms, and CloudWatch's ECS CPU showed which task saturated. The laptop run looked fine at 80 rooms, because there the bottleneck was the laptop itself. Local numbers aren't capacity numbers.
+- **Recovery time scaled with the number of rooms.** Locally, a killed server's room resumed in 8.3 s under load. In AWS, a stopped server's 41 rooms took 36 s to move. The lobby moves rooms one at a time, in passes with a 4-second deadline, and each takeover call to an overloaded server can take its full 2-second deadline. The fixes are clear: move rooms in parallel with a bound, and hand rooms over on a graceful stop (task 5.5).
+- **A load generator has its own failure modes.** The first runs found script bugs, not server bugs:
+  - the wrong player became host;
+  - the "wrong" guesses were real words;
+  - dropped sockets were never resumed, so a failover turned into a flood of new rooms;
+  - after a takeover, one room ran two drawing loops at once.
+
+  All the k6 players also come from one IP. After a failover, every rejoin hit the gateway's 20-requests-a-second per-address limit, which real users only meet behind a shared NAT. The script now resumes exactly like the web app does, and applies each room event once, by its room-wide `seq`.
+- **Rejected:** a load generator inside the VPC for this first pass. It would remove the home network from the client numbers, but it needs more Terraform, and the server-side metrics plus CloudWatch already located the bottleneck. It's the right next step when the numbers must be clean.
+
 ## Stage 6: Scale and depth

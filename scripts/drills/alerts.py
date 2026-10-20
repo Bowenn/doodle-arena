@@ -162,6 +162,7 @@ def ledger_drill() -> dict:
 
 def errors_drill() -> dict:
     previous = ai_mode()
+    sent_before = received("HighErrorRate", "FIRING")
     log(f"HighErrorRate: AI stub to fail (was {previous['mode']}), two calls a second")
     result: dict = {}
     start = time.monotonic()
@@ -189,7 +190,8 @@ def errors_drill() -> dict:
         ai_mode(previous)
         log(f"HighErrorRate: AI stub back to {previous['mode']}")
     if result.get("fire_s") is not None:
-        sent = wait_for("its notification on webhook-receiver", lambda: received("HighErrorRate", "FIRING") > 0, 90)
+        sent = wait_for("its notification on webhook-receiver",
+                        lambda: received("HighErrorRate", "FIRING") > sent_before, 90)
         result["notify_s"] = None if sent is None else result["fire_s"] + sent
     return result
 
