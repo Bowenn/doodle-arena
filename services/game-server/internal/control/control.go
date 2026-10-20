@@ -52,7 +52,10 @@ type Server struct {
 
 	mu       sync.Mutex
 	rooms    map[string]*entry
+	starting map[string]chan struct{} // ids an AllocateRoom is starting; closed when it is done
 	draining bool
+
+	afterReserve func(roomID string) // tests only: runs once a call has claimed the room id
 }
 
 // entry is a running room and, with a store, its lease.
@@ -97,7 +100,7 @@ func New(ctx context.Context, cfg Config) *Server {
 		cfg.Clock = room.RealClock
 	}
 	s := &Server{id: cfg.ID, wsAddress: cfg.WSAddress, maxRooms: cfg.MaxRooms, clock: cfg.Clock,
-		metrics: cfg.Metrics, events: cfg.Events, store: cfg.Store, log: cfg.Log, ctx: ctx, rooms: map[string]*entry{},
+		metrics: cfg.Metrics, events: cfg.Events, store: cfg.Store, log: cfg.Log, ctx: ctx, rooms: map[string]*entry{}, starting: map[string]chan struct{}{},
 		requeuer: cfg.Outbox, scanEvery: cmp.Or(cfg.OutboxScan, OutboxScanEvery), staleAge: cmp.Or(cfg.StaleAfter, OutboxStaleAfter)}
 	if s.store != nil {
 		s.wg.Go(s.keepLeases)
@@ -132,30 +135,24 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 	}
 	resp := &gamev1.AllocateRoomResponse{ServerId: s.id, WsAddress: s.wsAddress}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if e, ok := s.rooms[req.GetRoomId()]; ok {
-		if s.stillOwns(ctx, e) {
-			return resp, nil
-		}
-		// Another server took the room (ADR 0007) and the lobby is now giving it back. The old
-		// copy here must stop before a new one takes the lease, or OK would point the lobby at
-		// a room that is about to close.
-		if done := s.awaitStopped(ctx, e); !done {
-			return nil, status.Error(codes.Unavailable, "the room's previous copy is still stopping")
-		}
-		if cur, ok := s.rooms[req.GetRoomId()]; ok {
-			if cur != e {
-				return resp, nil // a concurrent AllocateRoom already took it back
-			}
-			delete(s.rooms, req.GetRoomId())
-		}
+	id := req.GetRoomId()
+	started, running, err := s.reserve(ctx, id)
+	if err != nil {
+		return nil, err
 	}
-	if s.draining {
-		return nil, status.Error(codes.FailedPrecondition, "server is draining")
+	if running {
+		return resp, nil
 	}
-	if len(s.rooms) >= s.maxRooms {
-		return nil, status.Error(codes.ResourceExhausted, "server is full")
+	// Installed or not, the id stops being "starting" only after the table says which: a call
+	// waiting for this one then finds the room, or starts it itself.
+	defer func() {
+		s.mu.Lock()
+		delete(s.starting, id)
+		s.mu.Unlock()
+		close(started)
+	}()
+	if s.afterReserve != nil {
+		s.afterReserve(id)
 	}
 	cfg := room.Config{
 		ID: req.GetRoomId(), Mode: "classic", HostID: req.GetHostUserId(), Settings: settings,
@@ -197,6 +194,7 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 		return nil, status.Error(codes.Internal, "room state can't be restored")
 	}
 	e.room = r
+	s.mu.Lock()
 	s.rooms[r.ID()] = e
 	s.wg.Go(func() {
 		r.Run(s.ctx)
@@ -207,6 +205,7 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 		}
 		s.mu.Unlock()
 	})
+	s.mu.Unlock()
 	if cfg.Restore == nil {
 		s.log.InfoContext(ctx, "room allocated", "room_id", r.ID(), "server_id", s.id, "user_id", req.GetHostUserId())
 	}
@@ -217,6 +216,55 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 		s.log.InfoContext(ctx, "outbox entries left by the previous owner queued", "room_id", r.ID(), "entries", n)
 	}
 	return resp, nil
+}
+
+// reserve claims a room id for one AllocateRoom call to start, or reports that this server
+// already runs the room. s.mu guards only the table, never a Redis call or a restore, so the
+// lobby can move many rooms here at once after a failover; a second call for a room that is
+// still starting waits for the first. A starting room counts toward maxRooms.
+func (s *Server) reserve(ctx context.Context, id string) (started chan struct{}, running bool, err error) {
+	for {
+		s.mu.Lock()
+		if wait, ok := s.starting[id]; ok {
+			s.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return nil, false, status.Error(codes.Unavailable, "the room is still starting")
+			}
+		}
+		if e, ok := s.rooms[id]; ok {
+			s.mu.Unlock()
+			if s.stillOwns(ctx, e) {
+				return nil, true, nil
+			}
+			// Another server took the room (ADR 0007) and the lobby is now giving it back. The old
+			// copy here must stop before a new one takes the lease, or OK would point the lobby at
+			// a room that is about to close.
+			if !s.awaitStopped(ctx, e) {
+				return nil, false, status.Error(codes.Unavailable, "the room's previous copy is still stopping")
+			}
+			s.mu.Lock()
+			if s.rooms[id] == e {
+				delete(s.rooms, id)
+			}
+			s.mu.Unlock()
+			continue // look again: a concurrent call may have taken it back meanwhile
+		}
+		switch {
+		case s.draining:
+			s.mu.Unlock()
+			return nil, false, status.Error(codes.FailedPrecondition, "server is draining")
+		case len(s.rooms)+len(s.starting) >= s.maxRooms:
+			s.mu.Unlock()
+			return nil, false, status.Error(codes.ResourceExhausted, "server is full")
+		}
+		started = make(chan struct{})
+		s.starting[id] = started
+		s.mu.Unlock()
+		return started, false, nil
+	}
 }
 
 // scanOutboxes queues again, every scanEvery, the outbox entries of this server's rooms that
@@ -318,12 +366,10 @@ func (s *Server) stillOwns(ctx context.Context, e *entry) bool {
 	return len(lost) == 0
 }
 
-// awaitStopped fences a room that lost its lease and waits, with s.mu released, until its actor
-// has stopped (at most stopWait). It returns with s.mu held again.
+// awaitStopped fences a room that lost its lease and waits until its actor has stopped (at
+// most stopWait).
 func (s *Server) awaitStopped(ctx context.Context, e *entry) bool {
 	e.room.Fence()
-	s.mu.Unlock()
-	defer s.mu.Lock()
 	timer := time.NewTimer(stopWait)
 	defer timer.Stop()
 	select {
@@ -344,10 +390,10 @@ func (s *Server) DrainServer(ctx context.Context, _ *gamev1.DrainServerRequest) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.draining {
-		s.log.InfoContext(ctx, "draining", "server_id", s.id, "rooms", len(s.rooms))
+		s.log.InfoContext(ctx, "draining", "server_id", s.id, "rooms", len(s.rooms)+len(s.starting))
 	}
 	s.draining = true
-	return &gamev1.DrainServerResponse{RoomsRemaining: uint32(len(s.rooms))}, nil
+	return &gamev1.DrainServerResponse{RoomsRemaining: uint32(len(s.rooms) + len(s.starting))}, nil
 }
 
 // Room finds a running room (for the WebSocket handler).

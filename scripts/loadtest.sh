@@ -42,5 +42,6 @@ else
   echo "No collector at $OTLP_ENDPOINT: k6's metrics stay in its summary only." >&2
 fi
 echo "==> k6 $profile: $rooms rooms at most, against $GATEWAY"
-# PIN_HOST and PIN_IP, when set, reach k6 too (loadtest/rooms.js).
-exec k6 run "${out[@]}" loadtest/rooms.js
+# PIN_HOST and PIN_IP, when set, reach k6 too (loadtest/rooms.js). An empty array is
+# "unbound" under set -u in macOS's bash 3.2, hence the ${out[@]+...} form.
+exec k6 run ${out[@]+"${out[@]}"} loadtest/rooms.js

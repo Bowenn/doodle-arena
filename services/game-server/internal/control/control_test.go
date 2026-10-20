@@ -380,3 +380,142 @@ func TestEndedRoomIsNotRestored(t *testing.T) {
 		t.Fatalf("err = %v, want NotFound", err)
 	}
 }
+
+// gateRoom makes AllocateRoom for one room id stop after it has claimed the id, until release
+// is closed. claimed receives once per claim.
+func gateRoom(s *Server, id string) (claimed chan struct{}, release chan struct{}) {
+	claimed, release = make(chan struct{}, 8), make(chan struct{})
+	s.afterReserve = func(got string) {
+		if got == id {
+			claimed <- struct{}{}
+			<-release
+		}
+	}
+	return claimed, release
+}
+
+func TestAllocationsOfDifferentRoomsDoNotWaitForEachOther(t *testing.T) {
+	// After a failover the lobby moves many rooms here at once: a slow takeover (Redis reads, a
+	// long replay) must not hold up the others.
+	s := newServer(t, 10)
+	claimed, release := gateRoom(s, "slow")
+	errs := make(chan error, 1)
+	go func() { _, err := s.AllocateRoom(t.Context(), req("slow")); errs <- err }()
+	<-claimed
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if _, err := s.AllocateRoom(ctx, req("fast")); err != nil {
+		t.Fatalf("fast room waited for the slow one: %v", err)
+	}
+	if s.Room("fast") == nil || s.Room("slow") != nil {
+		t.Fatal("want only the fast room running while the slow one starts")
+	}
+	close(release)
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if s.Room("slow") == nil {
+		t.Fatal("slow room not started")
+	}
+}
+
+func TestConcurrentAllocationsOfOneRoomStartOneCopy(t *testing.T) {
+	s := newServer(t, 10)
+	claimed, release := gateRoom(s, "r1")
+	errs := make(chan error, 3)
+	for range 3 {
+		go func() { _, err := s.AllocateRoom(t.Context(), req("r1")); errs <- err }()
+	}
+	<-claimed
+	select {
+	case err := <-errs:
+		t.Fatalf("a call returned while the room was still starting: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	for range 3 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(claimed); n != 0 {
+		t.Fatalf("%d more calls claimed the id after the first", n)
+	}
+	if rooms, _ := s.Status(); len(rooms) != 1 {
+		t.Fatalf("rooms = %+v, want one", rooms)
+	}
+}
+
+func TestStartingRoomsCountTowardMaxRooms(t *testing.T) {
+	s := newServer(t, 1)
+	claimed, release := gateRoom(s, "r1")
+	errs := make(chan error, 1)
+	go func() { _, err := s.AllocateRoom(t.Context(), req("r1")); errs <- err }()
+	<-claimed
+	if _, err := s.AllocateRoom(t.Context(), req("r2")); status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("err = %v, want ResourceExhausted while r1 starts", err)
+	}
+	if resp, _ := s.DrainServer(t.Context(), &gamev1.DrainServerRequest{}); resp.GetRoomsRemaining() != 1 {
+		t.Fatalf("drain counts %d rooms, want the starting one", resp.GetRoomsRemaining())
+	}
+	close(release)
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWaitingForAStartingRoomEndsWithTheDeadline(t *testing.T) {
+	s := newServer(t, 10)
+	claimed, release := gateRoom(s, "r1")
+	defer close(release)
+	go func() { _, _ = s.AllocateRoom(t.Context(), req("r1")) }()
+	<-claimed
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := s.AllocateRoom(ctx, req("r1")); status.Code(err) != codes.Unavailable {
+		t.Fatalf("err = %v, want Unavailable (the lobby retries)", err)
+	}
+}
+
+func TestManyTakeoversAtOnce(t *testing.T) {
+	// The failover path with a store: a second server takes 10 rooms (its maximum) concurrently.
+	rdb := redistest.New(t)
+	store := roomstore.New(rdb)
+	a, b := storedServer(t, "gs-1", store), storedServer(t, "gs-2", store)
+	ids := make([]string, 10)
+	for i := range ids {
+		ids[i] = "r" + string(rune('a'+i))
+		onA := req(ids[i])
+		onA.ServerId = "gs-1"
+		if _, err := a.AllocateRoom(t.Context(), onA); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(ids))
+	for _, id := range ids {
+		wg.Go(func() {
+			onB := req(id)
+			onB.ServerId = "gs-2"
+			_, err := b.AllocateRoom(t.Context(), onB)
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range ids {
+		if r := b.Room(id); r == nil || r.Token() != 2 {
+			t.Fatalf("room %s on gs-2: %v, want token 2", id, r)
+		}
+	}
+	eventually(t, "gs-1 fenced", func() bool {
+		rooms, _ := a.Status()
+		return len(rooms) == 0
+	})
+}

@@ -11,7 +11,7 @@
 //	lobby:room_hosts      set of server ids that have (or recently had) rooms; an id is dropped
 //	                      lazily, when Hosts finds its server_rooms set empty
 //	lobby:reassigner      lock (reassign.go): the lobby instance that runs reassignment passes,
-//	                      10 s TTL, taken or extended every 2 s
+//	                      10 s TTL, taken or extended every 2 s and before every AllocateRoom
 package rooms
 
 import (
