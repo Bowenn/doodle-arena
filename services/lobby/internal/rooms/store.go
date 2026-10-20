@@ -3,15 +3,21 @@
 //
 // Redis keys (the lobby owns lobby:*):
 //
-//	lobby:room:{room_id}  string, the room as JSON. Expires RoomTTL after the owning game server
-//	                      last reported it, so finished rooms disappear on their own.
-//	lobby:rooms:public    sorted set of public room ids, scored by creation time (ms)
-//	lobby:server_rooms:{server_id}  set of the room ids placed on that game server, so the
-//	                      reassigner finds a dead server's rooms (its heartbeat is gone too)
-//	lobby:room_hosts      set of server ids that have (or recently had) rooms; an id is dropped
-//	                      lazily, when Hosts finds its server_rooms set empty
-//	lobby:reassigner      lock (reassign.go): the lobby instance that runs reassignment passes,
-//	                      10 s TTL, taken or extended every 2 s and before every AllocateRoom
+//	lobby:{rooms}:room:<room_id>      string, the room as JSON. Expires RoomTTL after the owning
+//	                                  game server last reported it, so finished rooms disappear.
+//	lobby:{rooms}:public              sorted set of public room ids, scored by creation time (ms)
+//	lobby:{rooms}:server:<server_id>  set of the room ids placed on that game server, so the
+//	                                  reassigner finds a dead server's rooms (its heartbeat is gone)
+//	lobby:{rooms}:hosts               set of server ids that have (or recently had) rooms; an id is
+//	                                  dropped lazily, when Hosts finds its server set empty
+//	lobby:reassigner                  lock (reassign.go): the lobby instance that runs reassignment
+//	                                  passes, 10 s TTL, taken or extended every 2 s and before every
+//	                                  AllocateRoom
+//
+// {rooms} is a Redis Cluster hash tag (the braces are literal): Save, Move and Remove each change
+// a room and its indexes together, in one MULTI or one Lua script, which Redis Cluster allows only
+// within one slot. So the whole room index lives in one slot. It is small (a record per open
+// room), and one Redis node holds it today anyway. internal/clustertest proves it on a cluster.
 package rooms
 
 import (
@@ -31,13 +37,13 @@ import (
 const RoomTTL = 10 * time.Minute
 
 const (
-	publicKey = "lobby:rooms:public"
-	hostsKey  = "lobby:room_hosts"
+	publicKey = "lobby:{rooms}:public"
+	hostsKey  = "lobby:{rooms}:hosts"
 )
 
-func serverRoomsKey(serverID string) string { return "lobby:server_rooms:" + serverID }
+func serverRoomsKey(serverID string) string { return "lobby:{rooms}:server:" + serverID }
 
-func roomKey(id string) string { return "lobby:room:" + id }
+func roomKey(id string) string { return "lobby:{rooms}:room:" + id }
 
 // Settings are the host's choices for a room (design doc, section 7.3).
 type Settings struct {
