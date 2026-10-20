@@ -1,7 +1,7 @@
 {
   "uid": "da-game-server",
   "title": "Doodle Arena: game server",
-  "description": "Connections, rooms, broadcast latency, send lag, scheduler latency, guesses, reconnects, takeovers and the event outbox.",
+  "description": "Connections, rooms, broadcast latency, input and send lag, scheduler latency, guesses, reconnects, takeovers and the event outbox.",
   "tags": [
     "doodle-arena"
   ],
@@ -266,8 +266,8 @@
     {
       "id": 13,
       "type": "timeseries",
-      "title": "Send lag",
-      "description": "From queueing a message to a socket until its write returns: the wait for a CPU or behind a slow write, plus the write. SlowBroadcasts fires when p95 stays above 250 ms. Read it with Scheduler latency: both high means the CPU is pinned; send lag alone means slow clients.",
+      "title": "Input and send lag",
+      "description": "Input lag: a player's message waiting for its room's actor (behind earlier steps' Redis commits). Send lag: a message waiting to be written to a socket, plus the write. SlowBroadcasts fires when either p95 stays above 250 ms. Read them with Scheduler latency: high there too means the CPU is pinned; send lag alone means slow clients.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -301,8 +301,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(game_ws_send_lag_milliseconds_bucket[$__rate_interval])))",
-          "legendFormat": "p50"
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(game_room_input_lag_milliseconds_bucket[$__rate_interval])))",
+          "legendFormat": "input p50"
         },
         {
           "refId": "B",
@@ -310,8 +310,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (service_instance_id, le) (rate(game_ws_send_lag_milliseconds_bucket[$__rate_interval])))",
-          "legendFormat": "p95 {{service_instance_id}}"
+          "expr": "histogram_quantile(0.95, sum by (service_instance_id, le) (rate(game_room_input_lag_milliseconds_bucket[$__rate_interval])))",
+          "legendFormat": "input p95 {{service_instance_id}}"
         },
         {
           "refId": "C",
@@ -319,8 +319,17 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(game_ws_send_lag_milliseconds_bucket[$__rate_interval])))",
-          "legendFormat": "p99"
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(game_ws_send_lag_milliseconds_bucket[$__rate_interval])))",
+          "legendFormat": "send p50"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (service_instance_id, le) (rate(game_ws_send_lag_milliseconds_bucket[$__rate_interval])))",
+          "legendFormat": "send p95 {{service_instance_id}}"
         }
       ],
       "gridPos": {
