@@ -17,7 +17,7 @@ Either way one in twenty strokes, guesses and pongs reaches players late or wors
 1. One server or both? Split the Input and send lag panel by `service_instance_id` (it shows the p95 per instance).
 2. CPU: the Scheduler latency panel (`go_schedule_duration_seconds`). A p99 above a few milliseconds means goroutines wait for a CPU, so the server is the cause. Confirm with ECS CPU in AWS (the load-test dashboard, or CloudWatch `AWS/ECS` `CPUUtilization`) or `docker stats` locally. Task 5.3 measured a 0.25-vCPU game server pinned at about 20 four-player rooms.
 3. Load: WebSocket connections and active rooms on the same dashboard. A load test is the usual cause.
-4. Input lag high but the CPU idle: the steps themselves are slow, which usually means Redis. Check the Redis container's (or host's) CPU and latency (`redis-cli --latency`).
+4. Input lag high but the CPU idle: the steps themselves are slow, which usually means Redis. Check the Redis container's (or host's) CPU and latency (`docker compose -f infra/docker-compose.yml --env-file .env exec redis sh -c 'REDISCLI_AUTH="$REDIS_ADMIN_PASSWORD" redis-cli --user admin --latency'`; Redis has one user per service since task 5.5).
 5. Send lag high but scheduler latency low: the writes themselves are slow. `game.ws.slow_client_disconnects` rising (a queue filled up or a write took 10 s) points at clients' networks or the gateway, not the server.
 6. The room actor: `game.broadcast.duration` p99 above a few milliseconds means the actor itself is slow to queue (huge rooms, or garbage collection: `go_memory_allocated_bytes_total`).
 
