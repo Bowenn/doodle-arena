@@ -9,13 +9,14 @@ variable "domain_name" {
   type        = string
 }
 
-variable "team_cidrs" {
-  description = "Who may reach the load balancer. Team addresses only until task 5.5 adds Kafka users and ACLs (ADR 0003, ADR 0013)."
+variable "allowed_cidrs" {
+  description = "Who may reach the load balancer: everyone by default, since Kafka has users and ACLs (task 5.5, ADR 0013). A list of addresses narrows it, such as [\"203.0.113.7/32\"]."
   type        = list(string)
+  default     = ["0.0.0.0/0"]
 
   validation {
-    condition     = length(var.team_cidrs) > 0 && !contains(var.team_cidrs, "0.0.0.0/0")
-    error_message = "Open the stack to everyone only after task 5.5 (ADR 0003): list the team's addresses, such as [\"203.0.113.7/32\"]."
+    condition     = length(var.allowed_cidrs) > 0
+    error_message = "List at least one address range, or leave the default (everyone)."
   }
 }
 

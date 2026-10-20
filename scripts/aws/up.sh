@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts a session in AWS (ADR 0003): creates the stack with every service at 0, runs the
 # database migrations as one-off tasks, then starts the services and waits until they are stable.
-#   DOMAIN=example.com [TEAM_CIDRS=a.b.c.d/32,...] [IMAGE_TAG=<sha>] scripts/aws/up.sh
+#   DOMAIN=example.com [ALLOWED_CIDRS=a.b.c.d/32,...] [IMAGE_TAG=<sha>] scripts/aws/up.sh
 # It costs money from here until scripts/aws/down.sh (about $0.35-0.45 an hour; docs/roadmap.md
 # has the measured number).
 source "$(dirname "$0")/common.sh"
@@ -10,7 +10,7 @@ stack_vars
 init_stack
 
 start=$SECONDS
-echo "==> 1/3 the stack, no service running (team: $TEAM_CIDRS, images: $IMAGE_TAG)"
+echo "==> 1/3 the stack, no service running (open to: $ALLOWED_CIDRS, images: $IMAGE_TAG)"
 terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=false
 
 cluster="$(tf_output cluster)"

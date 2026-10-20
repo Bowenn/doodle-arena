@@ -1,20 +1,20 @@
 # The only public entry: HTTPS on the load balancer, then the Nginx gateway, which routes as it
-# does locally (WebSockets included, ADR 0002). Open to the team's addresses only (var.team_cidrs).
+# does locally (WebSockets included, ADR 0002). Open to var.allowed_cidrs: everyone by default.
 
 resource "aws_security_group" "alb" {
   name        = "doodle-alb"
-  description = "The load balancer: HTTPS (and the redirect from HTTP) from the team"
+  description = "The load balancer: HTTPS (and the redirect from HTTP) from the allowed addresses"
   vpc_id      = aws_vpc.main.id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "alb" {
-  for_each          = { for pair in setproduct(var.team_cidrs, [80, 443]) : "${pair[0]}:${pair[1]}" => pair }
+  for_each          = { for pair in setproduct(var.allowed_cidrs, [80, 443]) : "${pair[0]}:${pair[1]}" => pair }
   security_group_id = aws_security_group.alb.id
   cidr_ipv4         = each.value[0]
   from_port         = each.value[1]
   to_port           = each.value[1]
   ip_protocol       = "tcp"
-  description       = "Team address"
+  description       = "Allowed addresses"
 }
 
 resource "aws_vpc_security_group_egress_rule" "alb_to_gateway" {
