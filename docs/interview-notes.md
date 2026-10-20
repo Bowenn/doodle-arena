@@ -366,6 +366,7 @@ Read this before interviews, and practice with the interview drill prompt in `do
 
   All the k6 players also come from one IP. After a failover, every rejoin hit the gateway's 20-requests-a-second per-address limit, which real users only meet behind a shared NAT. The script now resumes exactly like the web app does, and applies each room event once, by its room-wide `seq`.
 - **Rejected:** a load generator inside the VPC for this first pass. It would remove the home network from the client numbers, but it needs more Terraform, and the server-side metrics plus CloudWatch already located the bottleneck. It's the right next step when the numbers must be clean.
+- **Re-measure after fixing, with the same test.** Four follow-ups merged after 5.3 (parallel room moves, input and send lag, Grafana links, otel-lgtm's memory guards), so I reran the identical ramp and stop drill in AWS. The stop test now passes: 40 rooms moved in 3 passes, 17.8 s after the shutdown instead of 36.7 s. It's still over the 10-second target, because the one surviving server was saturated. The new input-lag metric pinned the bottleneck on the room actors' inboxes waiting for CPU, not on socket writes. SlowBroadcasts fired to Discord on exactly that lag. A before-and-after only means something if the test and the setup stay the same.
 
 ### Follow-up to 5.3: failover time that doesn't grow with the room count
 
