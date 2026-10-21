@@ -8,6 +8,7 @@ on:
     paths:
       - infra/**
       - scripts/**
+      - loadtest/**
       - services/gateway/**
       - services/*/Dockerfile
       - services/*/Dockerfile.dockerignore
@@ -77,6 +78,8 @@ jobs:
           k6-version: "2.3.0"
       - name: make loadtest-smoke (k6, two four-player rooms through the gateway)
         run: make loadtest-smoke
+      - name: make loadtest-live-smoke (k6, a live room and 50 viewers through the relays)
+        run: make loadtest-live-smoke
       - name: Disk usage after the run
         if: always()
         run: df -h /
