@@ -216,6 +216,11 @@ locals {
   # As in compose: <name>-1, except a game server, whose instance id is its server id
   # (game-server-1), the one the gateway routes /ws/<server_id>/ by (ADR 0002).
   instance_id = { for name in keys(local.services) : name => startswith(name, "game-server") ? name : "${name}-1" }
+  # A rolling redeploy replaces one game server at a time (scripts/aws/up.sh): two stopping
+  # together couldn't take each other's rooms, and every room would fail over instead.
+  image_tag = { for name in keys(local.services) : name => (
+    name == "game-server-2" && var.game_server_2_image_tag != "" ? var.game_server_2_image_tag : var.image_tag
+  ) }
 }
 
 # for_each over the names: the services' settings differ in shape (each leaves out what it
@@ -225,18 +230,18 @@ module "svc" {
   for_each = toset(keys(local.services))
 
   name    = each.key
-  image   = "${local.registry}/${local.services[each.key].image}:${var.image_tag}"
+  image   = "${local.registry}/${local.services[each.key].image}:${local.image_tag[each.key]}"
   command = try(local.services[each.key].command, null)
   cpu     = try(local.services[each.key].cpu, 256)
   memory  = try(local.services[each.key].memory, 512)
   ports   = try(local.services[each.key].ports, [])
   # Each process names itself, as in compose (service.instance.id; Python adds a per-process suffix).
-  environment = merge(local.common_env, try(local.services[each.key].env, {}), each.key == "gateway" ? {
+  environment = merge(local.common_env, { SERVICE_VERSION = local.image_tag[each.key] }, try(local.services[each.key].env, {}), each.key == "gateway" ? {
     SERVICE_INSTANCE_ID = "gateway-1"
     } : {
     SERVICE_INSTANCE_ID      = local.instance_id[each.key]
     OTEL_SERVICE_NAME        = try(local.services[each.key].instance_service, startswith(each.key, "game-server") ? "game-server" : each.key)
-    OTEL_RESOURCE_ATTRIBUTES = "service.instance.id=${local.instance_id[each.key]},service.version=${var.image_tag},deployment.environment=aws"
+    OTEL_RESOURCE_ATTRIBUTES = "service.instance.id=${local.instance_id[each.key]},service.version=${local.image_tag[each.key]},deployment.environment=aws"
   })
   secrets             = try(local.services[each.key].secrets, {})
   health_check        = try(local.services[each.key].health, null)

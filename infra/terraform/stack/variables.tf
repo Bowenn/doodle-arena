@@ -25,6 +25,12 @@ variable "image_tag" {
   type        = string
 }
 
+variable "game_server_2_image_tag" {
+  description = "Holds game-server-2 at this tag while game-server-1 is replaced (scripts/aws/up.sh redeploying a running stack), so the two game servers never stop together and each drains into the other. Empty: image_tag."
+  type        = string
+  default     = ""
+}
+
 variable "running" {
   description = "false: everything exists but no service runs (the migrations run first, scripts/aws/up.sh)."
   type        = bool
