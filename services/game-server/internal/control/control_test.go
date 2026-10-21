@@ -468,8 +468,11 @@ func TestStartingRoomsCountTowardMaxRooms(t *testing.T) {
 func TestWaitingForAStartingRoomEndsWithTheDeadline(t *testing.T) {
 	s := newServer(t, 10)
 	claimed, release := gateRoom(s, "r1")
-	defer close(release)
-	go func() { _, _ = s.AllocateRoom(t.Context(), req("r1")) }()
+	// The first allocation's goroutine gets its context here and is waited for before the test
+	// returns: calling t.Context() from it after the test ended raced with the test's cleanup.
+	first, done := t.Context(), make(chan struct{})
+	go func() { defer close(done); _, _ = s.AllocateRoom(first, req("r1")) }()
+	defer func() { close(release); <-done }()
 	<-claimed
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
