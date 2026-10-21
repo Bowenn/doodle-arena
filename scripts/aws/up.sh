@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # Starts a session in AWS (ADR 0003): creates the stack with every service at 0, runs the
 # database migrations as one-off tasks, then starts the services and waits until they are stable.
+# On a stack that is already running it redeploys instead: the other services, then one game
+# server at a time.
+#   DOMAIN=example.com [ALLOWED_CIDRS=a.b.c.d/32,...] [IMAGE_TAG=<sha>] scripts/aws/up.sh
+# It costs money from here until scripts/aws/down.sh (about $0.30-0.80 an hour, measured in
+# docs/performance.md).
+source "$(dirname "$0")/common.sh"
+require_aws
+stack_vars
+init_stack
+
+start=$SECONDS
+
 # On a stack that is already running (a new IMAGE_TAG mid-session, or a rerun after a failure),
 # step 1 must not park the services: that would be an outage. A redeploy instead replaces
 # everything but the game servers first, then game-server-1 (which drains into game-server-2),
