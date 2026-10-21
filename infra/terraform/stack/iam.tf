@@ -139,21 +139,19 @@ resource "aws_iam_role_policy" "data_host" {
         Action   = ["s3:GetObject"]
         Resource = ["${aws_s3_bucket.bucket["config"].arn}/*"]
       },
-      # aws-down's dumps (ADR 0016, infra/backup/dump.sh). Write only: otel-lgtm can use this
-      # role too, so it must not read a backup back. Restores download through presigned URLs
-      # that the human running aws-up signs (scripts/aws/restore.sh).
+      # aws-down's dumps (ADR 0016, infra/backup/dump.sh), and nothing else. Write only:
+      # otel-lgtm can use this role too, so it must not read a backup back (restores download
+      # through presigned URLs the human running aws-up signs). Not the manifest, which makes a
+      # backup restorable and holds the SHA-256 each dump must match, and not the drawings: the
+      # human's credentials write both, so a host that is broken into can't forge a backup, and
+      # a dump it overwrites fails the restore's checksum.
       {
-        Effect   = "Allow"
-        Action   = ["s3:PutObject"]
-        Resource = ["arn:aws:s3:::doodle-arena-backups-${local.account_id}/backups/*"]
-      },
-      # Never a manifest: it is what makes a backup restorable, and it holds the SHA-256 each
-      # dump must match. Only the human running aws-down writes it, after checking the dumps,
-      # so a host that is broken into can't forge a backup or swap a dump unnoticed.
-      {
-        Effect   = "Deny"
-        Action   = ["s3:PutObject"]
-        Resource = ["arn:aws:s3:::doodle-arena-backups-${local.account_id}/backups/*/manifest.json"]
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [
+          "arn:aws:s3:::doodle-arena-backups-${local.account_id}/backups/*/pg-*.dump",
+          "arn:aws:s3:::doodle-arena-backups-${local.account_id}/backups/*/mongo-assets.archive",
+        ]
       },
     ]
   })
