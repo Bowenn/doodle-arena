@@ -68,6 +68,7 @@ type Store interface {
 	Snapshot(ctx context.Context, roomID string) (room.Snapshot, error)
 	EventsAfter(ctx context.Context, roomID string, after int64) ([]room.StoredEvent, error)
 	Tail(ctx context.Context, roomID string, after int64, block time.Duration, count int64) ([]room.StoredEvent, error)
+	Recent(ctx context.Context, roomID string, n int64) ([]room.StoredEvent, error)
 	Closed(ctx context.Context, roomID string) (bool, error)
 }
 
@@ -483,6 +484,24 @@ func (s *stream) load(ctx context.Context, reason string) (err error) {
 		}
 		s.events = append(s.events, ev)
 		s.seq = ev.Seq
+	}
+	// The last frames too, so a viewer whose relay stopped can resume on this one without a full
+	// welcome, even though this relay never sent them.
+	recent, err := s.relay.cfg.Store.Recent(ctx, s.id, replayFrames)
+	if err != nil {
+		return err
+	}
+	for _, ev := range recent {
+		if ev.Seq > s.seq {
+			break // committed after the read above: the stream's reader delivers it
+		}
+		if n := len(s.recent); n > 0 && ev.Seq != s.recent[n-1].seq+1 {
+			s.recent = nil // only an unbroken run up to s.seq can be replayed
+		}
+		s.recent = append(s.recent, frame{seq: ev.Seq, b: protocol.Marshal("event", protocol.Event{Seq: ev.Seq, Type: ev.Type, Data: ev.Data})})
+	}
+	if n := len(s.recent); n > 0 && s.recent[n-1].seq != s.seq {
+		s.recent = nil
 	}
 	s.version++
 	span.SetAttributes(attribute.Int64("seq", s.seq), attribute.Int("events", len(s.events)))

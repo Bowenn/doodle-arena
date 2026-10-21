@@ -5,10 +5,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1085,5 +1087,36 @@ func TestWatchRefusesRoomsThatArentLiveAndNoRelays(t *testing.T) {
 	e.relay(t, "relay-1", 0, true) // the only relay drains
 	if _, err := e.svc.Watch(t.Context(), User{ID: "u-v"}, live.ID); !errors.Is(err, ErrNoRelays) {
 		t.Fatalf("no relay: err = %v", err)
+	}
+}
+
+// Heartbeats are 2 s apart: a burst of viewers in between must not all go to the relay that was
+// least loaded at the last report.
+func TestWatchSpreadsABurstBetweenHeartbeats(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	room, err := e.svc.CreateRoom(t.Context(), "u-host", CreateOptions{Live: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.relay(t, "relay-1", 0, false)
+	e.relay(t, "relay-2", 4, false)
+	got := map[string]int{}
+	for i := range 20 {
+		j, err := e.svc.Watch(t.Context(), User{ID: fmt.Sprintf("u-%d", i)}, room.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got[strings.Split(j.WSURL, "/")[2]]++
+	}
+	// relay-1 first takes the 4 that even them out, then they alternate: 12 and 8.
+	if got["relay-1"] != 12 || got["relay-2"] != 8 {
+		t.Fatalf("viewers per relay = %v, want relay-1 12, relay-2 8", got)
+	}
+	// A new heartbeat replaces what the lobby counted: it reports the real viewers.
+	e.relay(t, "relay-1", 0, false)
+	j, err := e.svc.Watch(t.Context(), User{ID: "u-next"}, room.ID)
+	if err != nil || !strings.Contains(j.WSURL, "relay-1") {
+		t.Fatalf("after relay-1 reported 0 viewers: %+v, %v", j, err)
 	}
 }

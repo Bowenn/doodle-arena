@@ -123,6 +123,16 @@ type Service struct {
 	// is a latency optimisation, not shared state.
 	mu      sync.Mutex
 	suspect map[string]time.Time
+	// issued counts the viewer tickets this lobby gave each relay since that relay's last
+	// heartbeat (keyed by it), so a burst of viewers between two heartbeats spreads over the
+	// relays instead of all going to the one that was least loaded 2 seconds ago. Per process,
+	// like suspect: it corrects a stale report, it isn't shared state.
+	issued map[string]issuedSince
+}
+
+type issuedSince struct {
+	beat  time.Time // the relay heartbeat the count started from
+	count uint32
 }
 
 // NewService wires the room service. Metrics and spans go to the global OpenTelemetry
@@ -149,7 +159,7 @@ func NewService(store *Store, servers Servers, alloc Allocator, tickets TicketSi
 	return &Service{
 		store: store, servers: servers, alloc: alloc, tickets: tickets, now: now, log: log,
 		tracer: otel.Tracer("lobby"), allocations: allocations, reassigns: reassigns, watches: watches,
-		suspect: make(map[string]time.Time),
+		suspect: make(map[string]time.Time), issued: map[string]issuedSince{},
 	}, nil
 }
 
@@ -428,7 +438,7 @@ func (s *Service) Watch(ctx context.Context, user User, roomID string) (j Join, 
 		s.log.WarnContext(ctx, "no relay for a viewer", "room_id", room.ID, "user_id", user.ID)
 		return Join{}, ErrNoRelays
 	}
-	relay := relays[0]
+	relay := s.pickRelay(relays)
 	ticket, exp, err := s.tickets.SignViewer(user.ID, user.Name, room.ID)
 	if err != nil {
 		return Join{}, err
@@ -442,6 +452,32 @@ func (s *Service) Watch(ctx context.Context, user User, roomID string) (j Join, 
 		Ticket:    ticket,
 		ExpiresAt: exp,
 	}, nil
+}
+
+// pickRelay takes the relay with the fewest viewers: those it last reported plus the tickets
+// this lobby issued for it since that report.
+func (s *Service) pickRelay(relays []registry.Server) registry.Server {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	load := func(r registry.Server) uint32 {
+		if is, ok := s.issued[r.ID]; ok && is.beat.Equal(r.SeenAt) {
+			return r.Viewers + is.count
+		}
+		return r.Viewers
+	}
+	best := relays[0]
+	for _, r := range relays[1:] {
+		if load(r) < load(best) {
+			best = r
+		}
+	}
+	is := s.issued[best.ID]
+	if !is.beat.Equal(best.SeenAt) {
+		is = issuedSince{beat: best.SeenAt}
+	}
+	is.count++
+	s.issued[best.ID] = is
+	return best
 }
 
 // QuickPlay puts the player in the fullest waiting public room that has space, or creates a

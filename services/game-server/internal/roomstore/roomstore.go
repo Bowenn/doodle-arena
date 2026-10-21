@@ -427,6 +427,16 @@ func (s *Store) Tail(ctx context.Context, roomID string, after int64, block time
 	return decodeEntries(streams[0].Messages)
 }
 
+// Recent returns a room's last n stored events, oldest first.
+func (s *Store) Recent(ctx context.Context, roomID string, n int64) ([]room.StoredEvent, error) {
+	entries, err := s.rdb.XRevRangeN(ctx, eventsKey(roomID), "+", "-", n).Result()
+	if err != nil {
+		return nil, fmt.Errorf("%w: read recent events: %w", ErrUnavailable, err)
+	}
+	slices.Reverse(entries)
+	return decodeEntries(entries)
+}
+
 // Closed reports whether the room ended (its tombstone is set).
 func (s *Store) Closed(ctx context.Context, roomID string) (bool, error) {
 	n, err := s.rdb.Exists(ctx, closedKey(roomID)).Result()

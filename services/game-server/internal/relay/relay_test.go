@@ -82,6 +82,10 @@ func (o *owner) step(f func(g *room.Game, now time.Time)) {
 		s := o.g.Snapshot()
 		snap = &s
 	}
+	// An owner renews its lease every 1.5 s; this one at every step, so a long test keeps it.
+	if lost, err := o.store.Renew(o.t.Context(), "gs-1", []roomstore.Lease{{RoomID: o.id, Token: o.token}}); err != nil || len(lost) > 0 {
+		o.t.Fatalf("lease: lost %v, err %v", lost, err)
+	}
 	if err := o.store.Commit(o.t.Context(), o.id, "gs-1", o.token, evs, snap, nil); err != nil {
 		o.t.Fatal(err)
 	}
@@ -139,12 +143,19 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	rdb := redistest.New(t)
-	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return newEnvOn(t, redistest.New(t), key)
+}
+
+// newEnvOn is another relay on the same Redis, trusting the same lobby key.
+func newEnvOn(t *testing.T, rdb redis.UniversalClient, key ed25519.PrivateKey) *env {
+	t.Helper()
+	pub := key.Public().(ed25519.PublicKey)
 	reader := sdkmetric.NewManualReader()
+	var err error
 	e := &env{t: t, rdb: rdb, store: roomstore.New(rdb), key: key, reader: reader}
 	e.relay, err = New(Config{
 		ServerID: "relay-1", Store: e.store, Verifier: ticket.NewVerifier([]ed25519.PublicKey{pub}, time.Now),
@@ -589,5 +600,43 @@ func (r *Relay) streamSeq(roomID string) int64 {
 		return <-seq
 	case <-st.done:
 		return -1
+	}
+}
+
+// A viewer whose relay went away resumes on another one, which never sent it anything: the new
+// stream preloads the room's last events, so the resume needs no full welcome.
+func TestAViewerResumesOnAnotherRelay(t *testing.T) {
+	e := newEnv(t)
+	o := newOwner(t, e.store, "r1")
+	_, drawer := o.drawing()
+	v := e.watch("v1", "r1", ticket.WatchAudience, 0)
+	if w := v.next(); w.Type != "welcome" {
+		t.Fatalf("first = %s", w.Type)
+	}
+	o.stroke(drawer, 2)
+	evs, _ := v.events(1)
+	seen := evs[0].Seq
+	_ = v.c.Close(websocket.StatusNormalClosure, "")
+	for range 3 {
+		o.stroke(drawer, 2)
+	}
+
+	other := newEnvOn(t, e.rdb, e.key)
+	v2 := other.watch("v1", "r1", ticket.WatchAudience, seen)
+	var got []int64
+	for {
+		m := v2.next()
+		if m.Type == "welcome" {
+			t.Fatal("the other relay sent a full welcome instead of a resume")
+		}
+		if m.Type == "resumed" {
+			break
+		}
+		var ev event
+		_ = json.Unmarshal(m.Data, &ev)
+		got = append(got, ev.Seq)
+	}
+	if len(got) != 3 || got[0] != seen+1 {
+		t.Fatalf("replayed %v, want the 3 after %d", got, seen)
 	}
 }
