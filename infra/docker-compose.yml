@@ -215,6 +215,72 @@ services:
         condition: service_completed_successfully
     healthcheck: *go-healthcheck
 
+  # Relays (ADR 0017): the game server's binary in its relay role, streaming live rooms to
+  # viewers. They read rooms from Redis and never write them: no Kafka, no S3, no control port.
+  relay-1:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: services/game-server/Dockerfile
+    environment:
+      <<: *app-env
+      ROLE: relay
+      SERVICE_INSTANCE_ID: relay-1
+      OTEL_SERVICE_NAME: game-server
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=relay-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      LOBBY_GRPC_ADDR: lobby:9090
+      WS_ADDRESS: /ws/relay-1
+      REDIS_ADDR: redis:6379
+      # The game-server Redis user: it reads room:* and marks viewer tickets used there.
+      REDIS_USERNAME: game-server
+      REDIS_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
+      TICKET_PUBLIC_KEY_PATH: /run/secrets/ticket-public-key
+      WS_ALLOWED_ORIGINS: localhost:8080
+    secrets:
+      - ticket-public-key
+    # Thousands of viewer sockets (task 6.1's target is 5,000 on one room).
+    ulimits:
+      nofile: {soft: 65535, hard: 65535}
+    depends_on:
+      redis:
+        condition: service_healthy
+      otel-lgtm:
+        condition: service_healthy
+    healthcheck: *go-healthcheck
+
+  # Relays (ADR 0017): the game server's binary in its relay role, streaming live rooms to
+  # viewers. They read rooms from Redis and never write them: no Kafka, no S3, no control port.
+  relay-2:
+    <<: *app
+    build:
+      context: ..
+      dockerfile: services/game-server/Dockerfile
+    environment:
+      <<: *app-env
+      ROLE: relay
+      SERVICE_INSTANCE_ID: relay-2
+      OTEL_SERVICE_NAME: game-server
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=relay-2,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      LOBBY_GRPC_ADDR: lobby:9090
+      WS_ADDRESS: /ws/relay-2
+      REDIS_ADDR: redis:6379
+      # The game-server Redis user: it reads room:* and marks viewer tickets used there.
+      REDIS_USERNAME: game-server
+      REDIS_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
+      TICKET_PUBLIC_KEY_PATH: /run/secrets/ticket-public-key
+      WS_ALLOWED_ORIGINS: localhost:8080
+    secrets:
+      - ticket-public-key
+    # Thousands of viewer sockets (task 6.1's target is 5,000 on one room).
+    ulimits:
+      nofile: {soft: 65535, hard: 65535}
+    depends_on:
+      redis:
+        condition: service_healthy
+      otel-lgtm:
+        condition: service_healthy
+    healthcheck: *go-healthcheck
+
   notifier:
     <<: *app
     # Built from the repository root, for the generated contracts in proto/gen/go.
@@ -573,6 +639,9 @@ services:
       # Rendered into nginx.conf at start (the gateway has no OTEL_* settings of its own).
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       SERVICE_INSTANCE_ID: gateway-1
+    # Two connections per WebSocket, thousands of viewers (nginx.conf.template).
+    ulimits:
+      nofile: {soft: 65535, hard: 65535}
     depends_on:
       otel-lgtm:
         condition: service_healthy

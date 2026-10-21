@@ -15,8 +15,12 @@ load_module modules/ngx_http_js_module.so;
 worker_processes auto;
 error_log /dev/stderr notice;
 
+# Every WebSocket is two connections here (the client's and the upstream one), and a live room
+# holds thousands of viewers (ADR 0017): 5,000 viewers alone are 10,000.
+worker_rlimit_nofile 65535;
+
 events {
-    worker_connections 4096;
+    worker_connections 16384;
 }
 
 http {
@@ -81,13 +85,16 @@ http {
         ''      close;
     }
 
-    # Game WebSockets (ADR 0002): /ws/<server_id>/rooms/<room_id> goes to that game server.
+    # Game WebSockets (ADR 0002): /ws/<server_id>/rooms/<room_id> goes to that game server, or
+    # to that relay for a viewer (ADR 0017).
     # An explicit map, never the path segment as a host name: that would let a client reach
     # any internal service (postgres, redis, ...).
     map $ws_server $ws_upstream {
         default        "";
         game-server-1  game-server-1${SERVICE_DOMAIN}:8080;
         game-server-2  game-server-2${SERVICE_DOMAIN}:8080;
+        relay-1        relay-1${SERVICE_DOMAIN}:8080;
+        relay-2        relay-2${SERVICE_DOMAIN}:8080;
     }
 
     # /healthz/<service> targets. Restricted to internal traffic in AWS (ADR 0003).
@@ -97,6 +104,8 @@ http {
         lobby          http://lobby${SERVICE_DOMAIN}:8080/healthz;
         game-server-1  http://game-server-1${SERVICE_DOMAIN}:8080/healthz;
         game-server-2  http://game-server-2${SERVICE_DOMAIN}:8080/healthz;
+        relay-1        http://relay-1${SERVICE_DOMAIN}:8080/healthz;
+        relay-2        http://relay-2${SERVICE_DOMAIN}:8080/healthz;
         assets         http://assets${SERVICE_DOMAIN}:8080/healthz;
         ai             http://ai${SERVICE_DOMAIN}:8080/healthz;
         marketplace    http://marketplace${SERVICE_DOMAIN}:8080/healthz;

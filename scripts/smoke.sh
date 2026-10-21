@@ -4,7 +4,10 @@
 set -uo pipefail
 
 GATEWAY="${GATEWAY:-http://localhost:8080}"
-TARGETS=(gateway auth lobby game-server-1 game-server-2 assets ai marketplace notifier web)
+# The relays (ADR 0017) run locally; the AWS stack gets them in task 6.9 (scripts/aws/check.sh
+# sets SMOKE_RELAYS to nothing until then).
+read -r -a RELAYS <<< "${SMOKE_RELAYS-relay-1 relay-2}"
+TARGETS=(gateway auth lobby game-server-1 game-server-2 ${RELAYS[@]+"${RELAYS[@]}"} assets ai marketplace notifier web)
 
 failed=0
 for t in "${TARGETS[@]}"; do
