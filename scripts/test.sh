@@ -30,7 +30,9 @@ run_one() {
     ci) echo "(no tests; workflows are checked by make lint s=ci)" ;;
     secrets) echo "(no tests; history is scanned by make lint s=secrets)" ;;
     observability) echo "(no tests; checked by make lint s=observability, and live by make alerts-check)" ;;
-    terraform) echo "(no tests; checked by make lint s=terraform, and live by make aws-check)" ;;
+    # The backup's logic (ADR 0016); the rest is checked by make lint s=terraform, make
+    # backup-check and, live, make aws-check.
+    terraform) python3 -m unittest discover -s scripts/aws -p 'test_*.py' ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm test) ;;
   esac
 }
