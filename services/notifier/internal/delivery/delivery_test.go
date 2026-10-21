@@ -21,8 +21,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/Bowenn/gap-project_private/libs/go/kafkatest"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/delivery"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/kafkatest"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/pgtest"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
 	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
