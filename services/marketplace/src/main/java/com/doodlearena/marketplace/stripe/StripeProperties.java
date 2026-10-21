@@ -20,9 +20,17 @@ public record StripeProperties(String secretKey, String webhookSecret, String ap
 		coinPacks = (coinPacks == null) ? List.of() : List.copyOf(coinPacks);
 	}
 
+	/**
+	 * Whether Stripe is set up. In AWS an SSM parameter can't be empty, so a key nobody has put
+	 * yet is the placeholder {@code unset} (infra/terraform/bootstrap/main.tf), which counts as
+	 * not set up: checkout answers 503 instead of calling Stripe with it.
+	 */
 	public boolean configured() {
-		return this.secretKey != null && !this.secretKey.isBlank();
+		return this.secretKey != null && !this.secretKey.isBlank() && !UNSET.equals(this.secretKey);
 	}
+
+	/** The placeholder of a third-party secret no human has put yet (docs/setup.md, "AWS"). */
+	public static final String UNSET = "unset";
 
 	/** A pack for sale: coins for a price in the currency's smallest unit (cents). */
 	public record CoinPack(String id, long coins, long priceCents, String currency) {
