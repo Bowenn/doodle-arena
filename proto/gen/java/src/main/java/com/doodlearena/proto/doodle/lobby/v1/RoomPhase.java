@@ -135,7 +135,7 @@ public enum RoomPhase
   }
   public static com.google.protobuf.Descriptors.EnumDescriptor
       getDescriptor() {
-    return com.doodlearena.proto.doodle.lobby.v1.RegistryProto.getDescriptor().getEnumType(0);
+    return com.doodlearena.proto.doodle.lobby.v1.RegistryProto.getDescriptor().getEnumType(1);
   }
 
   private static final RoomPhase[] VALUES = values();

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package doodle.lobby.v1;
 
-// RegistryService is served by the lobby and called by every game server.
+// RegistryService is served by the lobby and called by every game server and relay.
 service RegistryService {
   // Heartbeat reports that a game server is alive, every 2 seconds. A server whose heartbeat
   // stops for 6 seconds is treated as dead, and its rooms are allocated elsewhere.
@@ -26,8 +26,33 @@ message HeartbeatRequest {
   // quick-play players to a room with space.
   repeated RoomStatus rooms = 6;
   // host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-  // for example "game-server-1:9090". Internal only; the gateway never routes it.
+  // for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+  // relay, which takes no rooms.
   string control_address = 7;
+  // What the server does (ADR 0017). Unspecified is a game server, as before this field.
+  ServerRole role = 8;
+  // A relay's open viewer sockets, its load figure for watch placement.
+  uint32 viewers = 9;
+  // A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+  repeated WatchedRoom watched = 10;
+}
+
+// ServerRole tells game servers, which own rooms, from relays, which fan rooms out to viewers.
+enum ServerRole {
+  // Not reported: a game server.
+  SERVER_ROLE_UNSPECIFIED = 0;
+  // Owns rooms and runs their games.
+  SERVER_ROLE_GAME = 1;
+  // Reads rooms' event streams and sends them to viewers (ADR 0017). Never allocated rooms.
+  SERVER_ROLE_RELAY = 2;
+}
+
+// WatchedRoom is one room a relay streams, with how many viewers it has there.
+message WatchedRoom {
+  // The room's id.
+  string room_id = 1;
+  // Viewers connected to this relay for the room.
+  uint32 viewers = 2;
 }
 
 // RoomStatus is one room as its game server sees it, reported in every heartbeat.

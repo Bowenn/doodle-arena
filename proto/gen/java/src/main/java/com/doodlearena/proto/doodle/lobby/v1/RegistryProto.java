@@ -32,6 +32,11 @@ public final class RegistryProto extends com.google.protobuf.GeneratedFile {
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
       internal_static_doodle_lobby_v1_HeartbeatRequest_fieldAccessorTable;
   static final com.google.protobuf.Descriptors.Descriptor
+    internal_static_doodle_lobby_v1_WatchedRoom_descriptor;
+  static final 
+    com.google.protobuf.GeneratedMessage.FieldAccessorTable
+      internal_static_doodle_lobby_v1_WatchedRoom_fieldAccessorTable;
+  static final com.google.protobuf.Descriptors.Descriptor
     internal_static_doodle_lobby_v1_RoomStatus_descriptor;
   static final 
     com.google.protobuf.GeneratedMessage.FieldAccessorTable
@@ -51,28 +56,35 @@ public final class RegistryProto extends com.google.protobuf.GeneratedFile {
   static {
     java.lang.String[] descriptorData = {
       "\n\036doodle/lobby/v1/registry.proto\022\017doodle" +
-      ".lobby.v1\"\373\001\n\020HeartbeatRequest\022\033\n\tserver" +
+      ".lobby.v1\"\376\002\n\020HeartbeatRequest\022\033\n\tserver" +
       "_id\030\001 \001(\tR\010serverId\022\035\n\nws_address\030\002 \001(\tR" +
       "\twsAddress\022\031\n\010room_ids\030\003 \003(\tR\007roomIds\022\030\n" +
       "\007sockets\030\004 \001(\rR\007sockets\022\032\n\010draining\030\005 \001(" +
       "\010R\010draining\0221\n\005rooms\030\006 \003(\0132\033.doodle.lobb" +
       "y.v1.RoomStatusR\005rooms\022\'\n\017control_addres" +
-      "s\030\007 \001(\tR\016controlAddress\"\207\001\n\nRoomStatus\022\027" +
-      "\n\007room_id\030\001 \001(\tR\006roomId\022\030\n\007players\030\002 \001(\r" +
-      "R\007players\0220\n\005phase\030\003 \001(\0162\032.doodle.lobby." +
-      "v1.RoomPhaseR\005phase\022\024\n\005seats\030\004 \001(\rR\005seat" +
-      "s\"\023\n\021HeartbeatResponse*W\n\tRoomPhase\022\032\n\026R" +
-      "OOM_PHASE_UNSPECIFIED\020\000\022\026\n\022ROOM_PHASE_WA" +
-      "ITING\020\001\022\026\n\022ROOM_PHASE_PLAYING\020\0022e\n\017Regis" +
-      "tryService\022R\n\tHeartbeat\022!.doodle.lobby.v" +
-      "1.HeartbeatRequest\032\".doodle.lobby.v1.Hea" +
-      "rtbeatResponseB\340\001\n%com.doodlearena.proto" +
-      ".doodle.lobby.v1B\rRegistryProtoP\001ZJgithu" +
-      "b.com/Bowenn/gap-project_private/proto/g" +
-      "en/go/doodle/lobby/v1;lobbyv1\242\002\003DLX\252\002\017Do" +
-      "odle.Lobby.V1\312\002\017Doodle\\Lobby\\V1\342\002\033Doodle" +
-      "\\Lobby\\V1\\GPBMetadata\352\002\021Doodle::Lobby::V" +
-      "1b\006proto3"
+      "s\030\007 \001(\tR\016controlAddress\022/\n\004role\030\010 \001(\0162\033." +
+      "doodle.lobby.v1.ServerRoleR\004role\022\030\n\007view" +
+      "ers\030\t \001(\rR\007viewers\0226\n\007watched\030\n \003(\0132\034.do" +
+      "odle.lobby.v1.WatchedRoomR\007watched\"@\n\013Wa" +
+      "tchedRoom\022\027\n\007room_id\030\001 \001(\tR\006roomId\022\030\n\007vi" +
+      "ewers\030\002 \001(\rR\007viewers\"\207\001\n\nRoomStatus\022\027\n\007r" +
+      "oom_id\030\001 \001(\tR\006roomId\022\030\n\007players\030\002 \001(\rR\007p" +
+      "layers\0220\n\005phase\030\003 \001(\0162\032.doodle.lobby.v1." +
+      "RoomPhaseR\005phase\022\024\n\005seats\030\004 \001(\rR\005seats\"\023" +
+      "\n\021HeartbeatResponse*V\n\nServerRole\022\033\n\027SER" +
+      "VER_ROLE_UNSPECIFIED\020\000\022\024\n\020SERVER_ROLE_GA" +
+      "ME\020\001\022\025\n\021SERVER_ROLE_RELAY\020\002*W\n\tRoomPhase" +
+      "\022\032\n\026ROOM_PHASE_UNSPECIFIED\020\000\022\026\n\022ROOM_PHA" +
+      "SE_WAITING\020\001\022\026\n\022ROOM_PHASE_PLAYING\020\0022e\n\017" +
+      "RegistryService\022R\n\tHeartbeat\022!.doodle.lo" +
+      "bby.v1.HeartbeatRequest\032\".doodle.lobby.v" +
+      "1.HeartbeatResponseB\340\001\n%com.doodlearena." +
+      "proto.doodle.lobby.v1B\rRegistryProtoP\001ZJ" +
+      "github.com/Bowenn/gap-project_private/pr" +
+      "oto/gen/go/doodle/lobby/v1;lobbyv1\242\002\003DLX" +
+      "\252\002\017Doodle.Lobby.V1\312\002\017Doodle\\Lobby\\V1\342\002\033D" +
+      "oodle\\Lobby\\V1\\GPBMetadata\352\002\021Doodle::Lob" +
+      "by::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
@@ -83,15 +95,21 @@ public final class RegistryProto extends com.google.protobuf.GeneratedFile {
     internal_static_doodle_lobby_v1_HeartbeatRequest_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_doodle_lobby_v1_HeartbeatRequest_descriptor,
-        new java.lang.String[] { "ServerId", "WsAddress", "RoomIds", "Sockets", "Draining", "Rooms", "ControlAddress", });
-    internal_static_doodle_lobby_v1_RoomStatus_descriptor =
+        new java.lang.String[] { "ServerId", "WsAddress", "RoomIds", "Sockets", "Draining", "Rooms", "ControlAddress", "Role", "Viewers", "Watched", });
+    internal_static_doodle_lobby_v1_WatchedRoom_descriptor =
       getDescriptor().getMessageType(1);
+    internal_static_doodle_lobby_v1_WatchedRoom_fieldAccessorTable = new
+      com.google.protobuf.GeneratedMessage.FieldAccessorTable(
+        internal_static_doodle_lobby_v1_WatchedRoom_descriptor,
+        new java.lang.String[] { "RoomId", "Viewers", });
+    internal_static_doodle_lobby_v1_RoomStatus_descriptor =
+      getDescriptor().getMessageType(2);
     internal_static_doodle_lobby_v1_RoomStatus_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_doodle_lobby_v1_RoomStatus_descriptor,
         new java.lang.String[] { "RoomId", "Players", "Phase", "Seats", });
     internal_static_doodle_lobby_v1_HeartbeatResponse_descriptor =
-      getDescriptor().getMessageType(2);
+      getDescriptor().getMessageType(3);
     internal_static_doodle_lobby_v1_HeartbeatResponse_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessage.FieldAccessorTable(
         internal_static_doodle_lobby_v1_HeartbeatResponse_descriptor,

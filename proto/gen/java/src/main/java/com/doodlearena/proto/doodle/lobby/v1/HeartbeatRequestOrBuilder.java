@@ -167,7 +167,8 @@ public interface HeartbeatRequestOrBuilder extends
   /**
    * <pre>
    * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-   * for example "game-server-1:9090". Internal only; the gateway never routes it.
+   * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+   * relay, which takes no rooms.
    * </pre>
    *
    * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -177,7 +178,8 @@ public interface HeartbeatRequestOrBuilder extends
   /**
    * <pre>
    * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-   * for example "game-server-1:9090". Internal only; the gateway never routes it.
+   * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+   * relay, which takes no rooms.
    * </pre>
    *
    * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -185,4 +187,77 @@ public interface HeartbeatRequestOrBuilder extends
    */
   com.google.protobuf.ByteString
       getControlAddressBytes();
+
+  /**
+   * <pre>
+   * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+   * </pre>
+   *
+   * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+   * @return The enum numeric value on the wire for role.
+   */
+  int getRoleValue();
+  /**
+   * <pre>
+   * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+   * </pre>
+   *
+   * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+   * @return The role.
+   */
+  com.doodlearena.proto.doodle.lobby.v1.ServerRole getRole();
+
+  /**
+   * <pre>
+   * A relay's open viewer sockets, its load figure for watch placement.
+   * </pre>
+   *
+   * <code>uint32 viewers = 9 [json_name = "viewers"];</code>
+   * @return The viewers.
+   */
+  int getViewers();
+
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  java.util.List<com.doodlearena.proto.doodle.lobby.v1.WatchedRoom> 
+      getWatchedList();
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  com.doodlearena.proto.doodle.lobby.v1.WatchedRoom getWatched(int index);
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  int getWatchedCount();
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  java.util.List<? extends com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder> 
+      getWatchedOrBuilderList();
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder getWatchedOrBuilder(
+      int index);
 }

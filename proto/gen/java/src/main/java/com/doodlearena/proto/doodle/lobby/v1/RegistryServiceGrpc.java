@@ -4,7 +4,7 @@ import static io.grpc.MethodDescriptor.generateFullMethodName;
 
 /**
  * <pre>
- * RegistryService is served by the lobby and called by every game server.
+ * RegistryService is served by the lobby and called by every game server and relay.
  * </pre>
  */
 @io.grpc.stub.annotations.GrpcGenerated
@@ -107,7 +107,7 @@ public final class RegistryServiceGrpc {
 
   /**
    * <pre>
-   * RegistryService is served by the lobby and called by every game server.
+   * RegistryService is served by the lobby and called by every game server and relay.
    * </pre>
    */
   public interface AsyncService {
@@ -127,7 +127,7 @@ public final class RegistryServiceGrpc {
   /**
    * Base class for the server implementation of the service RegistryService.
    * <pre>
-   * RegistryService is served by the lobby and called by every game server.
+   * RegistryService is served by the lobby and called by every game server and relay.
    * </pre>
    */
   public static abstract class RegistryServiceImplBase
@@ -141,7 +141,7 @@ public final class RegistryServiceGrpc {
   /**
    * A stub to allow clients to do asynchronous rpc calls to service RegistryService.
    * <pre>
-   * RegistryService is served by the lobby and called by every game server.
+   * RegistryService is served by the lobby and called by every game server and relay.
    * </pre>
    */
   public static final class RegistryServiceStub
@@ -173,7 +173,7 @@ public final class RegistryServiceGrpc {
   /**
    * A stub to allow clients to do synchronous rpc calls to service RegistryService.
    * <pre>
-   * RegistryService is served by the lobby and called by every game server.
+   * RegistryService is served by the lobby and called by every game server and relay.
    * </pre>
    */
   public static final class RegistryServiceBlockingV2Stub
@@ -204,7 +204,7 @@ public final class RegistryServiceGrpc {
   /**
    * A stub to allow clients to do limited synchronous rpc calls to service RegistryService.
    * <pre>
-   * RegistryService is served by the lobby and called by every game server.
+   * RegistryService is served by the lobby and called by every game server and relay.
    * </pre>
    */
   public static final class RegistryServiceBlockingStub
@@ -235,7 +235,7 @@ public final class RegistryServiceGrpc {
   /**
    * A stub to allow clients to do ListenableFuture-style rpc calls to service RegistryService.
    * <pre>
-   * RegistryService is served by the lobby and called by every game server.
+   * RegistryService is served by the lobby and called by every game server and relay.
    * </pre>
    */
   public static final class RegistryServiceFutureStub

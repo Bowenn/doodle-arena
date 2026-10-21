@@ -26,7 +26,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// RegistryService is served by the lobby and called by every game server.
+// RegistryService is served by the lobby and called by every game server and relay.
 type RegistryServiceClient interface {
 	// Heartbeat reports that a game server is alive, every 2 seconds. A server whose heartbeat
 	// stops for 6 seconds is treated as dead, and its rooms are allocated elsewhere.
@@ -55,7 +55,7 @@ func (c *registryServiceClient) Heartbeat(ctx context.Context, in *HeartbeatRequ
 // All implementations must embed UnimplementedRegistryServiceServer
 // for forward compatibility.
 //
-// RegistryService is served by the lobby and called by every game server.
+// RegistryService is served by the lobby and called by every game server and relay.
 type RegistryServiceServer interface {
 	// Heartbeat reports that a game server is alive, every 2 seconds. A server whose heartbeat
 	// stops for 6 seconds is treated as dead, and its rooms are allocated elsewhere.
