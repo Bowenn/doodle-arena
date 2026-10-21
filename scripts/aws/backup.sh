@@ -99,7 +99,8 @@ echo "    4/6 dumping the databases on the data host"
 dump_start=$SECONDS
 output="$work/dump.out"
 dumped=0
-host_run 3600 "BACKUP_BUCKET=$bucket BACKUP_PREFIX=backups/$id bash /opt/doodle/backup/dump.sh" > "$output" || dumped=1
+# The host's CLI has no default region: its boot script passes --region to every call.
+host_run 3600 "AWS_DEFAULT_REGION=$AWS_REGION BACKUP_BUCKET=$bucket BACKUP_PREFIX=backups/$id bash /opt/doodle/backup/dump.sh" > "$output" || dumped=1
 # Even a failed dump prints what it finished, so the telemetry names the store it stopped on.
 if python3 "$ROOT/scripts/aws/backups.py" summary "$output" > "$summary.new" 2>/dev/null; then
   mv "$summary.new" "$summary"
