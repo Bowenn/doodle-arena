@@ -55,7 +55,7 @@ Why not A: Compose on EC2 gives the weakest deployment story, and ADR 0006 relie
 ## Consequences
 
 - **Per-session cost.** About $0.35–0.45 an hour while running (estimate, 2026-10-19); measured numbers go in the evidence log. A stack left running for a month would exceed the $35 budget many times over, so `make aws-down` after each session is the routine and the budget emails are the safety net.
-- **No AWS data survives a teardown.** Postgres, Kafka and the buckets start empty in every session; demos use drills and seeds.
+- **No AWS data survives a teardown.** Postgres, Kafka and the buckets start empty in every session; demos use drills and seeds. Amended by ADR 0016 (task 6.10): a teardown backs up the services' databases and the drawings bucket first, and the next session restores them.
 - **The services need small changes to run outside Compose:** signing keys from environment variables (Fargate injects secrets only as variables, and the Go images have no shell), S3 through the task's IAM role, a configurable gateway template, and a static production build of the web app.
 - **ADR 0006 holds:** every service has its own security group, so the lobby's and game servers' gRPC port 9090 is open only to each other.
 - **What to watch:** the data host's disk and memory (Kafka, Postgres and otel-lgtm share 8 GB), the NAT gateway's data charges, and the real client IP reaching the gateway's rate limits through the ALB.
