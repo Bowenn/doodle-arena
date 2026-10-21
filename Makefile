@@ -3,10 +3,10 @@
 
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | lighthouse | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | lighthouse | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
@@ -58,6 +58,13 @@ loadtest:
 
 loadtest-smoke:
 	@./scripts/loadtest.sh smoke
+
+# One live room and 5,000 viewers through the relays (task 6.1c, ADR 0017), about 15 minutes.
+loadtest-live:
+	@./scripts/loadtest.sh live
+
+loadtest-live-smoke:
+	@./scripts/loadtest.sh live-smoke
 
 # Lighthouse, mobile, 3 runs (task 5.4): the production web image locally, or
 # GATEWAY=https://icanfly.click for the AWS stack.
