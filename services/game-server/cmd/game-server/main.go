@@ -72,9 +72,9 @@ func loadConfig() config {
 	if err != nil || maxRooms < 1 {
 		maxRooms = 100
 	}
-	drainTimeout, err := time.ParseDuration(envOr("DRAIN_TIMEOUT", "45s"))
+	drainTimeout, err := time.ParseDuration(envOr("DRAIN_TIMEOUT", "40s"))
 	if err != nil || drainTimeout < 0 {
-		drainTimeout = 45 * time.Second
+		drainTimeout = 40 * time.Second
 	}
 	return config{
 		port:           envOr("PORT", "8080"),
@@ -266,12 +266,17 @@ func run(cfg config, logger *slog.Logger) error {
 		_ = srv.Close()
 		return fmt.Errorf("serve: %w", err)
 	case <-ctx.Done():
+	case <-ctrl.DrainRequested():
+		logger.Info("drain requested over gRPC")
 	}
+	// A second SIGINT or SIGTERM now stops the process at once instead of waiting for the drain.
+	stop()
 
-	// SIGTERM (a deploy, ECS stopping the task, docker stop) drains first (task 5.5): the
-	// server takes no new rooms and tells the lobby at once, and the lobby moves every room to
-	// another server, where it carries on from Redis; this server's copies stop with room_moved
-	// as they are fenced, and their players rejoin there. Until then everything keeps running.
+	// SIGTERM (a deploy, ECS stopping the task, docker stop) or the DrainServer RPC drains first
+	// (task 5.5): the server takes no new rooms and tells the lobby at once, and the lobby moves
+	// every room to another server, where it carries on from Redis; this server's copies stop
+	// with room_moved as they are fenced, and their players rejoin there. Until then everything
+	// keeps running.
 	drain(ctx, ctrl, sender, cfg.drainTimeout, logger)
 
 	// Then: stop heartbeats, stop accepting connections, close the rooms that are left (their

@@ -1,5 +1,7 @@
 # AWS resources in Grafana (observability.md, section 1): CloudWatch through the data host's
-# instance role, which may only read CloudWatch. Billing metrics live in us-east-1.
+# instance role. That role reads CloudWatch, the stack's config bucket and the data host's own
+# SSM secrets, and is denied every other parameter (infra/terraform/stack/iam.tf). Billing
+# metrics live in us-east-1.
 apiVersion: 1
 datasources:
   - name: CloudWatch

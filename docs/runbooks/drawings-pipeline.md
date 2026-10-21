@@ -23,3 +23,7 @@
 ## Afterwards
 
 Count the drawings that failed and why; if a game-server bug lost stroke logs, add a test for it.
+
+## In AWS
+
+The same checks with the AWS commands in [Runbooks in AWS](README.md): logs in Grafana (`make aws-grafana`) or CloudWatch Logs, restarts with `aws ecs update-service --force-new-deployment`, and the stores through a Session Manager shell on the data host.

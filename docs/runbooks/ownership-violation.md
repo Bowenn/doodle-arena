@@ -29,3 +29,7 @@
 ## Afterwards
 
 Add a test for the path that broke the invariant, and note the drawings and owners involved in the evidence log.
+
+## In AWS
+
+The same checks with the AWS commands in [Runbooks in AWS](README.md): logs in Grafana (`make aws-grafana`) or CloudWatch Logs, restarts with `aws ecs update-service --force-new-deployment`, and the stores through a Session Manager shell on the data host.

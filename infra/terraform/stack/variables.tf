@@ -25,6 +25,12 @@ variable "image_tag" {
   type        = string
 }
 
+variable "held_game_servers" {
+  description = "Game servers held at their current image tag during a redeploy of a running stack (scripts/aws/up.sh): name to tag. The other services go first, then one game server at a time, so the two never stop together and each drains into the other. Empty: every service gets image_tag."
+  type        = map(string)
+  default     = {}
+}
+
 variable "running" {
   description = "false: everything exists but no service runs (the migrations run first, scripts/aws/up.sh)."
   type        = bool

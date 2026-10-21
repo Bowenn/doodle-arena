@@ -2,6 +2,9 @@ import socket
 
 from pydantic_settings import BaseSettings
 
+# The placeholder of a third-party secret no human has put yet (docs/setup.md, "AWS").
+UNSET = "unset"
+
 
 class Settings(BaseSettings):
     """Configuration read from environment variables (for example SERVICE_VERSION)."""
@@ -42,7 +45,9 @@ class Settings(BaseSettings):
 
     @property
     def google_configured(self) -> bool:
-        return bool(self.google_client_id and self.google_client_secret)
+        # In AWS an SSM parameter can't be empty, so a value nobody has put yet is the
+        # placeholder "unset" (infra/terraform/bootstrap/main.tf): that counts as not set up.
+        return all(v and v != UNSET for v in (self.google_client_id, self.google_client_secret))
 
     def database_url(self) -> str:
         return (

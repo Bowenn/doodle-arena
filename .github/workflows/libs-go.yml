@@ -1,4 +1,4 @@
-# The shared Go packages (libs/go: authn, logging, kafkaauth, redistest): lint and test. The
+# The shared Go packages (libs/go: authn, logging, kafkaauth, kafkatest, redistest, tcretry): lint and test. The
 # services that use them run their own workflows on a change here too.
 name: libs-go
 

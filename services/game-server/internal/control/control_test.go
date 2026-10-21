@@ -468,8 +468,11 @@ func TestStartingRoomsCountTowardMaxRooms(t *testing.T) {
 func TestWaitingForAStartingRoomEndsWithTheDeadline(t *testing.T) {
 	s := newServer(t, 10)
 	claimed, release := gateRoom(s, "r1")
-	defer close(release)
-	go func() { _, _ = s.AllocateRoom(t.Context(), req("r1")) }()
+	// The first allocation's goroutine gets its context here and is waited for before the test
+	// returns: calling t.Context() from it after the test ended raced with the test's cleanup.
+	first, done := t.Context(), make(chan struct{})
+	go func() { defer close(done); _, _ = s.AllocateRoom(first, req("r1")) }()
+	defer func() { close(release); <-done }()
 	<-claimed
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
@@ -583,5 +586,29 @@ func TestDrainWaitEndsWithItsDeadline(t *testing.T) {
 	}
 	if _, draining := s.Status(); !draining {
 		t.Fatal("status doesn't report draining")
+	}
+}
+
+func TestDrainServerRPCAsksMainToShutDown(t *testing.T) {
+	// main waits on DrainRequested as on SIGTERM, so an RPC drain also tells the lobby at once
+	// and exits once the rooms have moved (control.proto: "shuts down when none are left").
+	s := newServer(t, 10)
+	select {
+	case <-s.DrainRequested():
+		t.Fatal("drain requested before anyone asked")
+	default:
+	}
+	if _, err := s.DrainServer(t.Context(), &gamev1.DrainServerRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.DrainRequested():
+	case <-time.After(time.Second):
+		t.Fatal("the DrainServer RPC didn't signal a drain")
+	}
+	// Draining again, by SIGTERM or a second RPC, is harmless: the channel is closed only once.
+	_ = s.Drain(t.Context())
+	if _, err := s.DrainServer(t.Context(), &gamev1.DrainServerRequest{}); err != nil {
+		t.Fatal(err)
 	}
 }

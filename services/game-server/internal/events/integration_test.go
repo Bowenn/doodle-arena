@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Bowenn/gap-project_private/libs/go/kafkatest"
 	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/kafkatest"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/s3test"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -44,7 +45,7 @@ func TestPublishThroughKafkaAndSeaweedFS(t *testing.T) {
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() { otel.SetTracerProvider(prevTP); otel.SetTextMapPropagator(prevProp) })
 
-	store, err := NewS3Client(t.Context(), S3Config{Endpoint: kafkatest.SeaweedFS(t, "testkey", "testsecret"), Region: "us-east-1",
+	store, err := NewS3Client(t.Context(), S3Config{Endpoint: s3test.SeaweedFS(t, "testkey", "testsecret"), Region: "us-east-1",
 		PathStyle: true, AccessKey: "testkey", SecretKey: "testsecret"})
 	if err != nil {
 		t.Fatal(err)

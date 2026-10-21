@@ -22,3 +22,7 @@
 ## Afterwards
 
 If the job was down for long, look at the invariant gauges once it reports again, and note the gap in the evidence log.
+
+## In AWS
+
+The same checks with the AWS commands in [Runbooks in AWS](README.md): logs in Grafana (`make aws-grafana`) or CloudWatch Logs, restarts with `aws ecs update-service --force-new-deployment`, and the stores through a Session Manager shell on the data host.

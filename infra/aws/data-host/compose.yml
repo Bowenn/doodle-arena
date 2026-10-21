@@ -177,8 +177,9 @@ services:
 
   # On the host network, the only container that is: Grafana's CloudWatch data source needs the
   # instance role, and the instance's IMDS hop limit of 1 keeps it from every bridged container.
-  # Its ports are the host's: the data host's security group admits only OTLP (4317, 4318) from
-  # the services, and Grafana listens on 127.0.0.1 for the SSM port forward.
+  # Its ports are the host's: the data host's security group admits only OTLP from the services
+  # (4318) and the gateway (4317, and 4319 for the browser's telemetry), and Grafana listens on
+  # 127.0.0.1 for the SSM port forward.
   otel-lgtm:
     image: grafana/otel-lgtm:0.36.0
     restart: unless-stopped

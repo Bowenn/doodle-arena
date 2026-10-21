@@ -54,6 +54,7 @@ type Server struct {
 	rooms    map[string]*entry
 	starting map[string]chan struct{} // ids an AllocateRoom is starting; closed when it is done
 	draining bool
+	drained  chan struct{} // closed by the first Drain: main shuts down after an RPC drain too
 
 	afterReserve func(roomID string) // tests only: runs once a call has claimed the room id
 }
@@ -100,7 +101,7 @@ func New(ctx context.Context, cfg Config) *Server {
 		cfg.Clock = room.RealClock
 	}
 	s := &Server{id: cfg.ID, wsAddress: cfg.WSAddress, maxRooms: cfg.MaxRooms, clock: cfg.Clock,
-		metrics: cfg.Metrics, events: cfg.Events, store: cfg.Store, log: cfg.Log, ctx: ctx, rooms: map[string]*entry{}, starting: map[string]chan struct{}{},
+		metrics: cfg.Metrics, events: cfg.Events, store: cfg.Store, log: cfg.Log, ctx: ctx, rooms: map[string]*entry{}, starting: map[string]chan struct{}{}, drained: make(chan struct{}),
 		requeuer: cfg.Outbox, scanEvery: cmp.Or(cfg.OutboxScan, OutboxScanEvery), staleAge: cmp.Or(cfg.StaleAfter, OutboxStaleAfter)}
 	if s.store != nil {
 		s.wg.Go(s.keepLeases)
@@ -401,10 +402,16 @@ func (s *Server) Drain(ctx context.Context) int {
 	n := len(s.rooms) + len(s.starting)
 	if !s.draining {
 		s.log.InfoContext(ctx, "drain started", "server_id", s.id, "rooms", n)
+		s.draining = true
+		close(s.drained)
 	}
-	s.draining = true
 	return n
 }
+
+// DrainRequested is closed once the server drains, whether SIGTERM or the DrainServer RPC asked.
+// main waits for it as for a signal, so a drained server tells the lobby at once and exits when
+// its rooms have moved (the proto's promise); a drain can't be undone.
+func (s *Server) DrainRequested() <-chan struct{} { return s.drained }
 
 // Rooms is how many rooms this server runs or is starting.
 func (s *Server) Rooms() int {

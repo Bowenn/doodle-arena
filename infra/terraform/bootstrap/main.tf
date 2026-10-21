@@ -101,7 +101,8 @@ resource "aws_ecr_lifecycle_policy" "image" {
 
 # Created empty; a human puts each value (docs/setup.md, "AWS"):
 #   aws ssm put-parameter --profile doodle-arena --overwrite --type SecureString --name <name> --value ...
-# Terraform never reads the real values back into its state (ignore_changes).
+# Terraform never reads the real values back into its state: this root ignores changes to them,
+# and the stack root reads them without decryption, for their ARNs only.
 resource "aws_ssm_parameter" "third_party" {
   for_each = {
     "google/client-id"          = "Google OAuth client id (auth)"

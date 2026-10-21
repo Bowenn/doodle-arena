@@ -1,11 +1,10 @@
-// Package kafkatest starts a real single-node Kafka (KRaft) and SeaweedFS for integration
-// tests, with the same official images as infra/docker-compose.yml.
+// Package kafkatest starts a real single-node Kafka (KRaft) for integration tests, with the
+// same official image as infra/docker-compose.yml. The game server and the notifier share it.
 package kafkatest
 
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,11 +15,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-// Images match infra/docker-compose.yml.
-const (
-	KafkaImage     = "apache/kafka:4.2.2"
-	SeaweedFSImage = "chrislusf/seaweedfs:4.48"
-)
+// KafkaImage matches infra/docker-compose.yml.
+const KafkaImage = "apache/kafka:4.2.2"
 
 const advertisedFile = "/tmp/advertised-listeners"
 
@@ -97,33 +93,4 @@ func CreateTopics(t *testing.T, addr string, topics ...string) {
 	if err != nil {
 		t.Fatalf("create topics: %v", err)
 	}
-}
-
-// SeaweedFS starts SeaweedFS's S3 gateway with one identity and returns its endpoint.
-func SeaweedFS(t *testing.T, accessKey, secretKey string) string {
-	t.Helper()
-	ctx := t.Context()
-	cfg := fmt.Sprintf(`{"identities":[{"name":"test","credentials":[{"accessKey":%q,"secretKey":%q}],`+
-		`"actions":["Admin","Read","List","Tagging","Write"]}]}`, accessKey, secretKey)
-	c, err := tcretry.Run("seaweedfs", func() (*testcontainers.DockerContainer, error) {
-		return testcontainers.Run(ctx, SeaweedFSImage,
-			testcontainers.WithExposedPorts("8333/tcp"),
-			testcontainers.WithFiles(testcontainers.ContainerFile{
-				Reader: strings.NewReader(cfg), ContainerFilePath: "/etc/s3.json", FileMode: 0o644,
-			}),
-			testcontainers.WithEntrypoint("weed"),
-			testcontainers.WithCmd("server", "-dir=/data", "-ip.bind=0.0.0.0", "-volume.max=0",
-				"-s3", "-s3.port=8333", "-s3.config=/etc/s3.json"),
-			testcontainers.WithWaitStrategy(wait.ForListeningPort("8333/tcp").WithStartupTimeout(time.Minute)),
-		)
-	})
-	testcontainers.CleanupContainer(t, c)
-	if err != nil {
-		t.Fatalf("start seaweedfs: %v", err)
-	}
-	endpoint, err := c.PortEndpoint(ctx, "8333/tcp", "http")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return endpoint
 }

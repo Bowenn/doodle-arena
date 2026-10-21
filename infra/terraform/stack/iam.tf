@@ -108,6 +108,11 @@ resource "aws_iam_role_policy_attachment" "data_host_cloudwatch" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess"
 }
 
+locals {
+  data_host_secret_arns = [for name in local.data_host_secrets :
+  "arn:aws:ssm:${var.region}:${local.account_id}:parameter/doodle-arena/${name}"]
+}
+
 resource "aws_iam_role_policy" "data_host" {
   name = "data-host"
   role = aws_iam_role.data_host.id
@@ -115,10 +120,18 @@ resource "aws_iam_role_policy" "data_host" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["ssm:GetParameter"]
-        Resource = [for name in local.data_host_secrets :
-        "arn:aws:ssm:${var.region}:${local.account_id}:parameter/doodle-arena/${name}"]
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = local.data_host_secret_arns
+      },
+      # AmazonSSMManagedInstanceCore (Session Manager) allows ssm:GetParameter(s) on every
+      # parameter, which would let otel-lgtm, the one container that can use this role and
+      # takes public browser telemetry, read the signing keys and the Stripe key. An explicit
+      # Deny outranks that Allow, so the host reads only its own secrets (Stage 5 review).
+      {
+        Effect      = "Deny"
+        Action      = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath", "ssm:GetParameterHistory"]
+        NotResource = local.data_host_secret_arns
       },
       {
         Effect   = "Allow"

@@ -92,7 +92,7 @@ marketplace   Write    --topic market.listings.v1 --topic market.sales.v1 --topi
 notifier      Read     --topic market.sales.v1 --topic market.wallet.v1 --topic auth.users.v1 --group notifier --group notifier-auth
 notifier      Write    --topic notifier.dlq.v1
 auth          Write    --topic auth.users.v1
-kafka-metrics Describe --topic * --group * --cluster
+kafka-metrics Describe --topic * --group *
 dev-tools     Read     --topic *
 dev-tools     Read     --group dev-tools- --resource-pattern-type prefixed
 dev-tools     Write    --topic game.rounds.v1 --topic game.matches.v1
@@ -146,6 +146,12 @@ while read -r principal operation resources; do
   pids+=($!)
 done <<< "$GRANTS"
 for pid in "${pids[@]}"; do wait "$pid"; done
+
+# Grants removed from the table since a broker's volume was formatted. kafka-metrics needs
+# Describe on topics and groups only (its scrapers are consumers and topics); Describe on the
+# cluster would also let it read the whole ACL table (Stage 5 review).
+"$BIN/kafka-acls.sh" "${ADMIN[@]}" --remove --force --allow-principal User:kafka-metrics \
+  --operation Describe --cluster >/dev/null
 
 echo "topics:"
 "$BIN/kafka-topics.sh" "${ADMIN[@]}" --list

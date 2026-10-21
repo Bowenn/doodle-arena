@@ -3,12 +3,24 @@
 # bundle from S3, .env from SSM, then the containers. The log is in /var/log/cloud-init-output.log.
 set -euo pipefail
 
-dnf install -y docker unzip
+# User data runs once: a step that failed on a network blip would leave the host empty until
+# the instance is replaced, so every step that reaches the network is retried.
+retry() {
+  local n
+  for n in 1 2 3 4 5; do
+    "$@" && return 0
+    echo "failed (attempt $n), retrying: $1 $2" >&2
+    sleep $((n * 5))
+  done
+  return 1
+}
+
+retry dnf install -y docker unzip
 systemctl enable --now docker
 
 # Compose isn't packaged for Amazon Linux 2023: the release binary, checked against its digest.
 mkdir -p /usr/local/lib/docker/cli-plugins
-curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+retry curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
   https://github.com/docker/compose/releases/download/v5.6.0/docker-compose-linux-aarch64
 echo "733ec76717ceb59052a9609b9dadfb523b2df8eab57a54212872d10a58078ea2  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum -c
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
@@ -19,26 +31,30 @@ cd /opt/doodle
 # The OpenTelemetry agent for the Kafka broker (infra/kafka/Dockerfile has the same jar locally),
 # checked against Maven Central's digest.
 mkdir -p kafka-otel
-curl -fsSL -o kafka-otel/opentelemetry-javaagent.jar \
+retry curl -fsSL -o kafka-otel/opentelemetry-javaagent.jar \
   https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.32.0/opentelemetry-javaagent-2.32.0.jar
 echo "f787eb6c7f3d18e69a431e108a15278d25ee37f83d68b678f621e063f3988f82  kafka-otel/opentelemetry-javaagent.jar" | sha256sum -c
 chmod 644 kafka-otel/opentelemetry-javaagent.jar
-aws s3 cp --region ${region} "s3://${bundle_bucket}/${bundle_key}" bundle.zip
+retry aws s3 cp --region ${region} "s3://${bundle_bucket}/${bundle_key}" bundle.zip
 unzip -o -q bundle.zip
 chmod +x kafka/*.sh redis/*.sh postgres/init/*.sh
 
 # Secrets never touch the user data or a log: read with the instance role, written mode 600.
+# Each is read into a variable first: inside echo "X=$(...)" a failed read would go unnoticed
+# and write an empty value, which compose then refuses.
+param() { retry aws ssm get-parameter --region ${region} --with-decryption --name "/doodle-arena/$1" --query Parameter.Value --output text; }
 umask 077
 {
   echo "DATA_HOST_NAME=${data_host_name}"
 %{ for var, name in env ~}
-  echo "${var}=$(aws ssm get-parameter --region ${region} --with-decryption --name /doodle-arena/${name} --query Parameter.Value --output text)"
+  value="$(param ${name})"
+  echo "${var}=$value"
 %{ endfor ~}
 } > .env
 # The broker's TLS key and certificate (kafka.tf), for the Kafka container's user (uid 1000).
 mkdir -p kafka-tls
-aws ssm get-parameter --region ${region} --with-decryption --name /doodle-arena/stack/kafka-server-pem --query Parameter.Value --output text > kafka-tls/server.pem
-aws ssm get-parameter --region ${region} --name /doodle-arena/stack/kafka-ca-pem --query Parameter.Value --output text > kafka-tls/ca.pem
+param stack/kafka-server-pem > kafka-tls/server.pem
+param stack/kafka-ca-pem > kafka-tls/ca.pem
 chown 1000:1000 kafka-tls/server.pem
 chmod 644 kafka-tls/ca.pem
 chmod 755 kafka-tls

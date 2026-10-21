@@ -1,17 +1,47 @@
 #!/usr/bin/env bash
 # Starts a session in AWS (ADR 0003): creates the stack with every service at 0, runs the
 # database migrations as one-off tasks, then starts the services and waits until they are stable.
+# On a stack that is already running it redeploys instead: the other services, then one game
+# server at a time.
 #   DOMAIN=example.com [ALLOWED_CIDRS=a.b.c.d/32,...] [IMAGE_TAG=<sha>] scripts/aws/up.sh
-# It costs money from here until scripts/aws/down.sh (about $0.35-0.45 an hour; docs/roadmap.md
-# has the measured number).
+# It costs money from here until scripts/aws/down.sh (about $0.30-0.80 an hour, measured in
+# docs/performance.md).
 source "$(dirname "$0")/common.sh"
 require_aws
 stack_vars
 init_stack
 
 start=$SECONDS
-echo "==> 1/3 the stack, no service running (open to: $ALLOWED_CIDRS, images: $IMAGE_TAG)"
-terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=false
+
+# On a stack that is already running (a new IMAGE_TAG mid-session, or a rerun after a failure),
+# step 1 must not park the services: that would be an outage. A redeploy instead replaces
+# everything but the game servers first, then game-server-1 (which drains into game-server-2),
+# then game-server-2 (which drains into the new game-server-1): two game servers stopping
+# together couldn't take each other's rooms, and a gateway or lobby restarting during a drain
+# makes every player reconnect at once (measured in AWS, PR #62).
+running_tag_of() {
+  local definition image
+  [[ "$(aws ecs describe-services --cluster doodle-arena --services "$1" \
+    --query 'services[?status==`ACTIVE`].runningCount | [0]' --output text 2>/dev/null)" =~ ^[1-9] ]] || return 0
+  definition="$(aws ecs describe-services --cluster doodle-arena --services "$1" \
+    --query 'services[0].taskDefinition' --output text)"
+  image="$(aws ecs describe-task-definition --task-definition "$definition" \
+    --query 'taskDefinition.containerDefinitions[0].image' --output text)"
+  echo "${image##*:}"
+}
+held() { # held <server>=<tag>...: the -var that keeps those game servers at their tag
+  python3 -c 'import json, sys; print("held_game_servers=" + json.dumps(dict(a.split("=", 1) for a in sys.argv[1:])))' "$@"
+}
+running_tag="$(running_tag_of game-server-2)"
+running_tag_1="$(running_tag_of game-server-1)"
+
+if [[ -n "$running_tag" ]]; then
+  echo "==> 1/3 the stack is running (game-server-2 on $running_tag): the migrations' task definitions for $IMAGE_TAG"
+  terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true -target=aws_ecs_task_definition.migrate
+else
+  echo "==> 1/3 the stack, no service running (open to: $ALLOWED_CIDRS, images: $IMAGE_TAG)"
+  terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=false
+fi
 
 cluster="$(tf_output cluster)"
 subnets="$(terraform -chdir="$TF/stack" output -json private_subnets | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)))')"
@@ -22,16 +52,21 @@ migrate() {
   local name="$1" sg arn code
   sg="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])[sys.argv[2]])' "$sgs" "$name")"
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    # run-task answers "None" when ECS can't place the task, and any call can hit a network
+    # error: both are a failed attempt, not the end of the script.
     arn="$(aws ecs run-task --cluster "$cluster" --task-definition "doodle-$name" --launch-type FARGATE \
       --network-configuration "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$sg],assignPublicIp=DISABLED}" \
-      --query 'tasks[0].taskArn' --output text)"
-    aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$arn"
-    code="$(aws ecs describe-tasks --cluster "$cluster" --tasks "$arn" --query 'tasks[0].containers[0].exitCode' --output text)"
+      --query 'tasks[0].taskArn' --output text)" || arn=""
+    code=""
+    if [[ -n "$arn" && "$arn" != None ]] && aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$arn"; then
+      code="$(aws ecs describe-tasks --cluster "$cluster" --tasks "$arn" \
+        --query 'tasks[0].containers[0].exitCode' --output text)" || code=""
+    fi
     if [[ "$code" == 0 ]]; then
       echo "    $name done"
       return
     fi
-    echo "    $name exited $code (attempt $attempt; the data host may still be starting), retrying in 20 s"
+    echo "    $name: ${code:+exited $code}${code:-not run} (attempt $attempt; the data host may still be starting), retrying in 20 s"
     sleep 20
   done
   echo "$name failed; its logs are in CloudWatch Logs, /doodle-arena/ecs, stream prefix $name" >&2
@@ -42,6 +77,20 @@ migrate auth-migrate
 migrate assets-migrate
 
 echo "==> 3/3 the services"
+if [[ -n "$running_tag" && -n "$running_tag_1" && ( "$running_tag" != "$IMAGE_TAG" || "$running_tag_1" != "$IMAGE_TAG" ) ]]; then
+  echo "    everything but the game servers first"
+  terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true \
+    -var "$(held game-server-1="$running_tag_1" game-server-2="$running_tag")" -auto-approve
+  others=()
+  while IFS= read -r s; do [[ "$s" == game-server-* ]] || others+=("$s"); done < <(terraform -chdir="$TF/stack" output -json services | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)))')
+  aws ecs wait services-stable --cluster "$cluster" --services "${others[@]:0:10}"
+  ((${#others[@]} > 10)) && aws ecs wait services-stable --cluster "$cluster" --services "${others[@]:10}"
+  echo "    then game-server-1, which drains into game-server-2"
+  terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true \
+    -var "$(held game-server-2="$running_tag")" -auto-approve
+  aws ecs wait services-stable --cluster "$cluster" --services game-server-1
+  echo "    then game-server-2, which drains into the new game-server-1"
+fi
 terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true -auto-approve
 # services-stable takes at most 10 services per call.
 services=()

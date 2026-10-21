@@ -110,7 +110,7 @@ The [design doc](docs/design-doc.md) explains every choice; the [ADRs](docs/adr/
 | What | Number | Where |
 |---|---|---|
 | A server stopped in AWS under an 80-room load | players disconnected for 0.5 to 2.0 s with the drain, against 16 to 17.5 s before it (41 rooms moved within 6.8 s) | [performance](docs/performance.md#2-failover-under-load) |
-| A server killed, local | players disconnected for 5 to 8 s (the 6-second detection, then the move) | [performance](docs/performance.md#2-failover-under-load) |
+| A server killed, local | players back in 8.1 to 8.3 s (the 6-second detection, then the move); 12.9 s with the servers capped at 0.25 CPU | [performance](docs/performance.md#2-failover-under-load) |
 | Stroke fan-out in AWS, 10 rooms | p95 24 ms; a 0.25-vCPU game server holds about 20 to 40 rooms | [performance](docs/performance.md#1-the-game-under-load-task-53) |
 | Lighthouse in AWS (mobile) | performance 1.00, LCP 1.2 s, CLS 0 | [performance](docs/performance.md#3-the-web-app-task-54) |
 | A cold AWS stack | about 9 minutes up, 5 down | [performance](docs/performance.md#4-aws-sessions) |
@@ -154,7 +154,7 @@ This one-time step creates the state bucket, ECR and the SSM parameters ([docs/s
 make aws-bootstrap
 ```
 
-Then, for each session (it costs money from up to down, about $0.35 to 0.45 an hour):
+Then, for each session (it costs money from up to down, about $0.30 to $0.80 an hour, measured):
 
 ```bash
 make aws-push
@@ -207,7 +207,7 @@ CLAUDE.md, the project's working notes for humans and its coding agent, lists ev
 
 ```text
 services/   gateway, auth, lobby, game-server, assets, marketplace, notifier, ai
-libs/go/    Go packages the Go services share: authn, logging, kafkaauth, redistest
+libs/go/    Go packages the Go services share: authn, logging, kafkaauth, and the test helpers kafkatest, redistest, tcretry
 proto/      gRPC services and Kafka event schemas; generated code in proto/gen/
 web/        React + TypeScript web app
 infra/      docker-compose.yml, store setup (Kafka, Redis, SeaweedFS, Postgres), observability

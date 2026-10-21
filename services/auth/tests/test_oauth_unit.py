@@ -1,6 +1,7 @@
 import pytest
 
 from app.oauth import LoginState, StateError, code_challenge, safe_return_to
+from app.settings import Settings
 
 SECRET = "s" * 40
 
@@ -61,3 +62,21 @@ def test_state_cookie_rejects_another_secret_and_old_cookies() -> None:
 )
 def test_return_to_only_allows_local_paths(value: str | None, expected: str | None) -> None:
     assert safe_return_to(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("client_id", "client_secret", "configured"),
+    [
+        ("id", "secret", True),
+        ("", "secret", False),
+        ("id", "", False),
+        ("unset", "unset", False),
+        ("id", "unset", False),
+    ],
+)
+def test_google_counts_as_set_up_only_with_real_values(
+    client_id: str, client_secret: str, configured: bool
+) -> None:
+    # In AWS an SSM parameter can't be empty: one nobody has put yet holds "unset".
+    settings = Settings(google_client_id=client_id, google_client_secret=client_secret)
+    assert settings.google_configured is configured

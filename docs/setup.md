@@ -83,12 +83,14 @@ Set up once (2026-10-19):
 - **Third-party secrets**, put by a human, never pasted into a chat or a file:
 
   ```bash
-  aws ssm put-parameter --profile doodle-arena --overwrite --type SecureString --name /doodle-arena/google/client-id --value '...'
+  read -rs "VALUE?Paste the value: " && aws ssm put-parameter --profile doodle-arena --overwrite --type SecureString --name /doodle-arena/google/client-id --value "$VALUE"; unset VALUE
   ```
 
-  for `/doodle-arena/google/client-id`, `/doodle-arena/google/client-secret`, `/doodle-arena/stripe/secret-key`, `/doodle-arena/stripe/webhook-secret` and `/doodle-arena/discord/alert-webhook-url`. For Google, add `https://icanfly.click/api/auth/google/callback` as an authorized redirect URI and `https://icanfly.click` as a JavaScript origin of the OAuth client. For Stripe (test mode), add a webhook endpoint `https://icanfly.click/api/market/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`, and put its signing secret. Tasks read these when they start: after a change, redeploy the service (`aws ecs update-service --cluster doodle-arena --service auth --force-new-deployment`; otel-lgtm reads the Discord URL when the data host boots).
+  (zsh; in bash, `read -rsp "Paste the value: " VALUE`). Reading the value first keeps it out of your shell history.
 
-Each session (costs money from `aws-up` to `aws-down`; docs/roadmap.md has the measured cost per hour):
+  for `/doodle-arena/google/client-id`, `/doodle-arena/google/client-secret`, `/doodle-arena/stripe/secret-key`, `/doodle-arena/stripe/webhook-secret` and `/doodle-arena/discord/alert-webhook-url`. For Google, add `https://icanfly.click/api/auth/google/callback` as an authorized redirect URI and `https://icanfly.click` as a JavaScript origin of the OAuth client. For Stripe (test mode), add an event destination in the account (or sandbox) the secret key belongs to: a webhook endpoint `https://icanfly.click/api/market/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`, with payload style **Snapshot** (a thin event has no session, so nothing would be credited), and put its signing secret. The destination and its secret outlive sessions. A parameter nobody has put yet holds the placeholder `unset`, which auth and the marketplace treat as not configured (Google sign-in and coin packs answer 503). Tasks read these when they start: after a change, redeploy the service (`aws ecs update-service --cluster doodle-arena --service auth --force-new-deployment`; otel-lgtm reads the Discord URL when the data host boots).
+
+Each session (costs money from `aws-up` to `aws-down`; docs/performance.md has the measured cost per hour):
 
 ```bash
 make aws-push
