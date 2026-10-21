@@ -12,7 +12,8 @@ init_stack
 # The first destroy shows the plan and asks; a retry destroys the same stack, so it doesn't.
 approve=()
 for attempt in 1 2 3; do
-  if terraform -chdir="$TF/stack" destroy "${TF_STACK_VARS[@]}" "${approve[@]}"; then
+  # ${approve[@]+...}: an empty array is "unbound" under set -u in macOS's bash 3.2.
+  if terraform -chdir="$TF/stack" destroy "${TF_STACK_VARS[@]}" ${approve[@]+"${approve[@]}"}; then
     break
   fi
   if ((attempt == 3)); then
