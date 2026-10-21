@@ -45,6 +45,7 @@ Images are pinned to exact tags in `infra/docker-compose.yml`. Versions were che
 | Object storage | `chrislusf/seaweedfs:4.48` | S3 |
 | Telemetry | `grafana/otel-lgtm:0.36.0` | See ADR 0003 |
 | Kafka lag collector | `otel/opentelemetry-collector-contrib:0.162.0` (the collector version inside otel-lgtm 0.36.0) | The same container, or the collector of the AWS telemetry setup (ADR 0003) |
+| Load generator | `grafana/k6:2.3.0` for the live-room test, inside the stack's network (`scripts/loadtest.sh live`); the same k6 version CI installs with `setup-k6` | k6 on a machine outside AWS |
 | Gateway | `nginx:1.30.6-otel` (the variant with the OpenTelemetry and njs modules) | Container behind a load balancer |
 | Service build images | `golang:1.27.2-trixie`, `eclipse-temurin:25.0.4.1_1-jdk`, `python:3.14.8-slim-trixie`, `node:24.22.0-trixie-slim` (the web app) | Same images in CI |
 | Service runtime images | Go: `gcr.io/distroless/static-debian13:nonroot`, pinned by digest (distroless has no version tags); Java: `eclipse-temurin:25.0.4.1_1-jre`; Python: the build image | Same images on ECS or EC2 |

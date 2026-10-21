@@ -160,6 +160,9 @@ Two more sources besides the table: the Go services' runtime metrics (`go_gorout
 | `k6_room_errors`, `k6_reconnects` | Counter | A room that failed (tagged `step`); a socket the server closed that the player then resumed, as the web app does (tagged with the close `code`: 4010 room moved, 1001 going away, 1006 dropped), expected during a failover or drain |
 | `k6_resume` | Histogram (ms) | A socket closed until the player has `welcome` or `resumed` again: what a failover or drain costs a player under load |
 | `k6_rounds_completed`, `k6_matches_completed` | Counter | Rounds and matches the rooms finished |
+| `k6_viewer_fanout` | Histogram (ms) | The live-room test (`loadtest/live.js`, task 6.1c): a drawer's stroke batch until a viewer has it, through the owner and a relay. Sampled, one stroke batch in ten per viewer socket, so k6 isn't the bottleneck. The send time rides in the `stroke_id`, as for `k6_stroke_fanout` |
+| `k6_viewer_welcome` | Histogram (ms) | A viewer's connect until its `welcome` |
+| `k6_viewer_gaps`, `k6_viewer_drops`, `k6_viewer_errors`, `k6_viewer_joins`, `k6_viewers_open` | Counter, Gauge | Events missing or out of order on a viewer socket (must be 0); sockets the server closed (tagged `code`; each resumes with its last seq); refused tickets and the like (tagged `step`); viewers that got their first welcome, and how many are open in each VU |
 
 k6's built-ins (`k6_vus`, `k6_http_req_duration`, `k6_ws_msgs_sent` and the like) come along. A load test's virtual users are rooms, never metric attributes.
 

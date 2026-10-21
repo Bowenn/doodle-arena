@@ -59,6 +59,24 @@ if [[ "$script" == loadtest/live.js ]]; then
 else
   echo "==> k6 $profile: $rooms rooms at most, against $GATEWAY"
 fi
+# Locally, the live test's k6 runs inside the stack's network (task 6.1c). From the host, every
+# viewer's messages also cross Docker Desktop's proxy between macOS and its VM, which saturated
+# at about 2,000 viewers (80,000 messages a second): the players' own stroke fan-out, which
+# never touches a relay, went from 4 ms to seconds. Inside the network k6 talks to the gateway
+# directly, as browsers talk to the load balancer in AWS. K6_IN_DOCKER=0 runs it on the host.
+if [[ "$script" == loadtest/live.js && "$GATEWAY" == http://localhost:8080 && "${K6_IN_DOCKER:-1}" == 1 ]]; then
+  env_args=(-e TOKENS -e PROFILE -e GATEWAY=http://gateway)
+  for v in VIEWERS VIEWER_VUS RATE HOLD; do
+    if [[ -n "${!v:-}" ]]; then env_args+=(-e "$v"); fi
+  done
+  if ((${#out[@]})); then
+    env_args+=(-e K6_OTEL_SERVICE_NAME -e K6_OTEL_METRIC_PREFIX -e K6_OTEL_EXPORTER_PROTOCOL
+      -e K6_OTEL_HTTP_EXPORTER_ENDPOINT=otel-lgtm:4318 -e K6_OTEL_HTTP_EXPORTER_INSECURE -e K6_OTEL_FLUSH_INTERVAL)
+  fi
+  echo "    k6 runs in a container on the stack's network (K6_IN_DOCKER=0: on the host)"
+  exec docker run --rm --network doodle-arena_default -v "$PWD/loadtest:/loadtest:ro" \
+    --ulimit nofile=65535:65535 "${env_args[@]}" grafana/k6:2.3.0 run ${out[@]+"${out[@]}"} /loadtest/live.js
+fi
 # PIN_HOST and PIN_IP, when set, reach k6 too (loadtest/rooms.js). An empty array is
 # "unbound" under set -u in macOS's bash 3.2, hence the ${out[@]+...} form.
 exec k6 run ${out[@]+"${out[@]}"} "$script"

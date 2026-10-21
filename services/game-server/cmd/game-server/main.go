@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
@@ -124,6 +125,9 @@ func main() {
 
 	shutdownTelemetry, err := telemetry.Setup(context.Background())
 	logger := logging.New(os.Stdout, serviceName, cfg.version, cfg.logLevel, telemetry.Enabled())
+	if addr := os.Getenv("PPROF_ADDR"); addr != "" {
+		go servePprof(addr, logger)
+	}
 	if err != nil {
 		logger.Error("telemetry setup failed", "err", err)
 		os.Exit(1)
@@ -400,6 +404,24 @@ type relayStatus struct{ rl *relay.Relay }
 
 func (s relayStatus) Status() ([]control.Room, bool)     { return nil, s.rl.Draining() }
 func (s relayStatus) Viewers() (uint32, []relay.Watched) { return s.rl.Viewers() }
+
+// servePprof serves Go's profiles on addr when PPROF_ADDR is set (task 6.1c: profiling a relay
+// under 5,000 viewers). Off by default; a port of its own that the gateway never routes, so
+// profiles are fetched from inside the container's network, for example:
+//
+//	docker run --rm --network container:doodle-arena-relay-1-1 curlimages/curl \
+//	  -s http://localhost:6060/debug/pprof/profile?seconds=30 > relay.pprof
+func servePprof(addr string, logger *slog.Logger) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	logger.Info("pprof listening", "addr", addr)
+	if err := srv.ListenAndServe(); err != nil {
+		logger.Warn("pprof stopped", "err", err)
+	}
+}
 
 func healthcheck(port string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
