@@ -703,8 +703,8 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Room errors and closed sockets (k6)",
-      "description": "Any of these is a failed room: a refused join, a socket the server closed, an unexpected error message.",
+      "title": "Room errors and resumed sockets (k6)",
+      "description": "Room errors are failed rooms: a refused join, an unexpected error message. A resumed socket is one the server closed (by code: 4010 room moved, 1001 going away, 1006 dropped) that the player resumed, as the web app does: expected during a failover or drain.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -747,8 +747,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (code) (increase(k6_ws_closed_total[$__rate_interval]))",
-          "legendFormat": "closed {{code}}"
+          "expr": "sum by (code) (increase(k6_reconnects_total[$__rate_interval]))",
+          "legendFormat": "resumed after close {{code}}"
         }
       ],
       "gridPos": {
