@@ -160,9 +160,19 @@ The broker runs the OpenTelemetry Java agent (infra/kafka/Dockerfile, task 5.5):
 
 Kafka consumer lag per consumer group comes from the broker, not the clients (task 5.1): a `kafka-metrics` container (`otel/opentelemetry-collector-contrib`, the same version as the collector inside otel-lgtm) runs the `kafka_metrics` receiver every 30 s and pushes OTLP to otel-lgtm. It reports `kafka.consumer_group.lag_sum` per `group` and `topic` (Prometheus: `kafka_consumer_group_lag_sum`), for every consumer whatever its language. A collector of its own rather than an edit of otel-lgtm's bundled collector config, so upgrading that image never means re-syncing a copied file. Once Kafka requires SASL (ADR 0013, task 5.5), it needs a read-only Kafka user of its own.
 
+Backups and restores (task 6.10, ADR 0016) run from the laptop around a stack that the backup is about to destroy, so their telemetry doesn't go to the stack's collector: it would be gone a minute later. `scripts/aws/backup.sh` and `restore.sh` put CloudWatch metrics in the namespace `DoodleArena/Backups` and log lines in the log group `/doodle-arena/backups` (90 days), both in the bootstrap root's account and outside the stack, and Grafana in AWS reads the metrics through its CloudWatch data source. Custom metrics are billed by the hour they receive data, so the few dozen series cost cents a month.
+
+| Metric | Unit | Dimensions | What |
+|---|---|---|---|
+| `backup.duration` | Seconds | `direction` = backup, restore; `store` = mongo-assets, pg-auth, pg-assets, pg-marketplace, pg-notifier, drawings, all | One store's dump and upload, or download and load (on the data host); for drawings the bucket copy; for `all` the whole run, including stopping the writers or waiting for the data host |
+| `backup.size` | Bytes | `direction`, `store` (not `all`) | The dump file, or the drawings' total |
+| `backup.runs` | Count | `direction`, `store`, `result` = ok, error | One per store and one per run (`store=all`). A run that fails counts the stores it finished as ok and the one it stopped on as error |
+
+The log lines use the services' format with `service=aws-backup`, plus `backup_id`, `direction`, `store`, `bytes`, `seconds` and `result`. They hold sizes and times, never data, and there is no trace: these are scripts, not requests. A failed run's last line has `level=error` and the reason.
+
 Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into Grafana's "Doodle Arena" folder (task 5.1). They're read-only in the UI: change the JSON, and Grafana picks it up within 30 seconds.
 
-1. Service overview (`da-overview`): firing alerts, recent error and warning logs from Loki, request rate, server-error share and p95 latency per service (HTTP and gRPC servers together), auth sign-ins and refreshes, and the lobby.
+1. Service overview (`da-overview`): firing alerts, recent error and warning logs from Loki, request rate, server-error share and p95 latency per service (HTTP and gRPC servers together), auth sign-ins and refreshes, the lobby, and, in AWS, the last 30 days of backups and restores from CloudWatch (time, size per store, failures).
 2. Game server (`da-game-server`): connections, rooms, broadcast latency, input and send lag, scheduler latency, guesses, reconnects, takeovers, and the event outbox.
 3. Marketplace (`da-marketplace`): the three invariant gauges and the outbox lag as stats, purchases and conflicts, lock waits, idempotent replays, Stripe webhooks, rewards and minting.
 4. Async pipeline (`da-async-pipeline`): Kafka consumer lag, the outbox lags, Celery job age, the drawing pipeline and moderation, webhook deliveries, the queue age and the dead-letter queue.
