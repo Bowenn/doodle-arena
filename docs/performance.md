@@ -45,8 +45,15 @@ The capacity, in one line: a game server at 0.25 vCPU holds about 20 to 40 four-
 | Local, `stop` with the drain, 80 rooms, uncapped | 41 rooms in 3 passes within 14.4 s; the first pass 0.8 s after SIGTERM | 15.8 to 19.4 s after the stop (the rooms kept running until moved) | missed (one laptop runs both servers) |
 | Local, `stop` with the drain, 80 rooms, 0.25 CPU | 41 rooms within 17.5 s | disconnected for 5.3 to 7.4 s (12.9 s for a capped kill) | met, for the disconnection |
 | AWS, `stop` with the drain (5.5c), 80 rooms | 41 rooms in 2 passes within 6.8 s of the SIGTERM (which ECS sent about 18 s after `stop-task`) | disconnected for 0.5 to 2.0 s (16 to 17.5 s before the drain) | met |
+| AWS, rolling redeploy (Stage 5 review), 80 rooms, both game servers in one phase with the gateway and lobby | game-server-1: 31 of 41 rooms moved before its 40 s drain limit, 10 failed over; game-server-2: 41 rooms in 5.1 s | 269 room errors, resume p95 55.7 s: every player reconnected through the new gateway at once, and creates got 502s while the lobby was replaced | missed |
+| AWS, rolling redeploy, 80 rooms, the other services first, then one game server at a time | game-server-1: 47 rooms in 6.0 s; game-server-2: 74 rooms in 16.4 s; no drain hit its limit | the game-server phases: 30 room errors (429s from the retries, matches short of players); the gateway and lobby phase before them: 161 creates got 502 or 503 | met for the drains; see the note below |
 
 ECS delivered SIGTERM about 18 s after `stop-task`, so the drill's own clock (32.6 s from the call) includes that delay. The lobby notices a dead server 6 to 7 s after its last heartbeat.
+
+A redeploy (Stage 5 review) now replaces the other services first, then one game server at a time, so each drains into the other: no drain hit its limit. Two costs remain, both for Stage 6:
+
+- **Replacing the lobby gives 502s for a few seconds.** The gateway resolves the lobby's name at request time and caches it for 10 s (Cloud Map's record has a TTL too), so it keeps sending to the old task until that expires: 161 room creations failed in two minutes at 80 rooms.
+- **One game server holds every room while the other is replaced.** At 0.25 vCPU that is two to four times its capacity (section 1): stroke fan-out p95 was 30.5 s and `ws_rtt` p95 14 s during those minutes. A third server, or a larger task for the duration of a deploy, would keep the survivor under its limit.
 
 With the drain (task 5.5c), a stop is no longer a failover. The server takes no new rooms and tells the lobby at once, and the lobby moves its rooms while they keep running. A drained room's players are cut off only for the reconnect after `room_moved`, so the drill also reports "disconnected for". The moves are still takeovers, so they are bounded by the surviving server's CPU, as before.
 
