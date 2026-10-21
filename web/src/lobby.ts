@@ -9,6 +9,10 @@ export type RoomListing = {
   players: number
   max_players: number
   phase: string
+  /** Viewers may watch it through the relays (ADR 0017). */
+  live: boolean
+  /** How many watch it right now, over every relay. */
+  viewers: number
   created_at: string
 }
 
@@ -17,10 +21,12 @@ export type Room = {
   host_id: string
   mode: string
   public: boolean
+  live: boolean
   created_at: string
 }
 
-/** A join ticket: single-use, so every (re)connect asks for a new one. */
+/** A join ticket: single-use, so every (re)connect asks for a new one. A viewer's ticket has the
+ * same shape, for a relay's ws_url. */
 export type JoinTicket = {
   room_id: string
   ws_url: string
@@ -35,12 +41,17 @@ export function listRooms(): Promise<{ rooms: RoomListing[]; next_cursor: string
   return call('GET', '/api/lobby/rooms?limit=20')
 }
 
-export function createRoom(isPublic: boolean): Promise<Room> {
-  return call('POST', '/api/lobby/rooms', { public: isPublic })
+export function createRoom(isPublic: boolean, live = false): Promise<Room> {
+  return call('POST', '/api/lobby/rooms', live ? { public: isPublic, live } : { public: isPublic })
 }
 
 export function joinRoom(roomId: string): Promise<JoinTicket> {
   return call('POST', `/api/lobby/rooms/${encodeURIComponent(roomId)}/join`, {})
+}
+
+/** A viewer's ticket for a live room, on the least-loaded relay (ADR 0017). */
+export function watchRoom(roomId: string): Promise<JoinTicket> {
+  return call('POST', `/api/lobby/rooms/${encodeURIComponent(roomId)}/watch`, {})
 }
 
 export function quickPlay(): Promise<JoinTicket> {

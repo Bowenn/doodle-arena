@@ -86,7 +86,8 @@ export type PrivateMessage =
   | { type: 'rate_limited'; data: Record<string, never> }
   | { type: 'error'; data: { code: string; message: string } }
 
-export type Welcome = { user_id: string; view: View; seq: number }
+/** viewer is set on a relay's welcome: this socket watches a live room and can't play (ADR 0017). */
+export type Welcome = { user_id: string; view: View; seq: number; viewer?: boolean }
 
 export type ServerMessage =
   | { type: 'welcome'; data: Welcome }
