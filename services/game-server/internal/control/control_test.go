@@ -588,3 +588,27 @@ func TestDrainWaitEndsWithItsDeadline(t *testing.T) {
 		t.Fatal("status doesn't report draining")
 	}
 }
+
+func TestDrainServerRPCAsksMainToShutDown(t *testing.T) {
+	// main waits on DrainRequested as on SIGTERM, so an RPC drain also tells the lobby at once
+	// and exits once the rooms have moved (control.proto: "shuts down when none are left").
+	s := newServer(t, 10)
+	select {
+	case <-s.DrainRequested():
+		t.Fatal("drain requested before anyone asked")
+	default:
+	}
+	if _, err := s.DrainServer(t.Context(), &gamev1.DrainServerRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.DrainRequested():
+	case <-time.After(time.Second):
+		t.Fatal("the DrainServer RPC didn't signal a drain")
+	}
+	// Draining again, by SIGTERM or a second RPC, is harmless: the channel is closed only once.
+	_ = s.Drain(t.Context())
+	if _, err := s.DrainServer(t.Context(), &gamev1.DrainServerRequest{}); err != nil {
+		t.Fatal(err)
+	}
+}
