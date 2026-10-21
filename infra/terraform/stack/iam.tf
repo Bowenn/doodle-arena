@@ -147,6 +147,14 @@ resource "aws_iam_role_policy" "data_host" {
         Action   = ["s3:PutObject"]
         Resource = ["arn:aws:s3:::doodle-arena-backups-${local.account_id}/backups/*"]
       },
+      # Never a manifest: it is what makes a backup restorable, and it holds the SHA-256 each
+      # dump must match. Only the human running aws-down writes it, after checking the dumps,
+      # so a host that is broken into can't forge a backup or swap a dump unnoticed.
+      {
+        Effect   = "Deny"
+        Action   = ["s3:PutObject"]
+        Resource = ["arn:aws:s3:::doodle-arena-backups-${local.account_id}/backups/*/manifest.json"]
+      },
     ]
   })
 }
