@@ -1,30 +1,27 @@
 #!/usr/bin/env bash
 # Starts a session in AWS (ADR 0003): creates the stack with every service at 0, runs the
 # database migrations as one-off tasks, then starts the services and waits until they are stable.
-# On a stack that is already running it redeploys instead, one game server at a time.
-#   DOMAIN=example.com [ALLOWED_CIDRS=a.b.c.d/32,...] [IMAGE_TAG=<sha>] scripts/aws/up.sh
-# It costs money from here until scripts/aws/down.sh (about $0.30-0.80 an hour, measured in
-# docs/performance.md).
-source "$(dirname "$0")/common.sh"
-require_aws
-stack_vars
-init_stack
-
-start=$SECONDS
-
 # On a stack that is already running (a new IMAGE_TAG mid-session, or a rerun after a failure),
-# step 1 must not park the services: that would be an outage. A redeploy instead holds
-# game-server-2 at its current image while game-server-1 is replaced, so each game server
-# drains into the other one instead of both stopping together (task 5.5's drain).
-running_tag=""
-if [[ "$(aws ecs describe-services --cluster doodle-arena --services game-server-2 \
-    --query 'services[?status==`ACTIVE`].runningCount | [0]' --output text 2>/dev/null)" =~ ^[1-9] ]]; then
-  definition="$(aws ecs describe-services --cluster doodle-arena --services game-server-2 \
+# step 1 must not park the services: that would be an outage. A redeploy instead replaces
+# everything but the game servers first, then game-server-1 (which drains into game-server-2),
+# then game-server-2 (which drains into the new game-server-1): two game servers stopping
+# together couldn't take each other's rooms, and a gateway or lobby restarting during a drain
+# makes every player reconnect at once (measured in AWS, PR #62).
+running_tag_of() {
+  local definition image
+  [[ "$(aws ecs describe-services --cluster doodle-arena --services "$1" \
+    --query 'services[?status==`ACTIVE`].runningCount | [0]' --output text 2>/dev/null)" =~ ^[1-9] ]] || return 0
+  definition="$(aws ecs describe-services --cluster doodle-arena --services "$1" \
     --query 'services[0].taskDefinition' --output text)"
-  running_tag="$(aws ecs describe-task-definition --task-definition "$definition" \
+  image="$(aws ecs describe-task-definition --task-definition "$definition" \
     --query 'taskDefinition.containerDefinitions[0].image' --output text)"
-  running_tag="${running_tag##*:}"
-fi
+  echo "${image##*:}"
+}
+held() { # held <server>=<tag>...: the -var that keeps those game servers at their tag
+  python3 -c 'import json, sys; print("held_game_servers=" + json.dumps(dict(a.split("=", 1) for a in sys.argv[1:])))' "$@"
+}
+running_tag="$(running_tag_of game-server-2)"
+running_tag_1="$(running_tag_of game-server-1)"
 
 if [[ -n "$running_tag" ]]; then
   echo "==> 1/3 the stack is running (game-server-2 on $running_tag): the migrations' task definitions for $IMAGE_TAG"
@@ -68,10 +65,17 @@ migrate auth-migrate
 migrate assets-migrate
 
 echo "==> 3/3 the services"
-if [[ -n "$running_tag" && "$running_tag" != "$IMAGE_TAG" ]]; then
-  echo "    everything but game-server-2 first; game-server-1 drains into game-server-2"
+if [[ -n "$running_tag" && -n "$running_tag_1" && ( "$running_tag" != "$IMAGE_TAG" || "$running_tag_1" != "$IMAGE_TAG" ) ]]; then
+  echo "    everything but the game servers first"
   terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true \
-    -var "game_server_2_image_tag=$running_tag" -auto-approve
+    -var "$(held game-server-1="$running_tag_1" game-server-2="$running_tag")" -auto-approve
+  others=()
+  while IFS= read -r s; do [[ "$s" == game-server-* ]] || others+=("$s"); done < <(terraform -chdir="$TF/stack" output -json services | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)))')
+  aws ecs wait services-stable --cluster "$cluster" --services "${others[@]:0:10}"
+  ((${#others[@]} > 10)) && aws ecs wait services-stable --cluster "$cluster" --services "${others[@]:10}"
+  echo "    then game-server-1, which drains into game-server-2"
+  terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true \
+    -var "$(held game-server-2="$running_tag")" -auto-approve
   aws ecs wait services-stable --cluster "$cluster" --services game-server-1
   echo "    then game-server-2, which drains into the new game-server-1"
 fi

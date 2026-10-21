@@ -12,6 +12,6 @@ The runbooks give the local stack's commands. In an AWS session (ADR 0003, `docs
 
 Differences that matter during an incident:
 
-- **Deploys fire alerts.** A redeploy (`make aws-push`, then `aws-up` with the new `IMAGE_TAG`) replaces one game server at a time; each drains into the other, and GameServerDown can fire for the minute a server is gone. A one-off `update-service` restarts that service alone.
+- **Deploys fire alerts.** A redeploy (`make aws-push`, then `aws-up` with the new `IMAGE_TAG`) replaces the other services first, then one game server at a time; each drains into the other, and GameServerDown can fire for the minute a server is gone. A one-off `update-service` restarts that service alone.
 - **The data host is a single EC2 instance.** If it's gone, every store is gone with it: Postgres, Redis, MongoDB, Kafka and otel-lgtm (so Grafana too; CloudWatch Logs still has the services' logs). Replacing it starts the stores empty (ADR 0003).
 - **Secrets come from SSM** when a task starts. After changing one, redeploy the service.

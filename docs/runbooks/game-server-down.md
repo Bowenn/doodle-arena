@@ -28,6 +28,6 @@ Record the failover time from the drill or the incident (the evidence log has a 
 
 The same checks with the AWS commands in [Runbooks in AWS](README.md). In AWS the game servers are the ECS services `game-server-1` and `game-server-2`:
 
-- A deploy fires this alert by design: `aws-up` with a new image replaces one game server at a time, and each drains into the other (task 5.5). Look at the services' deployments before treating it as an incident.
+- A deploy fires this alert by design: `aws-up` with a new image replaces the other services first, then one game server at a time, and each drains into the other (task 5.5). Look at the services' deployments before treating it as an incident.
 - A stopped task is replaced by ECS on its own. Its log (`aws logs tail /doodle-arena/ecs --log-stream-name-prefix game-server-1`) says why: `drain finished` is a normal stop, a missing `stopped` line a crash or an OOM kill (`aws ecs describe-tasks ... --query 'tasks[0].stoppedReason'`).
 - To restart one: `aws ecs update-service --cluster doodle-arena --service game-server-1 --force-new-deployment`. It drains first.

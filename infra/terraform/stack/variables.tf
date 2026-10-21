@@ -25,10 +25,10 @@ variable "image_tag" {
   type        = string
 }
 
-variable "game_server_2_image_tag" {
-  description = "Holds game-server-2 at this tag while game-server-1 is replaced (scripts/aws/up.sh redeploying a running stack), so the two game servers never stop together and each drains into the other. Empty: image_tag."
-  type        = string
-  default     = ""
+variable "held_game_servers" {
+  description = "Game servers held at their current image tag during a redeploy of a running stack (scripts/aws/up.sh): name to tag. The other services go first, then one game server at a time, so the two never stop together and each drains into the other. Empty: every service gets image_tag."
+  type        = map(string)
+  default     = {}
 }
 
 variable "running" {

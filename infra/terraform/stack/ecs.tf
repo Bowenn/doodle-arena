@@ -216,11 +216,10 @@ locals {
   # As in compose: <name>-1, except a game server, whose instance id is its server id
   # (game-server-1), the one the gateway routes /ws/<server_id>/ by (ADR 0002).
   instance_id = { for name in keys(local.services) : name => startswith(name, "game-server") ? name : "${name}-1" }
-  # A rolling redeploy replaces one game server at a time (scripts/aws/up.sh): two stopping
-  # together couldn't take each other's rooms, and every room would fail over instead.
-  image_tag = { for name in keys(local.services) : name => (
-    name == "game-server-2" && var.game_server_2_image_tag != "" ? var.game_server_2_image_tag : var.image_tag
-  ) }
+  # A rolling redeploy replaces one game server at a time, after everything else
+  # (scripts/aws/up.sh): two stopping together couldn't take each other's rooms, and a gateway
+  # or lobby restarting during a drain makes every player reconnect at once.
+  image_tag = { for name in keys(local.services) : name => lookup(var.held_game_servers, name, var.image_tag) }
 }
 
 # for_each over the names: the services' settings differ in shape (each leaves out what it
