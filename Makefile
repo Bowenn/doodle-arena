@@ -3,10 +3,10 @@
 
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check kafka-acl-check data-acl-check alerts-check loadtest loadtest-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | kafka-acl-check | data-acl-check | alerts-check | loadtest | loadtest-smoke | lighthouse | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | lighthouse | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
@@ -44,6 +44,10 @@ kafka-acl-check:
 # Redis and SeaweedFS refuse each service another service's keys and buckets (task 5.5).
 data-acl-check:
 	@./scripts/data-acl-check.sh
+
+# The AWS backup's dump and restore (ADR 0016) against the local stack, into throwaway stores.
+backup-check:
+	@./scripts/backup-check.sh
 
 alerts-check:
 	@python3 ./scripts/alerts-check.py
