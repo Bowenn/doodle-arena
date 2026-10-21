@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
-# Ends a session (ADR 0003): destroys the whole stack, data included. The bootstrap root (state,
-# images, third-party secrets) and the budget stay.
-#   DOMAIN=example.com scripts/aws/down.sh
+# Ends a session (ADR 0003): backs up the data (ADR 0016, scripts/aws/backup.sh), then destroys
+# the whole stack. The bootstrap root (state, images, secrets, backups) and the budget stay.
+#   DOMAIN=example.com [SKIP_BACKUP=1] scripts/aws/down.sh
+# A backup that fails stops the teardown before anything is deleted. SKIP_BACKUP=1 ends the
+# session without keeping its data; with no data host running there is nothing to back up.
 # A destroy that fails halfway (a lost network, an AWS API hiccup) is retried, and afterwards
 # the script looks for anything still billing: a stack half torn down keeps costing money.
 source "$(dirname "$0")/common.sh"
 require_aws
 stack_vars
 init_stack
+
+if [[ -n "${SKIP_BACKUP:-}" ]]; then
+  echo "SKIP_BACKUP is set: this session's data will not be kept."
+elif [[ -z "$(data_host_id)" ]]; then
+  echo "No data host is running, so there is nothing to back up (a rerun after a destroy that failed halfway)."
+else
+  "$(dirname "$0")/backup.sh" || exit 1
+fi
 
 # The first destroy shows the plan and asks; a retry destroys the same stack, so it doesn't.
 approve=()
