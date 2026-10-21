@@ -30,6 +30,9 @@ RUNBOOK_URL = "https://github.com/Bowenn/gap-project_private/blob/master/docs/ru
 
 # Alerts in the spec that aren't Grafana rules: AWS Budgets / CloudWatch (task 5.2).
 NOT_GRAFANA = {"AwsBudget"}
+# Runbooks for failures a script reports instead of an alert: aws-down's backup and aws-up's
+# restore (task 6.10) exit with BACKUP FAILED or RESTORE FAILED.
+SCRIPT_RUNBOOKS = {"aws-backup.md"}
 # Metrics from instrumentation, the kafka-metrics collector or k6 rather than the spec's table
 # (observability.md lists each source).
 STANDARD = ("http_server_", "rpc_server_", "rpc_client_", "kafka_consumer_group_", "target_info", "go_", "k6_")
@@ -165,7 +168,7 @@ def check_runbooks(by_runbook: dict[str, set[str]]) -> None:
         for title in by_runbook.get(path.name, ()):
             if title not in text:
                 fail(f"runbook {path.name}: doesn't mention {title}, which links to it")
-        if path.name not in by_runbook:
+        if path.name not in by_runbook and path.name not in SCRIPT_RUNBOOKS:
             fail(f"runbook {path.name}: no alert links to it")
 
 

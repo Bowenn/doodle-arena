@@ -852,6 +852,404 @@
         "w": 12,
         "h": 8
       }
+    },
+    {
+      "id": 105,
+      "type": "row",
+      "title": "Backups (AWS only, ADR 0016)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Backup and restore time",
+      "description": "CloudWatch, DoodleArena/Backups: backup.duration for a whole run (store=all), one point per aws-down (backup) and aws-up (restore), over the last 30 days. A restore includes copying the drawings back. Empty locally.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "timeFrom": "30d",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 8,
+            "showPoints": "always",
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.duration",
+          "statistic": "Maximum",
+          "dimensions": {
+            "direction": [
+              "backup"
+            ],
+            "store": [
+              "all"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "backup"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.duration",
+          "statistic": "Maximum",
+          "dimensions": {
+            "direction": [
+              "restore"
+            ],
+            "store": [
+              "all"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "restore"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 62,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Backup size per store",
+      "description": "CloudWatch, DoodleArena/Backups: backup.size of each dump and of the drawings at each aws-down, over the last 30 days. Watch it grow: teardown and start time follow it. Empty locally.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "timeFrom": "30d",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "points",
+            "pointSize": 8,
+            "showPoints": "always",
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.size",
+          "statistic": "Maximum",
+          "dimensions": {
+            "direction": [
+              "backup"
+            ],
+            "store": [
+              "mongo-assets"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "mongo-assets"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.size",
+          "statistic": "Maximum",
+          "dimensions": {
+            "direction": [
+              "backup"
+            ],
+            "store": [
+              "pg-auth"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "pg-auth"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.size",
+          "statistic": "Maximum",
+          "dimensions": {
+            "direction": [
+              "backup"
+            ],
+            "store": [
+              "pg-assets"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "pg-assets"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.size",
+          "statistic": "Maximum",
+          "dimensions": {
+            "direction": [
+              "backup"
+            ],
+            "store": [
+              "pg-marketplace"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "pg-marketplace"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.size",
+          "statistic": "Maximum",
+          "dimensions": {
+            "direction": [
+              "backup"
+            ],
+            "store": [
+              "pg-notifier"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "pg-notifier"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.size",
+          "statistic": "Maximum",
+          "dimensions": {
+            "direction": [
+              "backup"
+            ],
+            "store": [
+              "drawings"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "drawings"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 62,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Failed backups and restores",
+      "description": "CloudWatch, DoodleArena/Backups: backup.runs with result=error (store=all), over the last 30 days. A failed backup stopped a teardown (the stack kept running); a failed restore stopped an aws-up. docs/runbooks/aws-backup.md. Empty locally.",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "cloudwatch"
+      },
+      "timeFrom": "30d",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "pointSize": 8,
+            "showPoints": "always",
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.runs",
+          "statistic": "Sum",
+          "dimensions": {
+            "direction": [
+              "backup"
+            ],
+            "store": [
+              "all"
+            ],
+            "result": [
+              "error"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "backup failed"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "cloudwatch"
+          },
+          "queryMode": "Metrics",
+          "region": "default",
+          "namespace": "DoodleArena/Backups",
+          "metricName": "backup.runs",
+          "statistic": "Sum",
+          "dimensions": {
+            "direction": [
+              "restore"
+            ],
+            "store": [
+              "all"
+            ],
+            "result": [
+              "error"
+            ]
+          },
+          "period": "300",
+          "matchExact": true,
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "label": "restore failed"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 70,
+        "w": 12,
+        "h": 8
+      }
     }
   ]
 }
