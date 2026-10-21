@@ -199,6 +199,7 @@ CLAUDE.md, the project's working notes for humans and its coding agent, lists ev
 | A room: one actor, write before broadcast | `services/game-server/internal/room/actor.go`, `room/game.go` |
 | Leases, fencing and takeover | `services/game-server/internal/roomstore/roomstore.go` (its Lua scripts), ADR 0007 |
 | Failover and drain in the lobby | `services/lobby/internal/rooms/reassign.go` |
+| Live rooms: relays fan a room out to viewers | `services/game-server/internal/relay/relay.go`, ADR 0017 |
 | A purchase (locks, ledger, ownership, outbox in one transaction) | `services/marketplace/src/main/java/com/doodlearena/marketplace/listing/PurchaseService.java`, then `ledger/LedgerService.java` |
 | Idempotency keys | `services/marketplace/src/main/java/com/doodlearena/marketplace/idempotency/IdempotencyService.java`, ADR 0012 |
 | The drawing pipeline | `services/assets/drawings/consumer.py`, `pipeline.py`, `relay.py` |

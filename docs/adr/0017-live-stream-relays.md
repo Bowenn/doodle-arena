@@ -76,6 +76,8 @@ How it works:
   A phase event (match start, choosing, round start or end, match end) comes with a snapshot in the same commit, and the relay reads that snapshot again. A `welcome` is the room rebuilt from the snapshot and events, viewed by a non-member. It never contains the word while a round runs, as for every guesser.
 - **The owner doesn't know about viewers.** A takeover changes nothing for them: the relay reads the same keys from whichever server owns the room.
 - **Resume** works as for players: up to 200 events are replayed, otherwise a fresh `welcome`. A viewer whose relay stops (drain, crash) asks the lobby again and resumes on another relay with `last_seq`.
+- **Placement corrects stale heartbeats.** Relays report their viewers every 2 seconds. The lobby picks the relay with the fewest viewers, adding the viewer tickets it issued for each relay since that relay's last heartbeat. Otherwise a burst of viewers between two heartbeats would all go to the relay that was least loaded at the last report.
+- **Any relay can resume a viewer.** A stream preloads the room's last 200 events when it starts, so a viewer whose relay stopped resumes on another one without a full welcome.
 - **The contract** (`registry.proto`, additive): `HeartbeatRequest` gains `role` (`SERVER_ROLE_RELAY`; unspecified means a game server), `viewers` and per-room viewer counts. A relay sends no rooms and no control address. The lobby never allocates rooms on relays.
 
 ## Consequences
