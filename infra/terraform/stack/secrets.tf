@@ -61,9 +61,12 @@ resource "aws_ssm_parameter" "mongo_url" {
 }
 
 # The third-party secrets a human puts (bootstrap root): Google, Stripe, Discord.
+# Only their ARNs are used (ECS reads the values when a task starts), so they are read without
+# decryption: the real Stripe, Google and Discord values never land in this root's state.
 data "aws_ssm_parameter" "third_party" {
-  for_each = toset(["google/client-id", "google/client-secret", "stripe/secret-key", "stripe/webhook-secret", "discord/alert-webhook-url"])
-  name     = "/doodle-arena/${each.key}"
+  for_each        = toset(["google/client-id", "google/client-secret", "stripe/secret-key", "stripe/webhook-secret", "discord/alert-webhook-url"])
+  name            = "/doodle-arena/${each.key}"
+  with_decryption = false
 }
 
 locals {
