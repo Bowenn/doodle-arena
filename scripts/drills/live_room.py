@@ -18,6 +18,7 @@ In a worktree, set DRILL_JWT_KEY to the main checkout's secrets/jwt-private.pem.
 
 import asyncio
 import contextlib
+import itertools
 import json
 import os
 import statistics
@@ -46,7 +47,9 @@ issuer = TokenIssuer(
 
 
 def call(method, path, user, body=None):
-    req = urllib.request.Request(GW + path, method=method, data=json.dumps(body or {}).encode())
+    req = urllib.request.Request(
+        GW + path, method=method, data=json.dumps(body or {}).encode()
+    )
     token = issuer.issue(user, ["player"], datetime.now(UTC), name=user)[0]
     req.add_header("Authorization", "Bearer " + token)
     with urllib.request.urlopen(req, timeout=5) as r:
@@ -70,7 +73,9 @@ class Socket:
         self.server = ws_url.split("/")[2]
         self.ws = await websockets.connect(WS + ws_url, origin=ORIGIN, max_size=1 << 24)
         await self.ws.send(
-            json.dumps({"type": "hello", "data": {"ticket": ticket, "last_seq": last_seq}})
+            json.dumps(
+                {"type": "hello", "data": {"ticket": ticket, "last_seq": last_seq}}
+            )
         )
 
     async def send(self, typ, data):
@@ -98,7 +103,7 @@ class Socket:
 
 
 def gaps(seqs):
-    return [(a, b) for a, b in zip(seqs, seqs[1:], strict=False) if b != a + 1]
+    return [(a, b) for a, b in itertools.pairwise(seqs) if b != a + 1]
 
 
 async def closed_code(ws):
@@ -162,8 +167,13 @@ async def main(n_viewers):
     for i in range(40):
         await drawer.send(
             "stroke_batch",
-            {"stroke_id": f"s{i}", "points": [[100 * i, 100, i]], "color": "#112233",
-             "width": 3, "done": True},
+            {
+                "stroke_id": f"s{i}",
+                "points": [[100 * i, 100, i]],
+                "color": "#112233",
+                "width": 3,
+                "done": True,
+            },
         )
         await asyncio.sleep(0.05)
         if i == 20:
@@ -189,22 +199,29 @@ async def main(n_viewers):
     lag = []
     for v in viewers:
         seqs = v.seqs()
-        early = [e["type"] for _, e in v.events() if word in json.dumps(e)
-                 and e["type"] != "round_ended"]
+        early = [
+            e["type"]
+            for _, e in v.events()
+            if word in json.dumps(e) and e["type"] != "round_ended"
+        ]
         welcomes = len(v.private("welcome"))
         resumed = len(v.private("resumed"))
         missing = sorted(set(player_seqs) - set(seqs) - {player_seqs[0]})
         lag += [t - player_at[e["seq"]] for t, e in v.events() if e["seq"] in player_at]
-        print(f"  {v.user} on {v.server}: {len(seqs)} seqs, gaps {gaps(seqs)}, "
-              f"missing {missing[:5]}, welcomes {welcomes}, resumes {resumed}, "
-              f"word early in {early}")
+        print(
+            f"  {v.user} on {v.server}: {len(seqs)} seqs, gaps {gaps(seqs)}, "
+            f"missing {missing[:5]}, welcomes {welcomes}, resumes {resumed}, "
+            f"word early in {early}"
+        )
         ok &= not gaps(seqs) and not missing and not early
         if v is viewers[0]:
             ok &= welcomes == 1 and resumed == 1
     if lag:
         lag_ms = sorted(1000 * x for x in lag)
-        print(f"viewer behind player: median {statistics.median(lag_ms):.1f} ms, "
-              f"p99 {lag_ms[int(0.99 * (len(lag_ms) - 1))]:.1f} ms over {len(lag_ms)} events")
+        print(
+            f"viewer behind player: median {statistics.median(lag_ms):.1f} ms, "
+            f"p99 {lag_ms[int(0.99 * (len(lag_ms) - 1))]:.1f} ms over {len(lag_ms)} events"
+        )
     print("OK" if ok else "FAILED")
     sys.exit(0 if ok else 1)
 
