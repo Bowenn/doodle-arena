@@ -7,8 +7,8 @@
 # RESTORE=none starts with empty stores. A backup whose schema is newer than the code being
 # deployed (IMAGE_TAG) is refused: deploy newer code, or pick an older backup.
 # 1. Reads the manifest and checks its schema against the code at IMAGE_TAG.
-# 2. On the data host, waits for the stores and loads every dump through presigned URLs (the
-#    host's role can't read the bucket), MongoDB first (infra/backup/load.sh). Stores that
+# 2. On the data host, waits for the stores, then loads every dump through presigned URLs (the
+#    host's role can't read the bucket; 15 minutes), MongoDB first (infra/backup/load.sh). Stores that
 #    already hold data are left alone: a rerun of aws-up on a restored stack skips this.
 # 3. Compares every table's rows and every collection's documents with the manifest's.
 # 4. Copies the drawings back and checks their count.
@@ -60,22 +60,27 @@ git -C "$ROOT" cat-file -e "$IMAGE_TAG^{commit}" 2>/dev/null || fail "IMAGE_TAG 
 python3 "$ROOT/scripts/aws/backups.py" check-schema "$manifest" "$ROOT" "$IMAGE_TAG" ||
   fail "backup $id has migrations the code at $IMAGE_TAG doesn't (above): it is from a newer schema"
 
-# The plan load.sh reads: one artifact per line, MongoDB first, each with a presigned GET.
+echo "    waiting for the data host's stores"
+host_run 1200 "for i in \$(seq 120); do [ -f /opt/doodle/backup/load.sh ] && break; sleep 5; done
+bash /opt/doodle/backup/load.sh --ready" >/dev/null || fail "the data host's stores didn't come up"
+
+# The plan load.sh reads: one artifact per line, MongoDB first, each with a presigned GET. The
+# URLs are part of the SSM command, so they stay in its history: signed only now that the host
+# is ready, for 15 minutes, enough for the downloads to start.
 plan=""
 while read -r name file _ sha256 _; do
-  url="$(aws s3 presign "s3://$bucket/backups/$id/$file" --expires-in 3600)" || fail "presigning $file failed"
+  url="$(aws s3 presign "s3://$bucket/backups/$id/$file" --expires-in 900)" || fail "presigning $file failed"
   plan="$plan$name $sha256 $url"$'\n'
 done < <(python3 "$ROOT/scripts/aws/backups.py" artifacts "$manifest")
 
-echo "    loading the dumps on the data host (it may still be starting)"
+echo "    loading the dumps on the data host"
 output="$work/load.out"
 loaded=0
-host_run 3600 "for i in \$(seq 120); do [ -f /opt/doodle/backup/load.sh ] && break; sleep 5; done
-cd /opt/doodle
+host_run 3600 "cd /opt/doodle
+umask 077
 cat > restore-plan.tsv <<'PLAN'
 $plan
 PLAN
-chmod 600 restore-plan.tsv
 status=0
 bash backup/load.sh restore-plan.tsv || status=\$?
 rm -f restore-plan.tsv

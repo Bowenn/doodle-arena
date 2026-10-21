@@ -15,7 +15,12 @@
 # and -END; any failure exits non-zero.
 source "$(dirname "$0")/lib.sh"
 
-plan="${1:?usage: load.sh <plan>}"
+# --ready only waits for the stores, so the caller signs its URLs once the host can use them.
+if [[ "${1:-}" == --ready ]]; then
+  wait_ready
+  exit 0
+fi
+plan="${1:?usage: load.sh <plan> | load.sh --ready}"
 dir="${BACKUP_DIR:-/opt/doodle/restore-work}"
 start_work "$dir" remove
 

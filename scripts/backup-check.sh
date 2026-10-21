@@ -5,6 +5,7 @@
 # passwords, as a new AWS session has), then checks that every table's rows and every
 # collection's documents match and that the backup's schema isn't newer than this checkout.
 # Read-only for the local stack. Takes a few minutes with load-test replays in MongoDB.
+# The mongodump reads the stack's MongoDB hard: don't run it during a load test.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -37,12 +38,14 @@ echo "==> the schema check against this checkout"
 python3 scripts/aws/backups.py check-schema "$work/manifest.json" "$ROOT" HEAD
 
 echo "==> fresh stores: $pg_image and $mongo_image"
-docker run -d --name "$pg" -e POSTGRES_PASSWORD="$(secret)" \
+# Memory-capped: they share Docker's VM with the local stack, and the first run of this check,
+# restoring 2.5 GB of load-test replays, got the stack's own MongoDB OOM-killed.
+docker run -d --name "$pg" --memory 512m -e POSTGRES_PASSWORD="$(secret)" \
   -e AUTH_DB_PASSWORD="$(secret)" -e ASSETS_DB_PASSWORD="$(secret)" \
   -e MARKETPLACE_DB_PASSWORD="$(secret)" -e NOTIFIER_DB_PASSWORD="$(secret)" \
   -v "$ROOT/infra/postgres/init:/docker-entrypoint-initdb.d:ro" "$pg_image" >/dev/null
-docker run -d --name "$mongo" -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD="$(secret)" \
-  "$mongo_image" >/dev/null
+docker run -d --name "$mongo" --memory 1g -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD="$(secret)" \
+  "$mongo_image" --wiredTigerCacheSizeGB 0.25 >/dev/null
 
 echo "==> restore"
 while read -r name file _ sha256 _; do
