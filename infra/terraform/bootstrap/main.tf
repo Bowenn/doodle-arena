@@ -1,5 +1,6 @@
-# What outlives every session (ADR 0003): the Terraform state, the image repositories and the
-# third-party secrets. The per-session stack (../stack) is created and destroyed around it. The
+# What outlives every session (ADR 0003): the Terraform state, the image repositories, the
+# third-party secrets and, since ADR 0016, the data's backups and the one key a restored database
+# needs. The per-session stack (../stack) is created and destroyed around it. The
 # budget alarm (doodle-arena-monthly, $35) was created by hand before anything else and stays
 # outside Terraform, so no destroy can remove it.
 
@@ -120,4 +121,93 @@ resource "aws_ssm_parameter" "third_party" {
   lifecycle {
     ignore_changes = [value]
   }
+}
+
+# ---------------------------------------------------------------- backups (ADR 0016)
+
+# aws-down writes each service's database dump and a copy of the drawings here before it destroys
+# the stack, and aws-up restores the latest one (scripts/aws/backup.sh, restore.sh). Each backup
+# is a prefix, backups/<id>/, finished by its manifest.json.
+resource "aws_s3_bucket" "backups" {
+  bucket = "doodle-arena-backups-${local.account_id}"
+}
+
+resource "aws_s3_bucket_versioning" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  versioning_configuration {
+    status = "Enabled" # a deleted or overwritten backup can still be recovered for 30 days
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "backups" {
+  bucket                  = aws_s3_bucket.backups.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# The dumps hold every account, wallet and webhook endpoint, so they travel only over TLS.
+resource "aws_s3_bucket_policy" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "TLSOnly"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource  = [aws_s3_bucket.backups.arn, "${aws_s3_bucket.backups.arn}/*"]
+      Condition = { Bool = { "aws:SecureTransport" = "false" } }
+    }]
+  })
+}
+
+# Backups are kept by count, not by age: aws-down keeps the newest 10. An age rule would delete
+# the only backup after a long enough break between sessions. What a prune deletes stays as a
+# noncurrent version for 30 days.
+resource "aws_s3_bucket_lifecycle_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  rule {
+    id     = "old-versions"
+    status = "Enabled"
+    filter {}
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+# Every backup and restore leaves its log lines here (never the data), so they outlive the
+# stack whose teardown they come before.
+resource "aws_cloudwatch_log_group" "backups" {
+  name              = "/doodle-arena/backups"
+  retention_in_days = 90
+}
+
+# The notifier encrypts webhook endpoint secrets with this key (internal/secretbox). It used to
+# be generated per session; a restored endpoint is readable only with the key that sealed it.
+# Letters and digits only, like the stack's generated secrets.
+resource "random_password" "notifier_secret_key" {
+  length  = 40
+  special = false
+}
+
+resource "aws_ssm_parameter" "notifier_secret_key" {
+  name        = "/doodle-arena/notifier-secret-key"
+  description = "The notifier's key for webhook endpoint secrets; outlives sessions (ADR 0016)"
+  type        = "SecureString"
+  value       = random_password.notifier_secret_key.result
 }
