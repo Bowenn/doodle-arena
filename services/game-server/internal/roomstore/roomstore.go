@@ -372,3 +372,78 @@ func (h *Handle) Close(ctx context.Context) error {
 
 // Lease is what the owner renews.
 func (h *Handle) Lease() Lease { return Lease{RoomID: h.roomID, Token: h.token} }
+
+// ---------------------------------------------------------------- reading, for relays
+
+// ErrNotFound means Redis has no such room: it never existed, or its keys are gone.
+var ErrNotFound = errors.New("room not found")
+
+// Snapshot returns a room's latest snapshot, for a relay (ADR 0017): no lease, never a write.
+// It returns ErrClosed for a room that ended and ErrNotFound for one Redis doesn't have.
+func (s *Store) Snapshot(ctx context.Context, roomID string) (room.Snapshot, error) {
+	raw, err := s.rdb.Get(ctx, snapshotKey(roomID)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		if closed, cerr := s.Closed(ctx, roomID); cerr != nil {
+			return room.Snapshot{}, cerr
+		} else if closed {
+			return room.Snapshot{}, ErrClosed
+		}
+		return room.Snapshot{}, ErrNotFound
+	}
+	if err != nil {
+		return room.Snapshot{}, fmt.Errorf("%w: read snapshot: %w", ErrUnavailable, err)
+	}
+	var snap room.Snapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		return room.Snapshot{}, fmt.Errorf("decode snapshot: %w", err)
+	}
+	return snap, nil
+}
+
+// EventsAfter returns a room's stored events with a seq above after, in order.
+func (s *Store) EventsAfter(ctx context.Context, roomID string, after int64) ([]room.StoredEvent, error) {
+	entries, err := s.rdb.XRange(ctx, eventsKey(roomID), "("+strconv.FormatInt(after, 10)+"-0", "+").Result()
+	if err != nil {
+		return nil, fmt.Errorf("%w: read events: %w", ErrUnavailable, err)
+	}
+	return decodeEntries(entries)
+}
+
+// Tail waits up to block for events with a seq above after (XREAD BLOCK) and returns at most
+// count of them; none when the wait ends empty.
+func (s *Store) Tail(ctx context.Context, roomID string, after int64, block time.Duration, count int64) ([]room.StoredEvent, error) {
+	streams, err := s.rdb.XRead(ctx, &redis.XReadArgs{
+		Streams: []string{eventsKey(roomID), strconv.FormatInt(after, 10) + "-0"},
+		Count:   count, Block: block,
+	}).Result()
+	switch {
+	case errors.Is(err, redis.Nil):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("%w: tail events: %w", ErrUnavailable, err)
+	case len(streams) == 0:
+		return nil, nil
+	}
+	return decodeEntries(streams[0].Messages)
+}
+
+// Closed reports whether the room ended (its tombstone is set).
+func (s *Store) Closed(ctx context.Context, roomID string) (bool, error) {
+	n, err := s.rdb.Exists(ctx, closedKey(roomID)).Result()
+	if err != nil {
+		return false, fmt.Errorf("%w: read tombstone: %w", ErrUnavailable, err)
+	}
+	return n == 1, nil
+}
+
+func decodeEntries(entries []redis.XMessage) ([]room.StoredEvent, error) {
+	out := make([]room.StoredEvent, 0, len(entries))
+	for _, e := range entries {
+		ev, err := decodeEntry(e)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}

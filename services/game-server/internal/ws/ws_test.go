@@ -345,13 +345,13 @@ func TestShutdownClosesWithGoingAway(t *testing.T) {
 // Closing a socket while messages are still being written must still send the close code:
 // cancelling a write's context makes the library drop the connection without a close frame.
 func TestCloseDuringWritesKeepsTheCloseCode(t *testing.T) {
-	accepted := make(chan *playerConn, 1)
+	accepted := make(chan *Conn, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
-		pc := newPlayerConn(context.Background(), c, "u1", func() {}, func(time.Duration) {})
+		pc := NewConn(context.Background(), c, "u1", func() {}, func(time.Duration, time.Time) {})
 		accepted <- pc
 		<-pc.writerDone
 	}))
@@ -426,9 +426,9 @@ func TestSendLagIsRecordedForEveryWrite(t *testing.T) {
 	}
 }
 
-// lagConn is a playerConn on a real socket that records its send lags.
+// lagConn is a Conn on a real socket that records its send lags.
 type lagConn struct {
-	pc     *playerConn
+	pc     *Conn
 	client *websocket.Conn
 	mu     sync.Mutex
 	lags   []time.Duration
@@ -437,13 +437,13 @@ type lagConn struct {
 func newLagConn(t *testing.T) *lagConn {
 	t.Helper()
 	lc := &lagConn{}
-	accepted := make(chan *playerConn, 1)
+	accepted := make(chan *Conn, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
-		pc := newPlayerConn(context.Background(), c, "u1", func() {}, func(lag time.Duration) {
+		pc := NewConn(context.Background(), c, "u1", func() {}, func(lag time.Duration, _ time.Time) {
 			lc.mu.Lock()
 			lc.lags = append(lc.lags, lag)
 			lc.mu.Unlock()

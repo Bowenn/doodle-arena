@@ -176,6 +176,17 @@ func RestoreGame(s Snapshot, events []StoredEvent, rng *rand.Rand, now time.Time
 	return g, nil
 }
 
+// ViewAt is what a viewer sees (ADR 0017): the room rebuilt from the snapshot and the events
+// after it, exactly as its owner has it, and its seq. It is a guesser's view, so it never holds
+// the word while a round runs.
+func ViewAt(s Snapshot, events []StoredEvent) (View, int64, error) {
+	g, err := restore(s, events, rand.New(rand.NewPCG(0, 0)))
+	if err != nil {
+		return View{}, 0, err
+	}
+	return g.ViewFor(""), g.seq, nil
+}
+
 // restore is the snapshot plus the events after it, exactly as the old owner had it.
 func restore(s Snapshot, events []StoredEvent, rng *rand.Rand) (*Game, error) {
 	g := &Game{
