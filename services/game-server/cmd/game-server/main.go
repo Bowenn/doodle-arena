@@ -24,6 +24,7 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/events"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/heartbeat"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/relay"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/server"
@@ -62,6 +63,8 @@ type config struct {
 	// How long SIGTERM waits for the lobby to move this server's rooms away before closing the
 	// rest (task 5.5). Under ECS's stop timeout (60 s) and compose's stop_grace_period.
 	drainTimeout time.Duration
+	// role is "game" (rooms) or "relay" (viewers of live rooms, ADR 0017).
+	role string
 }
 
 func loadConfig() config {
@@ -99,6 +102,7 @@ func loadConfig() config {
 		},
 		roundLogs:    envOr("ROUND_LOGS_BUCKET", "round-logs"),
 		drainTimeout: drainTimeout,
+		role:         envOr("ROLE", "game"),
 	}
 }
 
@@ -165,6 +169,9 @@ func run(cfg config, logger *slog.Logger) error {
 		return fmt.Errorf("redis tracing: %w", err)
 	}
 	meter := otel.Meter("game-server")
+	if cfg.role == "relay" {
+		return runRelay(ctx, stop, cfg, logger, keys, rdb)
+	}
 	roomMetrics, err := room.NewMetrics(meter)
 	if err != nil {
 		return fmt.Errorf("metrics: %w", err)
@@ -317,6 +324,82 @@ func run(cfg config, logger *slog.Logger) error {
 	logger.Info("stopped")
 	return nil
 }
+
+// relayDrainWait is how long a stopping relay keeps its viewers after telling the lobby it
+// drains, so the viewers it closes are sent to another relay.
+const relayDrainWait = 2 * time.Second
+
+// runRelay runs the relay role (ADR 0017): viewers' WebSockets and the streams of the rooms they
+// watch, registered with the lobby as a relay. It reads rooms from Redis and never writes them,
+// so it needs no Kafka, no S3 and no control port.
+func runRelay(ctx context.Context, stop context.CancelFunc, cfg config, logger *slog.Logger, keys []ed25519.PublicKey, rdb *redis.Client) error {
+	rl, err := relay.New(relay.Config{
+		ServerID: cfg.instance, Store: roomstore.New(rdb), Verifier: ticket.NewVerifier(keys, time.Now),
+		Redeem: func(ctx context.Context, t ticket.Ticket) error {
+			return ticket.RedeemViewer(ctx, rdb, t, time.Now())
+		},
+		Origins: cfg.origins, HelloTimeout: cfg.helloTimeout, Log: logger, Meter: otel.Meter("game-server"),
+	})
+	if err != nil {
+		return fmt.Errorf("relay: %w", err)
+	}
+	srv := &http.Server{
+		Addr:              ":" + cfg.port,
+		Handler:           server.NewHandler(server.Info{Service: serviceName, Version: cfg.version, Instance: cfg.instance}, rl),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	lobbyConn, err := heartbeat.Dial(cfg.lobbyAddr)
+	if err != nil {
+		return fmt.Errorf("lobby client: %w", err)
+	}
+	defer lobbyConn.Close()
+	sender := heartbeat.NewSender(lobbyv1.NewRegistryServiceClient(lobbyConn), heartbeat.Identity{
+		ServerID: cfg.instance, WSAddress: cfg.wsAddress, Role: lobbyv1.ServerRole_SERVER_ROLE_RELAY,
+	}, relayStatus{rl}, heartbeat.Interval, logger)
+	beatCtx, stopBeats := context.WithCancel(context.Background())
+	beatsDone := make(chan struct{})
+	go func() { sender.Run(beatCtx); close(beatsDone) }()
+	defer func() { stopBeats(); <-beatsDone }()
+
+	serveErr := make(chan error, 1)
+	go func() {
+		logger.Info("relay listening", "addr", srv.Addr, "instance", cfg.instance)
+		serveErr <- srv.ListenAndServe()
+	}()
+	select {
+	case err := <-serveErr:
+		return fmt.Errorf("serve: %w", err)
+	case <-ctx.Done():
+	}
+	stop()
+
+	// Tell the lobby first, so the viewers closed below are sent to another relay, where they
+	// resume with their last seq.
+	logger.Info("relay draining", "instance", cfg.instance)
+	rl.Drain()
+	sender.Now()
+	time.Sleep(relayDrainWait)
+	stopBeats()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown: %w", err)
+	}
+	if err := rl.Shutdown(shutdownCtx); err != nil {
+		logger.Warn("viewers still open at shutdown", "err", err)
+	}
+	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("serve: %w", err)
+	}
+	logger.Info("stopped")
+	return nil
+}
+
+// relayStatus is a relay as its heartbeat reports it: no rooms, its viewers.
+type relayStatus struct{ rl *relay.Relay }
+
+func (s relayStatus) Status() ([]control.Room, bool)     { return nil, s.rl.Draining() }
+func (s relayStatus) Viewers() (uint32, []relay.Watched) { return s.rl.Viewers() }
 
 func healthcheck(port string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
