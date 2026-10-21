@@ -93,9 +93,14 @@ def main() -> int:
     check("lobby can't read a room (room:*)", lambda: lobby.get(f"room:{{{probe}}}:x"), perm)
     check("game-server can't write lobby:names", lambda: game.hset("lobby:names", "u_x", "x"), perm)
     check("assets can't read lobby:names", lambda: assets.hgetall("lobby:names"), perm)
-    check("assets can't redeem a join ticket (ticket:*)", lambda: assets.get("ticket:x"), perm)
+    check("assets can't redeem a join ticket (room:{id}:ticket:*)",
+          lambda: assets.set(f"room:{{{probe}}}:ticket:x", "1", nx=True, ex=60), perm)
+    check("game-server can't queue a Celery task (assets:*)", lambda: game.lpush("assets:celery", "x"), perm)
+    check("lobby can't queue a Celery task (assets:*)", lambda: lobby.lpush("assets:celery", "x"), perm)
     check("game-server can't FLUSHALL", lambda: game.flushall(), perm)
     check("lobby can't list every key (KEYS)", lambda: lobby.keys("*"), perm)
+    check("lobby can't list key names with SCAN", lambda: lobby.scan(0), perm)
+    check("assets can't list key names with RANDOMKEY", lambda: assets.randomkey(), perm)
 
     print("S3 identities (one per service, scoped to its buckets):")
     gs3 = s3("game-server", env["S3_GAME_SERVER_SECRET_KEY"])

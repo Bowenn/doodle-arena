@@ -39,10 +39,17 @@ expect() {
 
 # A refused connection never lists the broker's API versions ("Produce(0): 0 to 13 ..."); a
 # hang until the timeout is a refusal too (the SASL listener drops a client that skips the
-# handshake).
+# handshake). That alone would also pass with the broker down or a wrong address, so the same
+# call with a valid credential (the control, $1) must list them first.
 expect_no_connection() {
-  local what="$1" out
-  shift
+  local control="$1" what="$2" out
+  shift 2
+  out="$(timeout 20 "$@" --command-config "$control" 2>&1 < /dev/null)"
+  if ! grep -q "Produce(0)" <<< "$out"; then
+    echo "  FAIL  $what: the broker didn't answer a valid credential either, so this proves nothing"
+    failures=$((failures + 1))
+    return
+  fi
   out="$(timeout 20 "$@" 2>&1 < /dev/null)"
   if grep -q "Produce(0)" <<< "$out"; then
     echo "  FAIL  $what"
@@ -61,7 +68,7 @@ wrong="$(props marketplace "not-the-password" wrong-password)"
 network_admin="$(props admin "$KAFKA_ADMIN_PASSWORD" network-admin)"
 
 echo "Kafka ACLs (ADR 0013):"
-expect_no_connection "a client with no credential is refused" \
+expect_no_connection "$lobby" "a client with no credential is refused" \
   "$BIN/kafka-broker-api-versions.sh" --bootstrap-server "$BOOTSTRAP"
 expect "a wrong password is refused" "Authentication failed" \
   "$BIN/kafka-topics.sh" --bootstrap-server "$BOOTSTRAP" --command-config "$wrong" --list
@@ -73,6 +80,8 @@ expect "notifier can't write game.matches.v1" "TOPIC_AUTHORIZATION_FAILED|Topic 
   bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $notifier --topic game.matches.v1 --producer-property enable.idempotence=false"
 expect "assets can't write game.matches.v1" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
   bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $assets --topic game.matches.v1 --producer-property enable.idempotence=false"
+expect "game-server can't write assets.drawings.v1 (mint a drawing)" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
+  bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $game_server --topic assets.drawings.v1 --producer-property enable.idempotence=false"
 expect "assets can't join group marketplace (skip its records)" "Not authorized to access group|GroupAuthorization" \
   "$BIN/kafka-console-consumer.sh" --bootstrap-server "$BOOTSTRAP" --command-config "$assets" \
   --topic game.rounds.v1 --group marketplace --max-messages 1 --timeout-ms 10000
