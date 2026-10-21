@@ -44,7 +44,13 @@ TOKENS="$(uv run -q --project services/auth python scripts/drills/mint_tokens.py
 export TOKENS PROFILE="$profile"
 
 out=()
-if curl -s -o /dev/null --max-time 2 "http://$OTLP_ENDPOINT/v1/metrics"; then
+if [[ "$script" == loadtest/live.js ]]; then
+  # Not for the live test: k6 makes a sample of every message it receives (about 100,000 a
+  # second at 2,500 viewers), and exporting them took k6 from 2.5 to 5 cores. A slower k6 reads
+  # its sockets late, the relays' writes back up behind it, and the relays' p99 went from 49 ms
+  # to 630 ms (task 6.1c). The relays' own metrics are the measurement; k6 keeps its summary.
+  echo "k6's metrics stay in its summary for the live test (the relays' are in Grafana)." >&2
+elif curl -s -o /dev/null --max-time 2 "http://$OTLP_ENDPOINT/v1/metrics"; then
   out=(--out opentelemetry)
   export K6_OTEL_SERVICE_NAME=k6 K6_OTEL_METRIC_PREFIX=k6_ K6_OTEL_EXPORTER_PROTOCOL=http/protobuf \
     K6_OTEL_HTTP_EXPORTER_ENDPOINT="$OTLP_ENDPOINT" K6_OTEL_HTTP_EXPORTER_INSECURE=true \
