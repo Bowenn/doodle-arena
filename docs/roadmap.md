@@ -177,6 +177,7 @@ Track B:
 Shared:
 
 - [ ] **6.9 Final measurements**: load and fault-injection runs in AWS, SLOs, tail sampling, deploy markers, and an alert fire drill with the runbooks. From 5.4: the browser's errors and fetch spans (a traces pipeline on the browser receiver, with the same hardening as its metrics).
+- [ ] **6.10 AWS data across sessions** (ADR 0016): `aws-down` stops the writers (the game servers drain, the outbox relays flush), dumps the `auth`, `assets`, `marketplace` and `notifier` Postgres databases and assets' MongoDB database, and copies the `drawings` bucket to a versioned backup bucket in the bootstrap root. Each artifact is checked, and only then does it destroy the stack; any failure aborts the teardown with the stack still up. `aws-up` restores the latest backup into the empty stores before the migrations, and refuses a backup from a newer schema. `notifier-secret-key` moves to the bootstrap root so restored webhook secrets stay readable. Telemetry: duration, size and result per database for both directions. Exit: drawings, wallets, ownership and webhook endpoints made in one session are there in the next one; a teardown that can't back up deletes nothing; restore time recorded in `docs/performance.md`.
 
 **M6 exit criteria**
 
