@@ -116,12 +116,11 @@ echo "    dumped in $((SECONDS - dump_start)) s"
 
 echo "    5/6 copying the drawings"
 drawings_start=$SECONDS
-src="s3://$(drawings_bucket)/" dst="s3://$bucket/backups/$id/drawings/"
-aws s3 sync "$src" "$dst" --only-show-errors || fail "copying the drawings failed"
-totals() { aws s3 ls "$1" --recursive --summarize | awk '/Total Objects:/ { o = $3 } /Total Size:/ { s = $3 } END { print o + 0, s + 0 }'; }
-read -r drawings drawings_bytes < <(totals "$src")
-copied="$(totals "$dst")"
-[[ "$copied" == "$drawings $drawings_bytes" ]] || fail "the drawings copy ($copied) doesn't match the bucket ($drawings $drawings_bytes)"
+aws s3 sync "s3://$(drawings_bucket)/" "s3://$bucket/backups/$id/drawings/" --only-show-errors || fail "copying the drawings failed"
+source_totals="$(s3_totals "$(drawings_bucket)" "")" || fail "counting the drawings failed"
+copied="$(s3_totals "$bucket" "backups/$id/drawings/")" || fail "counting the copied drawings failed"
+[[ "$copied" == "$source_totals" ]] || fail "the drawings copy ($copied) doesn't match the bucket ($source_totals)"
+read -r drawings drawings_bytes <<< "$source_totals"
 drawings_seconds=$((SECONDS - drawings_start))
 echo "    $drawings drawings, $drawings_bytes bytes, in $drawings_seconds s"
 
@@ -132,24 +131,23 @@ aws s3 cp "$work/manifest.json" "s3://$bucket/backups/$id/manifest.json" --only-
   fail "writing the manifest failed"
 
 # Keep the newest 10 complete backups. Incomplete ones (no manifest, from a run that failed) go.
+# A backup whose manifest can't be looked up (an error, not a 404) is left alone.
 complete=()
-while read -r prefix; do
-  [[ -n "$prefix" && "$prefix" != None ]] || continue
-  b="${prefix#backups/}"
-  b="${b%/}"
-  if aws s3api head-object --bucket "$bucket" --key "backups/$b/manifest.json" >/dev/null 2>&1; then
+ids="$(backup_ids "$bucket")" || ids=""
+for b in $ids; do
+  status=0
+  has_manifest "$bucket" "$b" || status=$?
+  if ((status == 0)); then
     complete+=("$b")
-  else
+  elif ((status == 1)); then
     aws s3 rm "s3://$bucket/backups/$b/" --recursive --only-show-errors || true
   fi
-done < <(aws s3api list-objects-v2 --bucket "$bucket" --prefix backups/ --delimiter / \
-  --query 'CommonPrefixes[].Prefix' --output text | tr '\t' '\n')
-if ((${#complete[@]} > 10)); then
-  printf '%s\n' "${complete[@]}" | sort -r | tail -n +11 | while read -r old; do
-    echo "    removing the old backup $old"
-    aws s3 rm "s3://$bucket/backups/$old/" --recursive --only-show-errors || true
-  done
-fi
+done
+# backup_ids lists newest first.
+for old in ${complete[@]+"${complete[@]:10}"}; do
+  echo "    removing the old backup $old"
+  aws s3 rm "s3://$bucket/backups/$old/" --recursive --only-show-errors || true
+done
 
 backup_telemetry backup ok "$id" "$summary" "backup $id complete" "$drawings_seconds" "$drawings_bytes" "$((SECONDS - start))"
 echo "Backup $id complete in $((SECONDS - start)) s: s3://$bucket/backups/$id/"

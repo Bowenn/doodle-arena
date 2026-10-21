@@ -55,12 +55,49 @@ task_image_tag() {
   echo "${image##*:}"
 }
 
-# The data host's instance id while it runs, else nothing.
+# The data host's state ("running", "stopped"...; nothing when there is none). An AWS error fails,
+# so it is never mistaken for "no data host" (aws-down would then destroy without a backup).
+data_host_state() {
+  local state
+  state="$(aws ec2 describe-instances --filters Name=tag:Name,Values=doodle-data-host Name=tag:Root,Values=stack \
+    Name=instance-state-name,Values=pending,running,stopping,stopped \
+    --query 'Reservations[0].Instances[0].State.Name' --output text)" || return 1
+  [[ "$state" == None ]] || echo "$state"
+}
+
+# The data host's instance id while it runs, else nothing; an AWS error fails.
 data_host_id() {
   local id
   id="$(aws ec2 describe-instances --filters Name=tag:Name,Values=doodle-data-host Name=tag:Root,Values=stack \
-    Name=instance-state-name,Values=running --query 'Reservations[0].Instances[0].InstanceId' --output text)"
+    Name=instance-state-name,Values=running --query 'Reservations[0].Instances[0].InstanceId' --output text)" || return 1
   [[ "$id" == None ]] || echo "$id"
+}
+
+# has_manifest <bucket> <backup id>: 0 when the backup is complete, 1 when it has no manifest,
+# 2 on any other error (an expired session, the network): never read as "incomplete".
+has_manifest() {
+  local err
+  if err="$(aws s3api head-object --bucket "$1" --key "backups/$2/manifest.json" 2>&1 >/dev/null)"; then
+    return 0
+  fi
+  [[ "$err" == *"Not Found"* || "$err" == *404* || "$err" == *NoSuchKey* ]] && return 1
+  echo "$err" >&2
+  return 2
+}
+
+# backup_ids <bucket>: every backup id (complete or not), newest first. Fails on an AWS error.
+backup_ids() {
+  local prefixes
+  prefixes="$(aws s3api list-objects-v2 --bucket "$1" --prefix backups/ --delimiter / \
+    --query 'CommonPrefixes[].Prefix' --output text)" || return 1
+  echo "$prefixes" | tr '\t' '\n' | sed -n 's|^backups/\(.*\)/$|\1|p' | sort -r
+}
+
+# s3_totals <bucket> <prefix>: "<objects> <bytes>", 0 0 for none. Fails on an AWS error (aws s3 ls
+# exits 1 on an empty prefix, so it can't tell "empty" from "failed").
+s3_totals() {
+  aws s3api list-objects-v2 --bucket "$1" --prefix "$2" \
+    --query '[length(Contents || `[]`), sum(Contents[].Size || `[]`)]' --output text | tr '\t' ' '
 }
 
 # host_run <timeout seconds> <script>: runs a script on the data host through SSM Run Command and
@@ -68,25 +105,47 @@ data_host_id() {
 # fresh data host may not have registered with SSM yet, so sending is retried for 5 minutes.
 host_run() {
   local timeout="$1" script="$2" instance params id="" status="" _
-  instance="$(data_host_id)"
+  instance="$(data_host_id)" || return 1
   if [[ -z "$instance" ]]; then
     echo "the data host isn't running" >&2
     return 1
   fi
   params="$(python3 -c 'import json, sys; print(json.dumps({"commands": [sys.argv[1]], "executionTimeout": [sys.argv[2]]}))' "$script" "$timeout")"
+  local err errors=0 errfile
+  errfile="$(mktemp)"
   for _ in $(seq 30); do
-    id="$(aws ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript \
-      --parameters "$params" --query Command.CommandId --output text 2>/dev/null)" && break
+    if id="$(aws ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript \
+      --parameters "$params" --query Command.CommandId --output text 2>"$errfile")"; then
+      break
+    fi
     id=""
+    err="$(cat "$errfile")"
+    # Only an instance SSM doesn't know yet is worth waiting for; anything else is final.
+    if [[ "$err" != *InvalidInstanceId* ]]; then
+      rm -f "$errfile"
+      echo "$err" >&2
+      return 1
+    fi
     sleep 10
   done
+  rm -f "$errfile"
   if [[ -z "$id" ]]; then
     echo "SSM couldn't reach the data host ($instance) for 5 minutes" >&2
     return 1
   fi
   while :; do
-    status="$(aws ssm get-command-invocation --command-id "$id" --instance-id "$instance" \
-      --query Status --output text 2>/dev/null)" || status=Pending
+    # Right after send-command the invocation may not exist yet; a minute of errors is the end.
+    if status="$(aws ssm get-command-invocation --command-id "$id" --instance-id "$instance" \
+      --query Status --output text 2>/dev/null)"; then
+      errors=0
+    else
+      status=Pending
+      errors=$((errors + 1))
+      if ((errors > 12)); then
+        echo "can't read SSM command $id's status (an expired session?)" >&2
+        return 1
+      fi
+    fi
     case "$status" in Pending | InProgress | Delayed) sleep 5 ;; *) break ;; esac
   done
   aws ssm get-command-invocation --command-id "$id" --instance-id "$instance" \

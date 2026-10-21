@@ -13,10 +13,21 @@ init_stack
 
 if [[ -n "${SKIP_BACKUP:-}" ]]; then
   echo "SKIP_BACKUP is set: this session's data will not be kept."
-elif [[ -z "$(data_host_id)" ]]; then
-  echo "No data host is running, so there is nothing to back up (a rerun after a destroy that failed halfway)."
 else
-  "$(dirname "$0")/backup.sh" || exit 1
+  # Only a data host that is certainly gone skips the backup; a lookup that fails stops here.
+  if ! state="$(data_host_state)"; then
+    echo "Couldn't look up the data host: nothing destroyed. Retry, or SKIP_BACKUP=1 to discard the data." >&2
+    exit 1
+  fi
+  case "$state" in
+    "") echo "No data host exists, so there is nothing to back up (a rerun after a destroy that failed halfway)." ;;
+    running) "$(dirname "$0")/backup.sh" || exit 1 ;;
+    *)
+      echo "The data host is $state, so it can't be backed up: nothing destroyed. Start it" >&2
+      echo "(aws ec2 start-instances) and rerun, or SKIP_BACKUP=1 to discard the data." >&2
+      exit 1
+      ;;
+  esac
 fi
 
 # The first destroy shows the plan and asks; a retry destroys the same stack, so it doesn't.

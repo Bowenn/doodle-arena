@@ -164,7 +164,7 @@ Backups and restores (task 6.10, ADR 0016) run from the laptop around a stack th
 
 | Metric | Unit | Dimensions | What |
 |---|---|---|---|
-| `backup.duration` | Seconds | `direction` = backup, restore; `store` = mongo-assets, pg-auth, pg-assets, pg-marketplace, pg-notifier, drawings, all | One store's dump and upload, or download and load (on the data host); for drawings the bucket copy; for `all` the whole run, including stopping the writers or waiting for the data host |
+| `backup.duration` | Seconds | `direction` = backup, restore; `store` = mongo-assets, pg-auth, pg-assets, pg-marketplace, pg-notifier, drawings, all | One store's dump and upload, or its load once every file is downloaded and checked (on the data host); for drawings the bucket copy; for `all` the whole run, including stopping the writers or waiting for the data host |
 | `backup.size` | Bytes | `direction`, `store` (not `all`) | The dump file, or the drawings' total |
 | `backup.runs` | Count | `direction`, `store`, `result` = ok, error | One per store and one per run (`store=all`). A run that fails counts the stores it finished as ok and the one it stopped on as error |
 

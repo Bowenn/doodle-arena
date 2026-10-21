@@ -39,13 +39,18 @@ fail() {
 }
 
 if [[ -z "$id" ]]; then
-  # Ids are UTC timestamps, so the newest complete backup is the last one with a manifest.
-  for candidate in $(aws s3api list-objects-v2 --bucket "$bucket" --prefix backups/ --delimiter / \
-    --query 'CommonPrefixes[].Prefix' --output text | tr '\t' '\n' | sed -n 's|^backups/\(.*\)/$|\1|p' | sort -r); do
-    if aws s3api head-object --bucket "$bucket" --key "backups/$candidate/manifest.json" >/dev/null 2>&1; then
+  # Ids are UTC timestamps, newest first: the newest complete backup is the first with a manifest.
+  # A listing or lookup that fails stops here: read as "no backup", it would start a session
+  # empty, and its aws-down would then back up the empty stores.
+  ids="$(backup_ids "$bucket")" || fail "listing s3://$bucket/backups/ failed"
+  for candidate in $ids; do
+    status=0
+    has_manifest "$bucket" "$candidate" || status=$?
+    if ((status == 0)); then
       id="$candidate"
       break
     fi
+    ((status == 1)) || fail "looking up backup $candidate's manifest failed"
   done
   if [[ -z "$id" ]]; then
     echo "    no backup in s3://$bucket/backups/ yet: starting with empty stores"
@@ -66,7 +71,7 @@ bash /opt/doodle/backup/load.sh --ready" >/dev/null || fail "the data host's sto
 
 # The plan load.sh reads: one artifact per line, MongoDB first, each with a presigned GET. The
 # URLs are part of the SSM command, so they stay in its history: signed only now that the host
-# is ready, for 15 minutes, enough for the downloads to start.
+# is ready, for 15 minutes. load.sh downloads and checks every file before it loads any.
 plan=""
 while read -r name file _ sha256 _; do
   url="$(aws s3 presign "s3://$bucket/backups/$id/$file" --expires-in 900)" || fail "presigning $file failed"
@@ -103,8 +108,8 @@ fi
 drawings_start=$SECONDS
 read -r drawings drawings_bytes < <(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["drawings"]; print(d["objects"], d["bytes"])' "$manifest")
 aws s3 sync "s3://$bucket/backups/$id/drawings/" "s3://$(drawings_bucket)/" --only-show-errors || fail "copying the drawings back failed"
-copied="$(aws s3 ls "s3://$(drawings_bucket)/" --recursive --summarize | awk '/Total Objects:/ { print $3 + 0 }')"
-((${copied:-0} >= drawings)) || fail "the drawings bucket has $copied objects, the backup $drawings"
+copied="$(s3_totals "$(drawings_bucket)" "")" || fail "counting the drawings failed"
+((${copied%% *} >= drawings)) || fail "the drawings bucket has ${copied%% *} objects, the backup $drawings"
 drawings_seconds=$((SECONDS - drawings_start))
 echo "    $drawings drawings copied back in $drawings_seconds s"
 

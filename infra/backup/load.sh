@@ -44,17 +44,26 @@ if [[ "$(mongo_collections)" != 0 ]]; then
   exit 1
 fi
 
-# The plan is read on fd 3: docker exec -i inside the loop would swallow the rest of stdin.
+# First every file is downloaded and checked against the manifest's SHA-256, so a dead URL or a
+# bad file fails before any store is loaded. The plan is read on fd 3: docker exec -i would
+# swallow the rest of stdin.
+names=""
 while read -r name sha256 url <&3; do
   [[ -z "$name" ]] && continue
-  start="$(now)"
-  file="$dir/$name"
-  curl -fsS --retry 3 -o "$file" "$url"
-  info="$(file_info "$file")"
+  curl -fsS --retry 3 -o "$dir/$name" "$url"
+  info="$(file_info "$dir/$name")"
   if [[ "${info#* }" != "$sha256" ]]; then
     echo "$name: its SHA-256 doesn't match the manifest's" >&2
     exit 1
   fi
+  names="$names $name"
+done 3< "$plan"
+
+# Then each is loaded, in the plan's order.
+for name in $names; do
+  start="$(now)"
+  file="$dir/$name"
+  info="$(file_info "$file")"
   case "$name" in
     pg-*)
       db="${name#pg-}"
@@ -75,6 +84,7 @@ while read -r name sha256 url <&3; do
   esac
   echo "$info $(python3 -c 'import sys, time; print(f"{time.time() - float(sys.argv[1]):.3f}")' "$start") $name" > "$dir/$name.info"
   echo "    $name restored: ${info%% *} bytes" >&2
-done 3< "$plan"
+  rm -f "$file"
+done
 
 print_summary "$dir" restored
