@@ -21,3 +21,7 @@ More than 5 Stripe webhooks in 10 minutes had a signature that didn't verify (`m
 ## Afterwards
 
 If payments were delayed, check that every paid session was credited (`stripe_checkouts`), and note the window.
+
+## In AWS
+
+The same checks with the AWS commands in [Runbooks in AWS](README.md): logs in Grafana (`make aws-grafana`) or CloudWatch Logs, restarts with `aws ecs update-service --force-new-deployment`, and the stores through a Session Manager shell on the data host.

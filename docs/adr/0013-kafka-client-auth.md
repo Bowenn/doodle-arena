@@ -65,7 +65,7 @@ Notes on the table:
 - **Two game servers share one principal**, as ADR 0006's "per-class identity". They already share `room:*` and `round-logs`, and one game server impersonating the other gains nothing on Kafka.
 - **Assets' credential goes only to the processes that use Kafka**: the round consumer (`Read` on `game.rounds.v1`, group `assets`) and the outbox relay (`Write` on `assets.drawings.v1`). The web process, the Celery worker and beat get no Kafka credential at all, so a rendering exploit in the worker can't reach Kafka with the service's identity. Splitting them into `assets-consumer` and `assets-relay` would be stricter still, but a compromised relay can already publish any `DrawingApproved`, so the gain is small.
 - **`dev-tools`** is the host tools' principal, on the `EXTERNAL` listener: `Read` on every topic (eventctl assigns partitions and uses no group) and `Write` on `game.rounds.v1` and `game.matches.v1` for `fake-events.sh` and `pipeline-check`. It can mint coins, which is its purpose. It exists only locally and in CI, never in AWS.
-- **`admin`** is the super user (`super.users`). The init job and humans use it to create topics, SCRAM users and ACLs. No service has it.
+- **`admin`** is the super user (`super.users`). The init job and humans use it to create topics, SCRAM users and ACLs. No service has it. (As built, the init job has a super user of its own, `kafka-init`, and `admin` is for humans only, on the broker's localhost listener: see the implementation notes.)
 
 ## Options
 
@@ -184,7 +184,7 @@ Rejected: B for now (certificate operations in every environment, better done to
 ## Consequences
 
 - **Task 5.5 implements it, before task 5.2 exposes the stack** to anyone outside the team (roadmap). Until then Kafka stays open, and task 4.4's 8-player check remains the only bound on a forged `MatchFinished`. Design doc sections 7.9 and 11 name the gap.
-- **The work, as described in "Local dev, CI and rollout" above:** spike the first-credential bootstrap first; the `kafka-init` job (topics, SCRAM users, ACLs from one declarative list); the six `KAFKA_*_PASSWORD` entries in `.env.example`; client config in game-server, lobby, assets (consumer and relay only), marketplace and eventctl; the host scripts reading `KAFKA_DEV_TOOLS_PASSWORD`; the Kafka-only Compose network; `make kafka-acl-check` in CI's stack job; denials logged and counted; `docs/setup.md`, CLAUDE.md's commands and the design doc updated.
+- **The work, as described in "Local dev, CI and rollout" above:** spike the first-credential bootstrap first; the `kafka-init` job (topics, SCRAM users, ACLs from one declarative list); the `KAFKA_*_PASSWORD` entries in `.env.example` (six planned, eleven as built: one per principal plus `admin`, `kafka-init` and `broker`); client config in game-server, lobby, assets (consumer and relay only), marketplace and eventctl; the host scripts reading `KAFKA_DEV_TOOLS_PASSWORD`; the Kafka-only Compose network; `make kafka-acl-check` in CI's stack job; denials logged and counted; `docs/setup.md`, CLAUDE.md's commands and the design doc updated.
 - **Every new Kafka client adds a principal and its rows** to the ACL table and the init job's list, in the same task: the notifier (4.7), analytics and relays (Stage 6). A Flink exactly-once sink also needs a prefixed `TransactionalId` grant.
 - **Integration tests stay on unauthenticated brokers**; each service's client-config function is unit-tested with and without credentials, and the stack job's negative checks test the ACLs themselves.
 - **Still trusted:** an authenticated producer's content. A compromised or buggy game server can still publish wrong results, so the marketplace keeps its contract checks. Locally the traffic is unencrypted; that is accepted for a single-host bridge network and fixed by `SASL_SSL` in AWS.
@@ -193,11 +193,11 @@ Rejected: B for now (certificate operations in every environment, better done to
 
 ## Implementation notes (task 5.5)
 
-- **The first credential.** `infra/kafka/broker.sh` replaces the image's start script: it writes `server.properties` and formats the storage once with `kafka-storage.sh format --add-scram` for `admin` (KIP-900). The `CONTROLLER` listener can't use SCRAM, because the credentials live in the metadata log the controller serves. So it is SASL/PLAIN with a static `admin` user, on `localhost` only. No `ANONYMOUS` super user exists anywhere. The data moved to `/var/lib/kafka/data/kraft`, so a volume formatted before this task is left alone instead of starting without an admin.
+- **The first credential.** `infra/kafka/broker.sh` replaces the image's start script: it writes `server.properties` and formats the storage once with `kafka-storage.sh format --add-scram` (KIP-900), for `kafka-init` and `broker` since the follow-up below (first for `admin`). The `CONTROLLER` listener can't use SCRAM, because the credentials live in the metadata log the controller serves. So it is SASL/PLAIN with a static `broker` user, on `localhost` only. No `ANONYMOUS` super user exists anywhere. The data moved to `/var/lib/kafka/data/kraft`, so a volume formatted before this task is left alone instead of starting without an admin.
 - **More principals than the table above.**
   - `notifier`: reads `market.sales.v1`, `market.wallet.v1` and `auth.users.v1` in groups `notifier` and `notifier-auth`, and writes `notifier.dlq.v1`.
   - `auth`: the `auth-relay` writes `auth.users.v1`.
-  - `kafka-metrics`: Describe on every topic and group, and on the cluster, for broker-side lag.
+  - `kafka-metrics`: Describe on every topic and group, for broker-side lag. It had Describe on the cluster too until the Stage 5 review: that also reads the whole ACL table, and the lag scrapers don't need it.
   - `dev-tools`: Read on every topic, Write on `game.rounds.v1` and `game.matches.v1`, and Read on groups starting with `dev-tools-`. It exists only locally and in CI; in AWS its password is unset, so `init.sh` skips it.
   - The list is `GRANTS` in `infra/kafka/init.sh`.
 - **`make pipeline-check` moved** out of the assets web container, which no longer has Kafka. It runs as a one-off container of `assets-consumer`'s with the `dev-tools` credential, the one user besides the game server that may write `game.rounds.v1`.

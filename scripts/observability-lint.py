@@ -156,7 +156,7 @@ def check_rules(spec: set[str], panels: dict[str, set[int]]) -> dict[str, set[st
 
 def check_runbooks(by_runbook: dict[str, set[str]]) -> None:
     for path in sorted(RUNBOOKS.glob("*.md")):
-        if path.name == "TEMPLATE.md":
+        if path.name in ("TEMPLATE.md", "README.md"):  # the template, and the AWS commands page
             continue
         text = path.read_text()
         for section in RUNBOOK_SECTIONS:

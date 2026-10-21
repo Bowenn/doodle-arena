@@ -38,7 +38,7 @@ services/
   notifier/      Go: signed outgoing webhooks with retries and a dead-letter queue
   ai/            Python, FastAPI: moderation (stub first), guesser and hints later
   analytics/     Java, Flink (Stage 6): live top guesses, wash-trading detection
-libs/go/         Go packages the Go services share: authn, logging, kafkaauth, redistest
+libs/go/         Go packages the Go services share: authn, logging, kafkaauth, and the test helpers kafkatest, redistest, tcretry
 proto/           Protobuf: gRPC services and Kafka event schemas (shared contracts)
 web/             TypeScript, React + Canvas
 infra/           docker-compose, observability config, Terraform (Stage 5)
@@ -143,5 +143,5 @@ Keep this list accurate:
 - Redis has a user per service and the default user off (`infra/redis/start.sh`): `redis-cli` needs `--user admin` with `REDISCLI_AUTH` set to `REDIS_ADMIN_PASSWORD`, and a service's new key prefix needs an ACL change. Celery's broker URL is `REDIS_URL`, never `CELERY_BROKER_URL`: Celery prefers that environment variable over its configuration, which drops the Redis user.
 - SeaweedFS has an S3 identity per service (`infra/seaweedfs/entrypoint.sh`). `S3_ACCESS_KEY` and `S3_SECRET_KEY` in `.env` belong to `dev-tools` (the host tools), not to a service.
 - Kafka has three super users: `broker` (the broker), `kafka-init` (the init job) and `admin` (humans only, no SCRAM credential, localhost-only through `kafka-admin`). The broker image (`infra/kafka/Dockerfile`) carries the OpenTelemetry agent; the AWS data host mounts the same files and jar into the official image (no buildx there).
-- Kafka's data moved to `/var/lib/kafka/data/kraft` in task 5.5, so the broker formats a fresh storage with its admin credential; a volume from before keeps its old files unused (`docker volume rm doodle-arena_kafka-data` after `make down` reclaims them).
+- Kafka's data moved to `/var/lib/kafka/data/kraft` in task 5.5, so the broker formats a fresh storage with its first SCRAM credentials (`kafka-init` and `broker`); a volume from before keeps its old files unused (`docker volume rm doodle-arena_kafka-data` after `make down` reclaims them).
 - Testcontainers needs Docker's socket. `scripts/test.sh` sets `DOCKER_HOST` from the Docker context, because Docker Desktop may not create `/var/run/docker.sock`.

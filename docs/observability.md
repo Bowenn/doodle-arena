@@ -150,7 +150,8 @@ Two more sources besides the table: the Go services' runtime metrics (`go_gorout
 | `k6_ws_rtt` | Histogram (ms) | `ping` until `pong`, answered without the room: the network, the gateway and the socket's send queue (`game.ws.send_lag` is the queue's share), to tell them apart from the room |
 | `k6_guess_result` | Histogram (ms) | A guess until its `guess_result` |
 | `k6_join`, `k6_welcome` | Histogram (ms) | `POST /join` until the ticket; connect until `welcome` |
-| `k6_room_errors`, `k6_ws_closed` | Counter | A room that failed (tagged `step`), a socket the server closed (tagged `code`) |
+| `k6_room_errors`, `k6_reconnects` | Counter | A room that failed (tagged `step`); a socket the server closed that the player then resumed, as the web app does (tagged with the close `code`: 4010 room moved, 1001 going away, 1006 dropped), expected during a failover or drain |
+| `k6_resume` | Histogram (ms) | A socket closed until the player has `welcome` or `resumed` again: what a failover or drain costs a player under load |
 | `k6_rounds_completed`, `k6_matches_completed` | Counter | Rounds and matches the rooms finished |
 
 k6's built-ins (`k6_vus`, `k6_http_req_duration`, `k6_ws_msgs_sent` and the like) come along. A load test's virtual users are rooms, never metric attributes.
@@ -175,6 +176,7 @@ The gateway (Nginx) exports traces but no metrics, so the overview shows the ser
 - The showcase trace follows a purchase across languages: gateway, marketplace (Java), Postgres, the outbox, Kafka, notifier (Go), and the outgoing webhook.
 - The gateway creates the root span with `ngx_otel_module`, which ships in the official `nginx` image's `-otel` variant. It starts a trace or continues the browser's `traceparent`.
 - Span names: domain spans are `<service>.<operation>`, for example `market.purchase`, `lobby.quickplay` or `game.round.end` (the game server's prefix is `game`). HTTP, gRPC and database spans keep the names their instrumentation gives them, which follow the OpenTelemetry conventions, such as `POST /api/lobby/rooms/{room_id}/join`.
+- A game server's drain (task 5.5) is one `game.server.drain` span: `rooms.start`, `rooms.left` and `drain.complete` (whether every room moved before `DRAIN_TIMEOUT`), with the `drain started` and `drain finished` logs.
 - Span attributes for ids use dots: `room.id`, `match.id`, `user.id`, `round.no` (log fields keep `room_id` and the like). Ids are fine on spans, never on metrics.
 - Sampling:
   - Keep every trace for purchases, Stripe webhooks and rewards.

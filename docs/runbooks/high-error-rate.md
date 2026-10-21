@@ -23,3 +23,7 @@ A service answered more than 1% of its requests with a server error for 5 minute
 ## Afterwards
 
 Add a test for the failing path, and note the cause. Drill: `scripts/drills/alerts.py` makes this alert fire on purpose with `ai`'s `fail` mode.
+
+## In AWS
+
+The same checks with the AWS commands in [Runbooks in AWS](README.md): logs in Grafana (`make aws-grafana`) or CloudWatch Logs, restarts with `aws ecs update-service --force-new-deployment`, and the stores through a Session Manager shell on the data host.

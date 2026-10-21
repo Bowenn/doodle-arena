@@ -26,3 +26,7 @@ These alerts watch the notifier's own health, not developers' servers (design do
 ## Afterwards
 
 Note how many deliveries went DEAD during the incident: those developers lost events, and the DLQ (`notifier.dlq.v1`) has their `DeliveryDead` for support.
+
+## In AWS
+
+The same checks with the AWS commands in [Runbooks in AWS](README.md): logs in Grafana (`make aws-grafana`) or CloudWatch Logs, restarts with `aws ecs update-service --force-new-deployment`, and the stores through a Session Manager shell on the data host.

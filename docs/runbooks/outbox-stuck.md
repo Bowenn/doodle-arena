@@ -18,7 +18,7 @@ Nothing is lost: the events stay in the outbox and go out once the relay recover
 
 ## Check
 
-1. Is Kafka healthy? `make ps`; `docker compose -f infra/docker-compose.yml --env-file .env exec kafka /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092`. If Kafka is down, every outbox alert fires together.
+1. Is Kafka healthy? `make ps`; `docker compose -f infra/docker-compose.yml --env-file .env exec kafka /tmp/healthcheck.sh && echo up` (the broker's own healthcheck, as the `broker` user: a client without a credential is refused since ADR 0013). If Kafka is down, every outbox alert fires together.
 2. Is the relay running? `make logs s=auth` (web and `auth-relay`), `make logs s=assets` (includes `assets-relay`), `make logs s=marketplace`, `make logs s=game-server`. Look for `publish` warnings and their errors.
 3. Is one event poisoning the queue? A relay that publishes in order can stall behind one record Kafka refuses (too large, a deleted topic). The relay's warn log names the event id.
 4. For the game server: S3 (SeaweedFS) must be up too, because a round's stroke log is uploaded before its `RoundFinished` is published.
@@ -33,3 +33,7 @@ Nothing is lost: the events stay in the outbox and go out once the relay recover
 ## Afterwards
 
 Note how long the outbox was stuck and how many events waited. If it was Kafka, check ConsumerLagGrowing cleared too.
+
+## In AWS
+
+The same checks with the AWS commands in [Runbooks in AWS](README.md): logs in Grafana (`make aws-grafana`) or CloudWatch Logs, restarts with `aws ecs update-service --force-new-deployment`, and the stores through a Session Manager shell on the data host.

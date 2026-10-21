@@ -21,3 +21,7 @@ More than 3 rotated refresh tokens were replayed in 10 minutes (`auth.refreshes{
 ## Afterwards
 
 Note how many users were logged out and the cause. If this fires during normal use, raise the threshold with a note in observability.md.
+
+## In AWS
+
+The same checks with the AWS commands in [Runbooks in AWS](README.md): logs in Grafana (`make aws-grafana`) or CloudWatch Logs, restarts with `aws ecs update-service --force-new-deployment`, and the stores through a Session Manager shell on the data host.
