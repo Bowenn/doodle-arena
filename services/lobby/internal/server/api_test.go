@@ -31,19 +31,31 @@ type fakeRooms struct {
 	createErr error
 	created   []string // "host public max_players"
 	joinErr   error
+	watchErr  error
 	listed    *rooms.Cursor
 }
 
-func (f *fakeRooms) Create(_ context.Context, host string, public bool, s rooms.Settings) (rooms.Room, error) {
+func (f *fakeRooms) CreateRoom(_ context.Context, host string, o rooms.CreateOptions) (rooms.Room, error) {
 	if f.createErr != nil {
 		return rooms.Room{}, f.createErr
 	}
-	s, err := s.Resolve()
+	s, err := o.Settings.Resolve()
 	if err != nil {
 		return rooms.Room{}, err
 	}
-	f.created = append(f.created, fmt.Sprint(host, " ", public, " ", s.MaxPlayers))
-	return rooms.Room{ID: "r1", HostID: host, Mode: rooms.ModeClassic, Public: public, Settings: s}, nil
+	created := fmt.Sprint(host, " ", o.Public, " ", s.MaxPlayers)
+	if o.Live {
+		created += " live"
+	}
+	f.created = append(f.created, created)
+	return rooms.Room{ID: "r1", HostID: host, Mode: rooms.ModeClassic, Public: o.Public, Live: o.Live, Settings: s}, nil
+}
+
+func (f *fakeRooms) Watch(_ context.Context, user rooms.User, room string) (rooms.Join, error) {
+	if f.watchErr != nil {
+		return rooms.Join{}, f.watchErr
+	}
+	return rooms.Join{RoomID: room, WSURL: "/ws/relay-1/rooms/" + room, Ticket: "v-" + user.ID, ExpiresAt: time.Unix(60, 0)}, nil
 }
 
 func (f *fakeRooms) List(_ context.Context, after *rooms.Cursor, _ int) ([]rooms.Listing, *rooms.Cursor, error) {
@@ -100,6 +112,7 @@ func TestEveryRoomRouteNeedsAValidToken(t *testing.T) {
 		{http.MethodGet, "/api/lobby/rooms"},
 		{http.MethodPost, "/api/lobby/rooms/r1/join"},
 		{http.MethodPost, "/api/lobby/quickplay"},
+		{http.MethodPost, "/api/lobby/rooms/r1/watch"},
 	}
 	for _, rt := range routes {
 		for _, token := range []string{"", "forged"} {
@@ -129,7 +142,11 @@ func TestCreateRoom(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("private room: %d", rec.Code)
 	}
-	if want := []string{"u1 true 8", "u1 false 4"}; strings.Join(f.created, ",") != strings.Join(want, ",") {
+	rec, body = call(t, h, http.MethodPost, "/api/lobby/rooms", "good-u1", `{"live":true}`)
+	if rec.Code != http.StatusCreated || body["live"] != true {
+		t.Fatalf("live room: %d %v", rec.Code, body)
+	}
+	if want := []string{"u1 true 8", "u1 false 4", "u1 true 8 live"}; strings.Join(f.created, ",") != strings.Join(want, ",") {
 		t.Fatalf("created = %v, want %v", f.created, want)
 	}
 
@@ -215,6 +232,29 @@ func TestJoinAndQuickPlay(t *testing.T) {
 		}
 		if strings.Contains(rec.Body.String(), "redis") {
 			t.Errorf("internal error leaked to the client: %s", rec.Body.String())
+		}
+	}
+}
+
+func TestWatch(t *testing.T) {
+	f := &fakeRooms{}
+	h := newAPI(f)
+	rec, body := call(t, h, http.MethodPost, "/api/lobby/rooms/r1/watch", "good-u3", "")
+	if rec.Code != http.StatusOK || body["ticket"] != "v-u3" || body["ws_url"] != "/ws/relay-1/rooms/r1" {
+		t.Fatalf("%d %v", rec.Code, body)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("a ticket response must not be cached")
+	}
+	for err, want := range map[error][2]any{
+		rooms.ErrRoomNotFound: {http.StatusNotFound, "ROOM_NOT_FOUND"},
+		rooms.ErrNotLive:      {http.StatusConflict, "ROOM_NOT_LIVE"},
+		rooms.ErrNoRelays:     {http.StatusServiceUnavailable, "NO_RELAY"},
+	} {
+		f.watchErr = err
+		rec, body := call(t, h, http.MethodPost, "/api/lobby/rooms/r1/watch", "good-u3", "")
+		if rec.Code != want[0] || errorCode(body) != want[1] {
+			t.Errorf("%v: %d %v", err, rec.Code, body)
 		}
 	}
 }

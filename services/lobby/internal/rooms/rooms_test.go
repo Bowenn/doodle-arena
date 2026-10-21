@@ -1003,3 +1003,87 @@ func TestDrainWithNowhereToGoKeepsTheRooms(t *testing.T) {
 		t.Fatalf("lobby.reassignments = %v, want 1 failed/drain", got)
 	}
 }
+
+// relay records a relay's heartbeat (ADR 0017): its viewers and the rooms it streams.
+func (e *env) relay(t *testing.T, id string, viewers uint32, draining bool, watched ...registry.Watched) {
+	t.Helper()
+	_, err := e.reg.Record(t.Context(), registry.Server{
+		ID: id, Role: registry.RoleRelay, WSAddress: "/ws/" + id, Viewers: viewers, Draining: draining, Watched: watched,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRelaysNeverGetRooms(t *testing.T) {
+	e := newEnv(t)
+	e.relay(t, "relay-1", 0, false)
+	if _, err := e.svc.Create(t.Context(), "u-host", true, Settings{}); !errors.Is(err, ErrNoServers) {
+		t.Fatalf("only a relay registered: err = %v, want ErrNoServers", err)
+	}
+	e.beat(t, "gs-1", 50, false)
+	room, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil || room.ServerID != "gs-1" {
+		t.Fatalf("room = %+v, err = %v: a busy game server beats an idle relay", room, err)
+	}
+	if slices.Contains(e.alloc.calls, "relay-1:9090") {
+		t.Fatalf("AllocateRoom went to a relay: %v", e.alloc.calls)
+	}
+}
+
+func TestWatchPicksTheLeastLoadedRelay(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	room, err := e.svc.CreateRoom(t.Context(), "u-host", CreateOptions{Public: true, Live: true})
+	if err != nil || !room.Live {
+		t.Fatalf("room = %+v, err = %v", room, err)
+	}
+	e.relay(t, "relay-1", 900, false, registry.Watched{ID: room.ID, Viewers: 900})
+	e.relay(t, "relay-2", 300, false, registry.Watched{ID: room.ID, Viewers: 300})
+	e.relay(t, "relay-3", 0, true) // draining: never chosen
+
+	j, err := e.svc.Watch(t.Context(), User{ID: "u-v", Name: "Viewer"}, room.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.WSURL != "/ws/relay-2/rooms/"+room.ID || j.RoomID != room.ID {
+		t.Fatalf("watch = %+v, want relay-2, the least loaded that isn't draining", j)
+	}
+	// A viewer's ticket opens the relay, never a seat on the game server.
+	if _, err := e.verifier.VerifyViewer(j.Ticket, room.ID); err != nil {
+		t.Fatalf("viewer ticket: %v", err)
+	}
+	if _, err := e.verifier.Verify(j.Ticket, room.ID); err == nil {
+		t.Fatal("a viewer's ticket verified as a player's")
+	}
+
+	// The room list counts viewers over every relay.
+	page, _, err := e.svc.List(t.Context(), nil, 10)
+	if err != nil || len(page) != 1 || !page[0].Live || page[0].Viewers != 1200 {
+		t.Fatalf("listing = %+v, err = %v", page, err)
+	}
+}
+
+func TestWatchRefusesRoomsThatArentLiveAndNoRelays(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	plain, err := e.svc.Create(t.Context(), "u-host", true, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.relay(t, "relay-1", 0, false)
+	if _, err := e.svc.Watch(t.Context(), User{ID: "u-v"}, plain.ID); !errors.Is(err, ErrNotLive) {
+		t.Fatalf("not live: err = %v", err)
+	}
+	if _, err := e.svc.Watch(t.Context(), User{ID: "u-v"}, "nosuchroom"); !errors.Is(err, ErrRoomNotFound) {
+		t.Fatalf("no such room: err = %v", err)
+	}
+	live, err := e.svc.CreateRoom(t.Context(), "u-host", CreateOptions{Live: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.relay(t, "relay-1", 0, true) // the only relay drains
+	if _, err := e.svc.Watch(t.Context(), User{ID: "u-v"}, live.ID); !errors.Is(err, ErrNoRelays) {
+		t.Fatalf("no relay: err = %v", err)
+	}
+}

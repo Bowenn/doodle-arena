@@ -146,6 +146,10 @@ func TestHeartbeatValidation(t *testing.T) {
 			Rooms: []*lobbyv1.RoomStatus{{RoomId: "lobby:servers"}}}},
 		{"bad legacy room id", &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "/ws", ControlAddress: "x:1",
 			RoomIds: []string{"../x"}}},
+		{"relay reporting rooms", &lobbyv1.HeartbeatRequest{ServerId: "relay-1", WsAddress: "/ws/relay-1",
+			Role: lobbyv1.ServerRole_SERVER_ROLE_RELAY, Rooms: []*lobbyv1.RoomStatus{{RoomId: "r1"}}}},
+		{"relay with a bad watched room id", &lobbyv1.HeartbeatRequest{ServerId: "relay-1", WsAddress: "/ws/relay-1",
+			Role: lobbyv1.ServerRole_SERVER_ROLE_RELAY, Watched: []*lobbyv1.WatchedRoom{{RoomId: "lobby:x"}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -172,5 +176,58 @@ func TestCandidatesLeastLoadedFirst(t *testing.T) {
 	// Draining d is skipped; fewest sockets, then fewest rooms, then id.
 	if want := []string{"b", "e", "a", "c"}; !slices.Equal(ids, want) {
 		t.Fatalf("order = %v, want %v", ids, want)
+	}
+}
+
+// ADR 0017: a relay registers without a control address and reports viewers, not rooms.
+func TestRelayHeartbeat(t *testing.T) {
+	reg := New(redistest.New(t), time.Minute, quiet)
+	rooms := &touched{}
+	srv := NewGRPCServer(reg, rooms, time.Now, quiet)
+	req := &lobbyv1.HeartbeatRequest{
+		ServerId: "relay-1", WsAddress: "/ws/relay-1", Role: lobbyv1.ServerRole_SERVER_ROLE_RELAY, Viewers: 1200,
+		Watched: []*lobbyv1.WatchedRoom{{RoomId: "r1", Viewers: 1000}, {RoomId: "r2", Viewers: 200}},
+	}
+	if _, err := srv.Heartbeat(t.Context(), req); err != nil {
+		t.Fatal(err)
+	}
+	got, err := reg.Server(t.Context(), "relay-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsRelay() || got.Viewers != 1200 || len(got.Watched) != 2 || got.Watched[0] != (Watched{ID: "r1", Viewers: 1000}) {
+		t.Fatalf("relay = %+v", got)
+	}
+	if rooms.server != "" {
+		t.Fatal("a relay's heartbeat refreshed rooms: it owns none")
+	}
+	// A game server still needs its control address.
+	if _, err := srv.Heartbeat(t.Context(), &lobbyv1.HeartbeatRequest{ServerId: "gs-1", WsAddress: "/ws/gs-1"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("game server without a control address: err = %v", err)
+	}
+}
+
+func TestRelaysAndViewers(t *testing.T) {
+	servers := []Server{
+		{ID: "gs-1", Sockets: 0},
+		{ID: "relay-b", Role: RoleRelay, Viewers: 10, Watched: []Watched{{ID: "r1", Viewers: 10}}},
+		{ID: "relay-a", Role: RoleRelay, Viewers: 10, Watched: []Watched{{ID: "r1", Viewers: 4}, {ID: "r2", Viewers: 6}}},
+		{ID: "relay-c", Role: RoleRelay, Viewers: 0, Draining: true},
+		{ID: "relay-d", Role: RoleRelay, Viewers: 3},
+	}
+	var ids []string
+	for _, s := range Relays(servers) {
+		ids = append(ids, s.ID)
+	}
+	if want := []string{"relay-d", "relay-a", "relay-b"}; !slices.Equal(ids, want) {
+		t.Fatalf("relays = %v, want %v (no game server, no draining relay)", ids, want)
+	}
+	for _, s := range Candidates(servers) {
+		if s.IsRelay() {
+			t.Fatalf("Candidates offered relay %s a room", s.ID)
+		}
+	}
+	if v := Viewers(servers); v["r1"] != 14 || v["r2"] != 6 {
+		t.Fatalf("viewers = %v", v)
 	}
 }

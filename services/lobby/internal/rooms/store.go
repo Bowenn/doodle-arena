@@ -55,10 +55,12 @@ type Settings struct {
 
 // Room is the lobby's record of a room.
 type Room struct {
-	ID        string    `json:"id"`
-	HostID    string    `json:"host_id"`
-	Mode      string    `json:"mode"`
-	Public    bool      `json:"public"`
+	ID     string `json:"id"`
+	HostID string `json:"host_id"`
+	Mode   string `json:"mode"`
+	Public bool   `json:"public"`
+	// Live rooms can be watched by viewers through relays (ADR 0017).
+	Live      bool      `json:"live,omitempty"`
 	Settings  Settings  `json:"settings"`
 	ServerID  string    `json:"server_id"`
 	CreatedAt time.Time `json:"created_at"`

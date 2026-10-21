@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"net"
@@ -59,8 +60,19 @@ func (g *GRPCServer) Heartbeat(ctx context.Context, req *lobbyv1.HeartbeatReques
 	if !wsAddressPattern.MatchString(req.GetWsAddress()) {
 		return nil, status.Error(codes.InvalidArgument, "ws_address must be a gateway path under /ws")
 	}
-	if !validControlAddress(req.GetControlAddress()) {
+	relay := req.GetRole() == lobbyv1.ServerRole_SERVER_ROLE_RELAY
+	switch {
+	case relay && (len(req.GetRooms()) > 0 || len(req.GetRoomIds()) > 0):
+		// A relay owns no room: one that reported rooms could be sent their reassignment.
+		return nil, status.Error(codes.InvalidArgument, "a relay reports watched rooms, not rooms")
+	case relay && req.GetControlAddress() == "":
+	case !validControlAddress(req.GetControlAddress()):
 		return nil, status.Error(codes.InvalidArgument, "control_address must be host:port")
+	}
+	for _, w := range req.GetWatched() {
+		if !roomIDPattern.MatchString(w.GetRoomId()) {
+			return nil, status.Error(codes.InvalidArgument, "room ids are 1-64 lowercase letters or digits")
+		}
 	}
 	for _, r := range req.GetRooms() {
 		if !roomIDPattern.MatchString(r.GetRoomId()) {
@@ -80,6 +92,12 @@ func (g *GRPCServer) Heartbeat(ctx context.Context, req *lobbyv1.HeartbeatReques
 		Sockets:        req.GetSockets(),
 		Draining:       req.GetDraining(),
 		SeenAt:         g.now().UTC(),
+	}
+	if relay {
+		s.Role, s.Viewers = RoleRelay, req.GetViewers()
+		for _, w := range req.GetWatched() {
+			s.Watched = append(s.Watched, Watched{ID: w.GetRoomId(), Viewers: w.GetViewers()})
+		}
 	}
 	for _, r := range req.GetRooms() {
 		phase := PhaseWaiting
@@ -101,7 +119,7 @@ func (g *GRPCServer) Heartbeat(ctx context.Context, req *lobbyv1.HeartbeatReques
 		return nil, status.Error(codes.Unavailable, "registry unavailable")
 	}
 	if registered {
-		g.log.InfoContext(ctx, "game server registered", "server_id", s.ID,
+		g.log.InfoContext(ctx, "game server registered", "server_id", s.ID, "role", cmp.Or(s.Role, "game"),
 			"ws_address", s.WSAddress, "control_address", s.ControlAddress)
 	}
 	if len(s.Rooms) > 0 {

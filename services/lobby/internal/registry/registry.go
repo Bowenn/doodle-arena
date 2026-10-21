@@ -1,6 +1,6 @@
-// Package registry keeps the list of live game servers (design doc, section 4.3). Each game
-// server calls RegistryService.Heartbeat every 2 seconds; its entry in Redis expires 6 seconds
-// after the last one, which is how the lobby notices a dead server.
+// Package registry keeps the list of live game servers and relays (design doc, section 4.3;
+// ADR 0017). Each calls RegistryService.Heartbeat every 2 seconds; its entry in Redis expires 6
+// seconds after the last one, which is how the lobby notices a dead server.
 //
 // Redis keys (the lobby owns lobby:*):
 //
@@ -54,16 +54,32 @@ type Room struct {
 // Held is how many seats are taken: Seats, or Players from a server that doesn't report seats.
 func (r Room) Held() uint32 { return max(r.Seats, r.Players) }
 
-// Server is a game server's last heartbeat.
+// RoleRelay marks a relay (ADR 0017): it streams rooms to viewers and never owns one. A
+// server without a role is a game server.
+const RoleRelay = "relay"
+
+// Watched is one room a relay streams, and its viewers there.
+type Watched struct {
+	ID      string `json:"id"`
+	Viewers uint32 `json:"viewers"`
+}
+
+// Server is a game server's or a relay's last heartbeat.
 type Server struct {
 	ID             string    `json:"id"`
+	Role           string    `json:"role,omitempty"`
 	WSAddress      string    `json:"ws_address"`
 	ControlAddress string    `json:"control_address"`
 	Sockets        uint32    `json:"sockets"`
 	Draining       bool      `json:"draining"`
 	Rooms          []Room    `json:"rooms"`
+	Viewers        uint32    `json:"viewers,omitempty"` // a relay's
+	Watched        []Watched `json:"watched,omitempty"` // a relay's
 	SeenAt         time.Time `json:"seen_at"`
 }
+
+// IsRelay reports whether the server is a relay.
+func (s Server) IsRelay() bool { return s.Role == RoleRelay }
 
 // Room returns the server's report for a room, if it hosts it.
 func (s Server) Room(id string) (Room, bool) {
@@ -177,12 +193,13 @@ func (r *Registry) Server(ctx context.Context, id string) (Server, error) {
 	return s, nil
 }
 
-// Candidates returns the servers that may receive a new room, least loaded first: not
+// Candidates returns the game servers that may receive a new room, least loaded first: not
 // draining, ordered by open sockets, then by room count, then by id (so ties are stable).
+// Relays never receive rooms.
 func Candidates(servers []Server) []Server {
 	out := make([]Server, 0, len(servers))
 	for _, s := range servers {
-		if !s.Draining {
+		if !s.Draining && !s.IsRelay() {
 			out = append(out, s)
 		}
 	}
@@ -193,5 +210,31 @@ func Candidates(servers []Server) []Server {
 			cmp.Compare(a.ID, b.ID),
 		)
 	})
+	return out
+}
+
+// Relays returns the relays that may take a new viewer, least loaded first: not draining,
+// ordered by viewers, then by id (ADR 0017).
+func Relays(servers []Server) []Server {
+	var out []Server
+	for _, s := range servers {
+		if s.IsRelay() && !s.Draining {
+			out = append(out, s)
+		}
+	}
+	slices.SortFunc(out, func(a, b Server) int {
+		return cmp.Or(cmp.Compare(a.Viewers, b.Viewers), cmp.Compare(a.ID, b.ID))
+	})
+	return out
+}
+
+// Viewers counts each room's viewers across every relay.
+func Viewers(servers []Server) map[string]uint32 {
+	out := map[string]uint32{}
+	for _, s := range servers {
+		for _, w := range s.Watched {
+			out[w.ID] += w.Viewers
+		}
+	}
 	return out
 }
