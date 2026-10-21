@@ -108,3 +108,14 @@ On AWS (2026-10-20, the signed-out screen; Prometheus on the data host):
 | 2026-10-20, task 5.5c (238 resources: Redis's passwords) | 530 s | 325 s | 30 minutes (with the load test) |
 
 Cost (Cost Explorer, 2026-10-20): about $0.30 to $0.80 per stack-hour, mostly the NAT gateway, then ECS, the ALB and EC2. Credits covered all of it so far; the domain ($15 plus tax) was the only charge. Cost Explorer lags up to a day, so the latest sessions may show more later.
+
+## 5. Backup and restore (task 6.10)
+
+What `aws-down` adds before the destroy and `aws-up` before the migrations (ADR 0016). The recovery point is the last completed `aws-down`.
+
+| Where | Data | Dump (on the host) | Restore (load and count check) |
+|---|---|---|---|
+| Local, `make backup-check`, 2026-10-21 | 4 Postgres databases, 81,607 rows, 5.6 MB of dumps; MongoDB 6,978 replays, 2.5 GB in the collection, a 683 MB gzipped archive (load tests) | Postgres 0.5 to 1.0 s each; MongoDB 172 s | 42 s for all five |
+| AWS | Not measured yet: the first AWS session with task 6.10 records the backup's and the restore's time here | | |
+
+MongoDB is most of it, and it grows with every match (a replay averages 360 KB). A full read for the dump pulls the whole collection through WiredTiger's cache, which is why MongoDB's cache is capped at 1 GB on both stacks (without the cap, the local `mongod` grew to 2.6 GB and was OOM-killed).
