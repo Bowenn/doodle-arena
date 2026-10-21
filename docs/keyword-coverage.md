@@ -14,7 +14,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Java | marketplace (Spring Boot), analytics (Flink) | 4, 6 |
 | JUnit | marketplace tests, including the purchase-race test | 4 |
 | Go / Golang | lobby, game-server, notifier | 2, 4 |
-| AWS | S3, CloudWatch, deployment (ADR 0003) | 5 |
+| AWS | S3, CloudWatch, deployment (ADR 0003); backups that outlive the stack (ADR 0016) | 5, 6 |
 | GCP, Azure | Optional: AI service on Cloud Run; drawing backups to Azure Blob | 7 |
 | Docker | Every service; Docker Compose locally; multi-stage builds | 1 |
 | Amazon S3 | `round-logs` and `drawings` buckets (SeaweedFS locally) | 2, 3, 5 |
@@ -60,6 +60,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Rate limiting (token bucket) | Per-player token bucket in the game server; coarse Nginx limit | 1, 2 |
 | Build tools / build process | Go modules, Gradle, uv, Vite, Buf, multi-stage Docker builds, CI caching | 1 |
 | Deployment & release process | Terraform, rolling deploys, game-server draining, deploy markers | 5, 6 |
+| Backup and restore, disaster recovery | `pg_dump`/`mongodump` at every teardown, verified with checksums and row counts; a restore at every start, with a stated recovery point and a measured restore time (ADR 0016, task 6.10) | 6 |
 | Stream processing | Flink jobs | 6 |
 | Transactions | Purchase transaction; transactional outbox | 4 |
 | End-to-end project ownership | The whole project | All |
@@ -71,7 +72,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Technical documentation / design docs | `docs/` | All |
 | Deployment / release monitoring metrics, logs | Version-tagged telemetry, deploy markers, reconnect watch during deploys | 5, 6 |
 | OpenTelemetry, Prometheus & Grafana | The telemetry pipeline | 1, 5 |
-| Amazon CloudWatch | AWS resource metrics and logs; billing alarm | 5 |
+| Amazon CloudWatch | AWS resource metrics and logs; billing alarm; backup and restore metrics and logs | 5, 6 |
 | Monitoring, Observability, Telemetry | `docs/observability.md` | 1, 5 |
 | Alerting | Grafana alerting to Discord; invariant alerts | 5 |
 | Logging | JSON logs with trace IDs into Loki | 1 |

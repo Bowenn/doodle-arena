@@ -651,6 +651,10 @@ services:
 
   mongo:
     image: mongo:8.0.34
+    # WiredTiger's cache defaults to half of (memory - 1 GB), and memory here is the whole host
+    # (or Docker's VM), shared with every other store. A full read, such as aws-down's mongodump
+    # of every replay (task 6.10), grew it to 2.6 GB and got MongoDB OOM-killed locally.
+    command: ["--wiredTigerCacheSizeGB", "1"]
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?}

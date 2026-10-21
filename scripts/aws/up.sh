@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Starts a session in AWS (ADR 0003): creates the stack with every service at 0, runs the
-# database migrations as one-off tasks, then starts the services and waits until they are stable.
+# Starts a session in AWS (ADR 0003): creates the stack with every service at 0, restores the
+# latest backup into its empty stores (ADR 0016, scripts/aws/restore.sh), runs the database
+# migrations as one-off tasks, then starts the services and waits until they are stable.
 # On a stack that is already running it redeploys instead: the other services, then one game
 # server at a time.
-#   DOMAIN=example.com [ALLOWED_CIDRS=a.b.c.d/32,...] [IMAGE_TAG=<sha>] scripts/aws/up.sh
+#   DOMAIN=example.com [ALLOWED_CIDRS=a.b.c.d/32,...] [IMAGE_TAG=<sha>] [BACKUP_ID=<id> | RESTORE=none] scripts/aws/up.sh
 # It costs money from here until scripts/aws/down.sh (about $0.30-0.80 an hour, measured in
 # docs/performance.md).
 source "$(dirname "$0")/common.sh"
@@ -20,14 +21,9 @@ start=$SECONDS
 # together couldn't take each other's rooms, and a gateway or lobby restarting during a drain
 # makes every player reconnect at once (measured in AWS, PR #62).
 running_tag_of() {
-  local definition image
   [[ "$(aws ecs describe-services --cluster doodle-arena --services "$1" \
     --query 'services[?status==`ACTIVE`].runningCount | [0]' --output text 2>/dev/null)" =~ ^[1-9] ]] || return 0
-  definition="$(aws ecs describe-services --cluster doodle-arena --services "$1" \
-    --query 'services[0].taskDefinition' --output text)"
-  image="$(aws ecs describe-task-definition --task-definition "$definition" \
-    --query 'taskDefinition.containerDefinitions[0].image' --output text)"
-  echo "${image##*:}"
+  task_image_tag "$1"
 }
 held() { # held <server>=<tag>...: the -var that keeps those game servers at their tag
   python3 -c 'import json, sys; print("held_game_servers=" + json.dumps(dict(a.split("=", 1) for a in sys.argv[1:])))' "$@"
@@ -36,10 +32,10 @@ running_tag="$(running_tag_of game-server-2)"
 running_tag_1="$(running_tag_of game-server-1)"
 
 if [[ -n "$running_tag" ]]; then
-  echo "==> 1/3 the stack is running (game-server-2 on $running_tag): the migrations' task definitions for $IMAGE_TAG"
+  echo "==> 1/4 the stack is running (game-server-2 on $running_tag): the migrations' task definitions for $IMAGE_TAG"
   terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true -target=aws_ecs_task_definition.migrate
 else
-  echo "==> 1/3 the stack, no service running (open to: $ALLOWED_CIDRS, images: $IMAGE_TAG)"
+  echo "==> 1/4 the stack, no service running (open to: $ALLOWED_CIDRS, images: $IMAGE_TAG)"
   terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=false
 fi
 
@@ -72,11 +68,21 @@ migrate() {
   echo "$name failed; its logs are in CloudWatch Logs, /doodle-arena/ecs, stream prefix $name" >&2
   exit 1
 }
-echo "==> 2/3 migrations"
+# Only into a stack whose services are stopped: a running stack has its data already.
+if [[ -n "$running_tag" ]]; then
+  echo "==> 2/4 restore: skipped, the stack is running"
+else
+  echo "==> 2/4 restore the latest backup"
+  restore_start=$SECONDS
+  "$(dirname "$0")/restore.sh"
+  echo "    (restore step: $((SECONDS - restore_start)) s, including waiting for the data host)"
+fi
+
+echo "==> 3/4 migrations"
 migrate auth-migrate
 migrate assets-migrate
 
-echo "==> 3/3 the services"
+echo "==> 4/4 the services"
 if [[ -n "$running_tag" && -n "$running_tag_1" && ( "$running_tag" != "$IMAGE_TAG" || "$running_tag_1" != "$IMAGE_TAG" ) ]]; then
   echo "    everything but the game servers first"
   terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true \

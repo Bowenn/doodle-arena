@@ -1,6 +1,7 @@
 # Least privilege per role: the execution role pulls images, writes logs and reads secrets;
 # each task role holds only what its code calls (S3 for the game servers and assets); the data
-# host may read its own secrets and its config bundle, and read CloudWatch for Grafana.
+# host may read its own secrets and its config bundle, write backups, and read CloudWatch for
+# Grafana.
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
   statement {
@@ -137,6 +138,20 @@ resource "aws_iam_role_policy" "data_host" {
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
         Resource = ["${aws_s3_bucket.bucket["config"].arn}/*"]
+      },
+      # aws-down's dumps (ADR 0016, infra/backup/dump.sh), and nothing else. Write only:
+      # otel-lgtm can use this role too, so it must not read a backup back (restores download
+      # through presigned URLs the human running aws-up signs). Not the manifest, which makes a
+      # backup restorable and holds the SHA-256 each dump must match, and not the drawings: the
+      # human's credentials write both, so a host that is broken into can't forge a backup, and
+      # a dump it overwrites fails the restore's checksum.
+      {
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [
+          "arn:aws:s3:::doodle-arena-backups-${local.account_id}/backups/*/pg-*.dump",
+          "arn:aws:s3:::doodle-arena-backups-${local.account_id}/backups/*/mongo-assets.archive",
+        ]
       },
     ]
   })

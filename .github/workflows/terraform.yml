@@ -1,20 +1,27 @@
 # Checks the Terraform (infra/terraform/) offline, the same check as `make lint s=terraform`:
 # formatting, both roots and the service module validated without AWS access, then tflint. It
 # never plans or applies: that needs the account, and happens from a developer's machine
-# (scripts/aws/up.sh, ADR 0003).
+# (scripts/aws/up.sh, ADR 0003). It also runs the unit tests of the backup's logic
+# (scripts/aws/backups.py, ADR 0016), as `make test s=terraform` does.
 name: terraform
 
 on:
   pull_request:
     paths:
       - infra/terraform/**
+      - infra/backup/**
+      - scripts/aws/**
       - scripts/lint.sh
+      - scripts/test.sh
       - .github/workflows/terraform.yml
   push:
     branches: [master]
     paths:
       - infra/terraform/**
+      - infra/backup/**
+      - scripts/aws/**
       - scripts/lint.sh
+      - scripts/test.sh
       - .github/workflows/terraform.yml
   workflow_dispatch: {}
 
@@ -44,3 +51,5 @@ jobs:
           cache: false
       - name: Lint
         run: ./scripts/lint.sh terraform
+      - name: Test the backup logic (ADR 0016)
+        run: ./scripts/test.sh terraform

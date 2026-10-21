@@ -44,6 +44,8 @@ locals {
     { for f in fileset("${local.repo}/infra/kafka", "*") : "kafka/${f}" => "${local.repo}/infra/kafka/${f}" },
     { "redis/start.sh" = "${local.repo}/infra/redis/start.sh" },
     { "mongo/create-users.js" = "${local.repo}/infra/mongo/create-users.js" },
+    # The backup and restore scripts, run through SSM Run Command (ADR 0016).
+    { for f in fileset("${local.repo}/infra/backup", "*.sh") : "backup/${f}" => "${local.repo}/infra/backup/${f}" },
   )
 }
 
