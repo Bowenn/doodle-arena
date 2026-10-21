@@ -229,6 +229,12 @@ The room client (task 2.3):
 - The timer counts down to the server's deadline on the local clock. It is display only; the server ends phases. Clock skew shows as a timer that is a little off.
 - The ping round-trip time is shown next to the connection status and exported as `web.ws.rtt` (task 5.4), with the Core Web Vitals: `web/src/rum.ts` loads the OpenTelemetry SDK only after the page's load event.
 
+Live rooms (task 6.1b, ADR 0017):
+
+- The lobby has a "Live" checkbox for a new room and, above the open rooms, a "Live now" list: each live room's players and viewers (summed over every relay), with Watch. A live room in the open-rooms list shows its viewers and has Watch next to Join.
+- `/rooms/<room_id>/watch` is the room page as a viewer. It uses the same connection, which asks the lobby for a viewer's ticket (`POST /api/lobby/rooms/{id}/watch`) on every attempt and reconnects and resumes as a player's does. The page uses the same reducer and the same canvas, read-only. There is no Start button, no word choice and no guess box ("Viewers can't guess yet", until task 6.2). "Copy watch link" shares the page.
+- A room that isn't live (`409 ROOM_NOT_LIVE`) ends the connection with a message, and `503 NO_RELAY` is retried. The page reports its Web Vitals as `page=room`.
+
 The gallery (task 3.5):
 
 - `/gallery` lists everyone's approved drawings (newest first, "Load more" follows `next_cursor`) or, on "Drawn by me", your own in any state with its status. Opened from the end of a match (`/gallery?match_id=<id>`), it lists that match's drawings in round order. Thumbnails load straight from storage through their presigned URLs.
