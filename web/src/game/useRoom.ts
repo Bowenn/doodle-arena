@@ -1,13 +1,14 @@
 // React binding for a room: the connection lives outside React, the state in a reducer.
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { joinRoom } from '../lobby.ts'
+import { joinRoom, watchRoom } from '../lobby.ts'
 import { recordWsRtt } from '../rum.ts'
 import { RoomConnection, type ConnectionStatus } from './connection.ts'
 import type { ClientMessage } from './protocol.ts'
 import { roomReducer } from './roomState.ts'
 
-export function useRoom(roomId: string) {
+/** watch connects as a viewer, through a relay (ADR 0017), instead of as a player. */
+export function useRoom(roomId: string, { watch = false }: { watch?: boolean } = {}) {
   const [state, dispatch] = useReducer(roomReducer, null)
   const [status, setStatus] = useState<ConnectionStatus>({ kind: 'connecting' })
   const [rtt, setRtt] = useState<number | null>(null)
@@ -33,7 +34,7 @@ export function useRoom(roomId: string) {
           recordWsRtt(ms)
         },
       },
-      { join: joinRoom },
+      { join: watch ? watchRoom : joinRoom },
     )
     conn.current = c
     c.start()
@@ -41,7 +42,7 @@ export function useRoom(roomId: string) {
       c.close()
       conn.current = null
     }
-  }, [roomId])
+  }, [roomId, watch])
 
   const send = useCallback((msg: ClientMessage) => conn.current?.send(msg) ?? false, [])
 

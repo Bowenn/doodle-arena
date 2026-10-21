@@ -24,18 +24,20 @@ type Props = {
   onLeave: () => void
   /** Opens the gallery with this match's drawings (shown when the match has ended). */
   onMatchDrawings?: (matchId: string) => void
+  /** Watch a live room through a relay instead of playing (ADR 0017): nothing to draw or guess. */
+  watch?: boolean
 }
 
-export function Room({ roomId, onLeave, onMatchDrawings }: Props) {
-  const { state, status, rtt, welcomes, send } = useRoom(roomId)
+export function Room({ roomId, onLeave, onMatchDrawings, watch = false }: Props) {
+  const { state, status, rtt, welcomes, send } = useRoom(roomId, { watch })
 
   return (
     <main className="room">
       <div className="room-header">
-        <h1>Room {roomId}</h1>
+        <h1>{watch ? `Watching room ${roomId}` : `Room ${roomId}`}</h1>
         <StatusLine status={status} rtt={rtt} />
-        <button type="button" onClick={() => void copyLink(roomId)}>
-          Copy invite link
+        <button type="button" onClick={() => void copyLink(watch ? `${roomId}/watch` : roomId)}>
+          {watch ? 'Copy watch link' : 'Copy invite link'}
         </button>
         <button type="button" onClick={onLeave}>
           Leave
@@ -51,13 +53,18 @@ export function Room({ roomId, onLeave, onMatchDrawings }: Props) {
           {status.reason}
         </p>
       )}
-      {state ? <RoomBody state={state} send={send} welcomes={welcomes} live={status.kind === 'open'} /> : <p>Joining…</p>}
+      {state ? (
+        <RoomBody state={state} send={send} welcomes={welcomes} live={status.kind === 'open'} watching={watch} />
+      ) : (
+        <p>{watch ? 'Connecting to the stream…' : 'Joining…'}</p>
+      )}
     </main>
   )
 }
 
-async function copyLink(roomId: string) {
-  const url = `${window.location.origin}/rooms/${roomId}`
+/** path is the room id, or <id>/watch for a viewer's link. */
+async function copyLink(path: string) {
+  const url = `${window.location.origin}/rooms/${path}`
   try {
     await navigator.clipboard.writeText(url)
   } catch {
@@ -94,11 +101,13 @@ type BodyProps = {
   welcomes: number
   /** Whether the socket is up; a stale room can't be drawn on or guessed in. */
   live: boolean
+  /** A viewer: never a drawer, and no guess box until viewers can guess (task 6.2). */
+  watching: boolean
 }
 
-function RoomBody({ state, send, welcomes, live }: BodyProps) {
+function RoomBody({ state, send, welcomes, live, watching }: BodyProps) {
   const drawing = state.phase === 'drawing'
-  const canDraw = live && drawing && isDrawer(state)
+  const canDraw = !watching && live && drawing && isDrawer(state)
   return (
     <div className="room-grid">
       <section className="stage">
@@ -108,7 +117,11 @@ function RoomBody({ state, send, welcomes, live }: BodyProps) {
       <aside className="side">
         <Scoreboard state={state} />
         <Feed state={state} />
-        <GuessBox state={state} send={send} live={live} />
+        {watching ? (
+          <p className="muted viewer-note">You are watching. Viewers can't guess yet.</p>
+        ) : (
+          <GuessBox state={state} send={send} live={live} />
+        )}
       </aside>
     </div>
   )

@@ -124,6 +124,9 @@ export class RoomConnection {
       if (err instanceof LobbyError && err.code === 'ROOM_NOT_FOUND') {
         return this.finish(TERMINAL_CLOSES[CloseCode.NoRoom])
       }
+      if (err instanceof LobbyError && err.code === 'ROOM_NOT_LIVE') {
+        return this.finish("This room isn't live: it can't be watched.")
+      }
       if (err instanceof LobbyError && err.code === 'SIGNED_OUT') {
         return this.finish('You are signed out.')
       }

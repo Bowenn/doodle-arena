@@ -17,9 +17,10 @@ type View =
   | { kind: 'signed-in'; me: Me }
   | { kind: 'error' }
 
-/** The room id in a /rooms/<id> path, or null for the lobby. */
-function roomFromPath(path: string): string | null {
-  return /^\/rooms\/([a-z0-9]{1,64})$/.exec(path)?.[1] ?? null
+/** The room id in a /rooms/<id> path (or /rooms/<id>/watch for a viewer), or null. */
+function roomFromPath(path: string): { id: string; watch: boolean } | null {
+  const m = /^\/rooms\/([a-z0-9]{1,64})(\/watch)?$/.exec(path)
+  return m ? { id: m[1], watch: m[2] !== undefined } : null
 }
 
 /** The top bar's links, in order. */
@@ -80,7 +81,7 @@ export default function App() {
 
   if (view.kind === 'signed-in') {
     const { me } = view
-    const roomId = roomFromPath(path)
+    const room = roomFromPath(path)
     const drawingId = drawingFromPath(path)
     return (
       <>
@@ -121,10 +122,11 @@ export default function App() {
             </button>
           </span>
         </header>
-        {roomId ? (
+        {room ? (
           <Room
-            key={roomId}
-            roomId={roomId}
+            key={path}
+            roomId={room.id}
+            watch={room.watch}
             onLeave={() => go('/')}
             onMatchDrawings={(matchId) => go(`/gallery?match_id=${encodeURIComponent(matchId)}`)}
           />
@@ -163,6 +165,7 @@ export default function App() {
         ) : (
           <Lobby
             onEnter={(id) => go(`/rooms/${id}`)}
+            onWatch={(id) => go(`/rooms/${id}/watch`)}
             onLeaderboard={() => go('/leaderboard')}
             onGallery={() => go('/gallery')}
           />

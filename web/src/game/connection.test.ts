@@ -242,6 +242,20 @@ describe('RoomConnection', () => {
     expect(statuses.at(-1)).toEqual({ kind: 'closed', reason: 'This room no longer exists.' })
   })
 
+  it('stops when the lobby says the room is not live (a viewer, ADR 0017)', async () => {
+    join.mockRejectedValueOnce(new LobbyError('ROOM_NOT_LIVE', 409, 'not live'))
+    conn.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(statuses.at(-1)).toEqual({ kind: 'closed', reason: "This room isn't live: it can't be watched." })
+  })
+
+  it('retries when no relay can take a viewer yet', async () => {
+    join.mockRejectedValueOnce(new LobbyError('NO_RELAY', 503, 'busy'))
+    conn.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(statuses.at(-1)?.kind).toBe('reconnecting')
+  })
+
   it('retries when the lobby is unavailable', async () => {
     join.mockRejectedValueOnce(new LobbyError('NO_GAME_SERVER', 503, 'busy'))
     conn.start()

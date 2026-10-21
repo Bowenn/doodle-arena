@@ -11,7 +11,10 @@ It also prints how much later a viewer gets an event than a player (the relay's 
 Run it from the repo root against a running stack (make up). Access tokens are signed with the
 local development key in secrets/, through auth's own TokenIssuer:
 
-    uv run --project services/auth --with websockets python scripts/drills/live_room.py [viewers]
+    uv run --project services/auth --with websockets python scripts/drills/live_room.py [viewers] [--hold s]
+
+--hold keeps the drawer drawing for that many seconds (at most 150) before the round is guessed,
+so the room can be watched in a browser meanwhile (the lobby's "Live now").
 
 In a worktree, set DRILL_JWT_KEY to the main checkout's secrets/jwt-private.pem.
 """
@@ -20,6 +23,7 @@ import asyncio
 import contextlib
 import itertools
 import json
+import math
 import os
 import statistics
 import sys
@@ -82,9 +86,22 @@ class Socket:
         await self.ws.send(json.dumps({"type": typ, "data": data}))
 
     async def run(self):
+        # Ping every 5 s like the web app: a socket silent for 60 s is closed as idle.
+        async def ping(ws):
+            with contextlib.suppress(websockets.ConnectionClosed):
+                while True:
+                    await asyncio.sleep(5)
+                    await ws.send(
+                        json.dumps(
+                            {"type": "ping", "data": {"t": int(time.time() * 1000)}}
+                        )
+                    )
+
+        pinger = asyncio.create_task(ping(self.ws))
         with contextlib.suppress(websockets.ConnectionClosed):
             async for raw in self.ws:
                 self.msgs.append((time.monotonic(), json.loads(raw)))
+        pinger.cancel()
 
     def events(self):
         return [(t, m["data"]) for t, m in self.msgs if m["type"] == "event"]
@@ -114,13 +131,16 @@ async def closed_code(ws):
     return None
 
 
-async def main(n_viewers):
+async def main(n_viewers, hold):
     ok = True
     room = call(
         "POST",
         "/api/lobby/rooms",
         "live-host",
-        {"live": True, "settings": {"draw_seconds": 30, "choose_seconds": 10}},
+        {
+            "live": True,
+            "settings": {"draw_seconds": int(max(30, hold + 20)), "choose_seconds": 10},
+        },
     )
     rid = room["room_id"]
     print(f"live room {rid}")
@@ -164,12 +184,14 @@ async def main(n_viewers):
     await drawer.send("choose_word", {"index": 0})
     await asyncio.sleep(0.5)
     word = drawer.private("your_word")[0]["word"]
-    for i in range(40):
+    if hold:
+        print(f"drawing for {hold:.0f} s: watch it at {GW}/rooms/{rid}/watch")
+    for i in range(max(40, int(hold / 0.05))):
         await drawer.send(
             "stroke_batch",
             {
                 "stroke_id": f"s{i}",
-                "points": [[100 * i, 100, i]],
+                "points": spiral(i),
                 "color": "#112233",
                 "width": 3,
                 "done": True,
@@ -226,9 +248,28 @@ async def main(n_viewers):
     sys.exit(0 if ok else 1)
 
 
+def spiral(i):
+    """A few points of a growing spiral: something to look at while watching."""
+    r = min(300 + 12 * i, 4500)
+    return [
+        [
+            int(5000 + r * math.cos((i + k / 4) / 3)),
+            int(5000 + r * math.sin((i + k / 4) / 3)),
+            k,
+        ]
+        for k in range(4)
+    ]
+
+
 def host_url(sock, rid):
     return f"/ws/{sock.server}/rooms/{rid}"
 
 
 if __name__ == "__main__":
-    asyncio.run(main(int(sys.argv[1]) if len(sys.argv) > 1 else 6))
+    args = sys.argv[1:]
+    hold = 0.0
+    if "--hold" in args:
+        i = args.index("--hold")
+        hold = min(float(args[i + 1]), 150)
+        del args[i : i + 2]
+    asyncio.run(main(int(args[0]) if args else 6, hold))
