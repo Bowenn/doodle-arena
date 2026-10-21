@@ -9,6 +9,7 @@ import (
 
 	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
+	"github.com/Bowenn/gap-project_private/services/game-server/internal/relay"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -42,11 +43,18 @@ type Status interface {
 	Status() (rooms []control.Room, draining bool)
 }
 
-// Identity is how the lobby reaches this server.
+// ViewerStatus is what a relay reports besides Status (ADR 0017): its viewers, in total and per
+// room it streams.
+type ViewerStatus interface {
+	Viewers() (total uint32, rooms []relay.Watched)
+}
+
+// Identity is how the lobby reaches this server, and what it is.
 type Identity struct {
 	ServerID       string
 	WSAddress      string
-	ControlAddress string
+	ControlAddress string // empty for a relay
+	Role           lobbyv1.ServerRole
 }
 
 // Sender sends heartbeats.
@@ -108,6 +116,14 @@ func (s *Sender) beat(ctx context.Context) error {
 		WsAddress:      s.id.WSAddress,
 		ControlAddress: s.id.ControlAddress,
 		Draining:       draining,
+		Role:           s.id.Role,
+	}
+	if vs, ok := s.status.(ViewerStatus); ok {
+		total, watched := vs.Viewers()
+		req.Viewers = total
+		for _, w := range watched {
+			req.Watched = append(req.Watched, &lobbyv1.WatchedRoom{RoomId: w.RoomID, Viewers: w.Viewers})
+		}
 	}
 	for _, r := range rooms {
 		phase := lobbyv1.RoomPhase_ROOM_PHASE_WAITING

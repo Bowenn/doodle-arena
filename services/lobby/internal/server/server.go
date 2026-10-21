@@ -34,10 +34,11 @@ type Verifier interface {
 
 // Rooms is the room logic behind the API.
 type Rooms interface {
-	Create(ctx context.Context, hostID string, public bool, s rooms.Settings) (rooms.Room, error)
+	CreateRoom(ctx context.Context, hostID string, o rooms.CreateOptions) (rooms.Room, error)
 	List(ctx context.Context, after *rooms.Cursor, n int) ([]rooms.Listing, *rooms.Cursor, error)
 	Join(ctx context.Context, user rooms.User, roomID string) (rooms.Join, error)
 	QuickPlay(ctx context.Context, user rooms.User) (rooms.Join, error)
+	Watch(ctx context.Context, user rooms.User, roomID string) (rooms.Join, error)
 }
 
 // Leaderboard is the weekly leaderboard behind the API.
@@ -79,6 +80,7 @@ func NewHandler(info Info, deps Deps, opts ...otelhttp.Option) http.Handler {
 		mux.Handle("GET /api/lobby/rooms", auth(a.listRooms))
 		mux.Handle("POST /api/lobby/rooms/{room_id}/join", auth(a.joinRoom))
 		mux.Handle("POST /api/lobby/quickplay", auth(a.quickPlay))
+		mux.Handle("POST /api/lobby/rooms/{room_id}/watch", auth(a.watchRoom))
 		if deps.Leaderboard != nil {
 			mux.Handle("GET /api/lobby/leaderboard", auth(a.leaderboard))
 		}
@@ -130,7 +132,9 @@ func caller(r *http.Request) rooms.User {
 
 type createRoomRequest struct {
 	// Public rooms appear in the room list and in quick play. Defaults to true.
-	Public   *bool          `json:"public"`
+	Public *bool `json:"public"`
+	// Live rooms can be watched through relays (ADR 0017). Defaults to false.
+	Live     bool           `json:"live"`
 	Mode     string         `json:"mode"`
 	Settings rooms.Settings `json:"settings"`
 }
@@ -140,6 +144,7 @@ type roomResponse struct {
 	HostID    string         `json:"host_id"`
 	Mode      string         `json:"mode"`
 	Public    bool           `json:"public"`
+	Live      bool           `json:"live"`
 	Settings  rooms.Settings `json:"settings"`
 	CreatedAt time.Time      `json:"created_at"`
 }
@@ -154,13 +159,13 @@ func (a *api) createRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	public := req.Public == nil || *req.Public
-	room, err := a.rooms.Create(r.Context(), userID(r), public, req.Settings)
+	room, err := a.rooms.CreateRoom(r.Context(), userID(r), rooms.CreateOptions{Public: public, Live: req.Live, Settings: req.Settings})
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, roomResponse{
-		RoomID: room.ID, HostID: room.HostID, Mode: room.Mode, Public: room.Public,
+		RoomID: room.ID, HostID: room.HostID, Mode: room.Mode, Public: room.Public, Live: room.Live,
 		Settings: room.Settings, CreatedAt: room.CreatedAt,
 	})
 }
@@ -172,6 +177,8 @@ type listing struct {
 	Players    uint32         `json:"players"`
 	MaxPlayers uint32         `json:"max_players"`
 	Phase      registry.Phase `json:"phase"`
+	Live       bool           `json:"live"`
+	Viewers    uint32         `json:"viewers"`
 	CreatedAt  time.Time      `json:"created_at"`
 }
 
@@ -206,7 +213,7 @@ func (a *api) listRooms(w http.ResponseWriter, r *http.Request) {
 	for _, l := range page {
 		out.Rooms = append(out.Rooms, listing{
 			RoomID: l.ID, HostID: l.HostID, Mode: l.Mode, Players: l.Players,
-			MaxPlayers: l.Settings.MaxPlayers, Phase: l.Phase, CreatedAt: l.CreatedAt,
+			MaxPlayers: l.Settings.MaxPlayers, Phase: l.Phase, Live: l.Live, Viewers: l.Viewers, CreatedAt: l.CreatedAt,
 		})
 	}
 	if next != nil {
@@ -230,6 +237,22 @@ func (a *api) joinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.rememberName(r)
+	writeTicket(w, j)
+}
+
+// watchRoom hands out a viewer's ticket for a live room (ADR 0017). A viewer has no seat, so it
+// doesn't count towards the leaderboard's names either.
+func (a *api) watchRoom(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("room_id")
+	if !roomIDPattern.MatchString(id) {
+		writeError(w, r, http.StatusNotFound, "ROOM_NOT_FOUND", "no such room")
+		return
+	}
+	j, err := a.rooms.Watch(r.Context(), caller(r), id)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
 	writeTicket(w, j)
 }
 
@@ -300,6 +323,11 @@ func (a *api) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, rooms.ErrNoServers):
 		w.Header().Set("Retry-After", "2")
 		writeError(w, r, http.StatusServiceUnavailable, "NO_GAME_SERVER", "no game server can take a room right now")
+	case errors.Is(err, rooms.ErrNotLive):
+		writeError(w, r, http.StatusConflict, "ROOM_NOT_LIVE", "the room can't be watched")
+	case errors.Is(err, rooms.ErrNoRelays):
+		w.Header().Set("Retry-After", "2")
+		writeError(w, r, http.StatusServiceUnavailable, "NO_RELAY", "no relay can take a viewer right now")
 	case errors.Is(err, rooms.ErrRoomUnavailable):
 		w.Header().Set("Retry-After", "2")
 		writeError(w, r, http.StatusServiceUnavailable, "ROOM_UNAVAILABLE", "the room's game server is not reachable")

@@ -28,8 +28,11 @@ import (
 const (
 	// Issuer is the lobby.
 	Issuer = "doodle-lobby"
-	// Audience is every game server.
+	// Audience is every game server: a player's ticket.
 	Audience = "doodle-game"
+	// WatchAudience is every relay: a viewer's ticket (ADR 0017). Each role accepts only its
+	// own, so a viewer's ticket never takes a player's seat.
+	WatchAudience = "doodle-watch"
 	// TTL is the longest lifetime a ticket may have.
 	TTL = 60 * time.Second
 	// Leeway is the clock skew allowed on exp and iat.
@@ -132,13 +135,23 @@ func parsePublicKeys(data []byte, source string) ([]ed25519.PublicKey, error) {
 	return keys, nil
 }
 
-// Verify checks the signature (EdDSA only), issuer, audience, expiry, lifetime and room.
-// Single use is checked separately, by Redeem.
+// Verify checks a player's ticket: the signature (EdDSA only), issuer, audience, expiry,
+// lifetime and room. Single use is checked separately, by Redeem.
 func (v *Verifier) Verify(token, roomID string) (Ticket, error) {
+	return v.verify(Audience, token, roomID)
+}
+
+// VerifyViewer checks a viewer's ticket the same way, for a relay (audience WatchAudience).
+// Single use is checked by RedeemViewer.
+func (v *Verifier) VerifyViewer(token, roomID string) (Ticket, error) {
+	return v.verify(WatchAudience, token, roomID)
+}
+
+func (v *Verifier) verify(audience, token, roomID string) (Ticket, error) {
 	parser := jwt.NewParser(
 		jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}),
 		jwt.WithIssuer(Issuer),
-		jwt.WithAudience(Audience),
+		jwt.WithAudience(audience),
 		jwt.WithLeeway(Leeway),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
@@ -243,6 +256,26 @@ func (r *RedisRedeemer) Redeem(ctx context.Context, t Ticket, token int64) error
 	case res < 0:
 		return ErrNotOwner
 	case res == 0:
+		return ErrReused
+	}
+	return nil
+}
+
+// RedeemViewer marks a viewer's ticket used (room:{room_id}:viewer-ticket:{ticket_id}, SET NX)
+// and returns ErrReused the second time. There is no lease check: a relay doesn't own the room,
+// and a viewer writes nothing to it (ADR 0017).
+func RedeemViewer(ctx context.Context, rdb redis.UniversalClient, t Ticket, now time.Time) error {
+	ttl := t.ExpiresAt.Add(Leeway).Sub(now)
+	if ttl < time.Second {
+		ttl = time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	ok, err := rdb.SetNX(ctx, roomstore.ViewerTicketKey(t.RoomID, t.ID), "1", ttl).Result()
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
+	case !ok:
 		return ErrReused
 	}
 	return nil

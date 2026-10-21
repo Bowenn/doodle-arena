@@ -38,6 +38,8 @@ private static final long serialVersionUID = 0L;
         com.google.protobuf.LazyStringArrayList.emptyList();
     rooms_ = java.util.Collections.emptyList();
     controlAddress_ = "";
+    role_ = 0;
+    watched_ = java.util.Collections.emptyList();
   }
 
   public static final com.google.protobuf.Descriptors.Descriptor
@@ -311,7 +313,8 @@ private static final long serialVersionUID = 0L;
   /**
    * <pre>
    * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-   * for example "game-server-1:9090". Internal only; the gateway never routes it.
+   * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+   * relay, which takes no rooms.
    * </pre>
    *
    * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -333,7 +336,8 @@ private static final long serialVersionUID = 0L;
   /**
    * <pre>
    * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-   * for example "game-server-1:9090". Internal only; the gateway never routes it.
+   * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+   * relay, which takes no rooms.
    * </pre>
    *
    * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -352,6 +356,108 @@ private static final long serialVersionUID = 0L;
     } else {
       return (com.google.protobuf.ByteString) ref;
     }
+  }
+
+  public static final int ROLE_FIELD_NUMBER = 8;
+  private int role_ = 0;
+  /**
+   * <pre>
+   * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+   * </pre>
+   *
+   * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+   * @return The enum numeric value on the wire for role.
+   */
+  @java.lang.Override public int getRoleValue() {
+    return role_;
+  }
+  /**
+   * <pre>
+   * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+   * </pre>
+   *
+   * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+   * @return The role.
+   */
+  @java.lang.Override public com.doodlearena.proto.doodle.lobby.v1.ServerRole getRole() {
+    com.doodlearena.proto.doodle.lobby.v1.ServerRole result = com.doodlearena.proto.doodle.lobby.v1.ServerRole.forNumber(role_);
+    return result == null ? com.doodlearena.proto.doodle.lobby.v1.ServerRole.UNRECOGNIZED : result;
+  }
+
+  public static final int VIEWERS_FIELD_NUMBER = 9;
+  private int viewers_ = 0;
+  /**
+   * <pre>
+   * A relay's open viewer sockets, its load figure for watch placement.
+   * </pre>
+   *
+   * <code>uint32 viewers = 9 [json_name = "viewers"];</code>
+   * @return The viewers.
+   */
+  @java.lang.Override
+  public int getViewers() {
+    return viewers_;
+  }
+
+  public static final int WATCHED_FIELD_NUMBER = 10;
+  @SuppressWarnings("serial")
+  private java.util.List<com.doodlearena.proto.doodle.lobby.v1.WatchedRoom> watched_;
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  @java.lang.Override
+  public java.util.List<com.doodlearena.proto.doodle.lobby.v1.WatchedRoom> getWatchedList() {
+    return watched_;
+  }
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  @java.lang.Override
+  public java.util.List<? extends com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder> 
+      getWatchedOrBuilderList() {
+    return watched_;
+  }
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  @java.lang.Override
+  public int getWatchedCount() {
+    return watched_.size();
+  }
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  @java.lang.Override
+  public com.doodlearena.proto.doodle.lobby.v1.WatchedRoom getWatched(int index) {
+    return watched_.get(index);
+  }
+  /**
+   * <pre>
+   * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+   * </pre>
+   *
+   * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+   */
+  @java.lang.Override
+  public com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder getWatchedOrBuilder(
+      int index) {
+    return watched_.get(index);
   }
 
   private byte memoizedIsInitialized = -1;
@@ -388,6 +494,15 @@ private static final long serialVersionUID = 0L;
     }
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(controlAddress_)) {
       com.google.protobuf.GeneratedMessage.writeString(output, 7, controlAddress_);
+    }
+    if (role_ != com.doodlearena.proto.doodle.lobby.v1.ServerRole.SERVER_ROLE_UNSPECIFIED.getNumber()) {
+      output.writeEnum(8, role_);
+    }
+    if (viewers_ != 0) {
+      output.writeUInt32(9, viewers_);
+    }
+    for (int i = 0; i < watched_.size(); i++) {
+      output.writeMessage(10, watched_.get(i));
     }
     getUnknownFields().writeTo(output);
   }
@@ -427,6 +542,23 @@ private static final long serialVersionUID = 0L;
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(controlAddress_)) {
       size += com.google.protobuf.GeneratedMessage.computeStringSize(7, controlAddress_);
     }
+    if (role_ != com.doodlearena.proto.doodle.lobby.v1.ServerRole.SERVER_ROLE_UNSPECIFIED.getNumber()) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeEnumSize(8, role_);
+    }
+    if (viewers_ != 0) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeUInt32Size(9, viewers_);
+    }
+
+        {
+          final int count = watched_.size();
+          for (int i = 0; i < count; i++) {
+            size += com.google.protobuf.CodedOutputStream
+              .computeMessageSizeNoTag(watched_.get(i));
+          }
+          size += 1 * count;
+        }
     return size;
   }
   @java.lang.Override
@@ -465,6 +597,11 @@ private static final long serialVersionUID = 0L;
         .equals(other.getRoomsList())) return false;
     if (!getControlAddress()
         .equals(other.getControlAddress())) return false;
+    if (role_ != other.role_) return false;
+    if (getViewers()
+        != other.getViewers()) return false;
+    if (!getWatchedList()
+        .equals(other.getWatchedList())) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -495,6 +632,14 @@ private static final long serialVersionUID = 0L;
     }
     hash = (37 * hash) + CONTROL_ADDRESS_FIELD_NUMBER;
     hash = (53 * hash) + getControlAddress().hashCode();
+    hash = (37 * hash) + ROLE_FIELD_NUMBER;
+    hash = (53 * hash) + role_;
+    hash = (37 * hash) + VIEWERS_FIELD_NUMBER;
+    hash = (53 * hash) + getViewers();
+    if (getWatchedCount() > 0) {
+      hash = (37 * hash) + WATCHED_FIELD_NUMBER;
+      hash = (53 * hash) + getWatchedList().hashCode();
+    }
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -644,6 +789,15 @@ private static final long serialVersionUID = 0L;
       }
       bitField0_ = (bitField0_ & ~0x00000020);
       controlAddress_ = "";
+      role_ = 0;
+      viewers_ = 0;
+      if (watchedBuilder_ == null) {
+        watched_ = java.util.Collections.emptyList();
+      } else {
+        watched_ = null;
+        watchedBuilder_.clear();
+      }
+      bitField0_ = (bitField0_ & ~0x00000200);
       return this;
     }
 
@@ -686,6 +840,15 @@ private static final long serialVersionUID = 0L;
       } else {
         result.rooms_ = roomsBuilder_.build();
       }
+      if (watchedBuilder_ == null) {
+        if (((bitField0_ & 0x00000200) != 0)) {
+          watched_ = java.util.Collections.unmodifiableList(watched_);
+          bitField0_ = (bitField0_ & ~0x00000200);
+        }
+        result.watched_ = watched_;
+      } else {
+        result.watched_ = watchedBuilder_.build();
+      }
     }
 
     private void buildPartial0(com.doodlearena.proto.doodle.lobby.v1.HeartbeatRequest result) {
@@ -708,6 +871,12 @@ private static final long serialVersionUID = 0L;
       }
       if (((from_bitField0_ & 0x00000040) != 0)) {
         result.controlAddress_ = controlAddress_;
+      }
+      if (((from_bitField0_ & 0x00000080) != 0)) {
+        result.role_ = role_;
+      }
+      if (((from_bitField0_ & 0x00000100) != 0)) {
+        result.viewers_ = viewers_;
       }
     }
 
@@ -780,6 +949,38 @@ private static final long serialVersionUID = 0L;
         bitField0_ |= 0x00000040;
         onChanged();
       }
+      if (other.role_ != 0) {
+        setRoleValue(other.getRoleValue());
+      }
+      if (other.getViewers() != 0) {
+        setViewers(other.getViewers());
+      }
+      if (watchedBuilder_ == null) {
+        if (!other.watched_.isEmpty()) {
+          if (watched_.isEmpty()) {
+            watched_ = other.watched_;
+            bitField0_ = (bitField0_ & ~0x00000200);
+          } else {
+            ensureWatchedIsMutable();
+            watched_.addAll(other.watched_);
+          }
+          onChanged();
+        }
+      } else {
+        if (!other.watched_.isEmpty()) {
+          if (watchedBuilder_.isEmpty()) {
+            watchedBuilder_.dispose();
+            watchedBuilder_ = null;
+            watched_ = other.watched_;
+            bitField0_ = (bitField0_ & ~0x00000200);
+            watchedBuilder_ = 
+              com.google.protobuf.GeneratedMessage.alwaysUseFieldBuilders ?
+                 internalGetWatchedFieldBuilder() : null;
+          } else {
+            watchedBuilder_.addAllMessages(other.watched_);
+          }
+        }
+      }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
       return this;
@@ -847,6 +1048,29 @@ private static final long serialVersionUID = 0L;
               bitField0_ |= 0x00000040;
               break;
             } // case 58
+            case 64: {
+              role_ = input.readEnum();
+              bitField0_ |= 0x00000080;
+              break;
+            } // case 64
+            case 72: {
+              viewers_ = input.readUInt32();
+              bitField0_ |= 0x00000100;
+              break;
+            } // case 72
+            case 82: {
+              com.doodlearena.proto.doodle.lobby.v1.WatchedRoom m =
+                  input.readMessage(
+                      com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.parser(),
+                      extensionRegistry);
+              if (watchedBuilder_ == null) {
+                ensureWatchedIsMutable();
+                watched_.add(m);
+              } else {
+                watchedBuilder_.addMessage(m);
+              }
+              break;
+            } // case 82
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -1620,7 +1844,8 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+     * relay, which takes no rooms.
      * </pre>
      *
      * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -1641,7 +1866,8 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+     * relay, which takes no rooms.
      * </pre>
      *
      * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -1663,7 +1889,8 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+     * relay, which takes no rooms.
      * </pre>
      *
      * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -1681,7 +1908,8 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+     * relay, which takes no rooms.
      * </pre>
      *
      * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -1696,7 +1924,8 @@ private static final long serialVersionUID = 0L;
     /**
      * <pre>
      * host:port of this server's ControlService (gRPC), which the lobby dials for AllocateRoom,
-     * for example "game-server-1:9090". Internal only; the gateway never routes it.
+     * for example "game-server-1:9090". Internal only; the gateway never routes it. Empty from a
+     * relay, which takes no rooms.
      * </pre>
      *
      * <code>string control_address = 7 [json_name = "controlAddress"];</code>
@@ -1711,6 +1940,428 @@ private static final long serialVersionUID = 0L;
       bitField0_ |= 0x00000040;
       onChanged();
       return this;
+    }
+
+    private int role_ = 0;
+    /**
+     * <pre>
+     * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+     * </pre>
+     *
+     * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+     * @return The enum numeric value on the wire for role.
+     */
+    @java.lang.Override public int getRoleValue() {
+      return role_;
+    }
+    /**
+     * <pre>
+     * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+     * </pre>
+     *
+     * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+     * @param value The enum numeric value on the wire for role to set.
+     * @return This builder for chaining.
+     */
+    public Builder setRoleValue(int value) {
+      role_ = value;
+      bitField0_ |= 0x00000080;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+     * </pre>
+     *
+     * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+     * @return The role.
+     */
+    @java.lang.Override
+    public com.doodlearena.proto.doodle.lobby.v1.ServerRole getRole() {
+      com.doodlearena.proto.doodle.lobby.v1.ServerRole result = com.doodlearena.proto.doodle.lobby.v1.ServerRole.forNumber(role_);
+      return result == null ? com.doodlearena.proto.doodle.lobby.v1.ServerRole.UNRECOGNIZED : result;
+    }
+    /**
+     * <pre>
+     * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+     * </pre>
+     *
+     * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+     * @param value The role to set.
+     * @throws IllegalArgumentException if UNRECOGNIZED is provided.
+     * @return This builder for chaining.
+     */
+    public Builder setRole(com.doodlearena.proto.doodle.lobby.v1.ServerRole value) {
+      java.util.Objects.requireNonNull(value);
+      bitField0_ |= 0x00000080;
+      role_ = value.getNumber();
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * What the server does (ADR 0017). Unspecified is a game server, as before this field.
+     * </pre>
+     *
+     * <code>.doodle.lobby.v1.ServerRole role = 8 [json_name = "role"];</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearRole() {
+      bitField0_ = (bitField0_ & ~0x00000080);
+      role_ = 0;
+      onChanged();
+      return this;
+    }
+
+    private int viewers_ ;
+    /**
+     * <pre>
+     * A relay's open viewer sockets, its load figure for watch placement.
+     * </pre>
+     *
+     * <code>uint32 viewers = 9 [json_name = "viewers"];</code>
+     * @return The viewers.
+     */
+    @java.lang.Override
+    public int getViewers() {
+      return viewers_;
+    }
+    /**
+     * <pre>
+     * A relay's open viewer sockets, its load figure for watch placement.
+     * </pre>
+     *
+     * <code>uint32 viewers = 9 [json_name = "viewers"];</code>
+     * @param value The viewers to set.
+     * @return This builder for chaining.
+     */
+    public Builder setViewers(int value) {
+
+      viewers_ = value;
+      bitField0_ |= 0x00000100;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's open viewer sockets, its load figure for watch placement.
+     * </pre>
+     *
+     * <code>uint32 viewers = 9 [json_name = "viewers"];</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearViewers() {
+      bitField0_ = (bitField0_ & ~0x00000100);
+      viewers_ = 0;
+      onChanged();
+      return this;
+    }
+
+    private java.util.List<com.doodlearena.proto.doodle.lobby.v1.WatchedRoom> watched_ =
+      java.util.Collections.emptyList();
+    private void ensureWatchedIsMutable() {
+      if (!((bitField0_ & 0x00000200) != 0)) {
+        watched_ = new java.util.ArrayList<com.doodlearena.proto.doodle.lobby.v1.WatchedRoom>(watched_);
+        bitField0_ |= 0x00000200;
+       }
+    }
+
+    private com.google.protobuf.RepeatedFieldBuilder<
+        com.doodlearena.proto.doodle.lobby.v1.WatchedRoom, com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder, com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder> watchedBuilder_;
+
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public java.util.List<com.doodlearena.proto.doodle.lobby.v1.WatchedRoom> getWatchedList() {
+      if (watchedBuilder_ == null) {
+        return java.util.Collections.unmodifiableList(watched_);
+      } else {
+        return watchedBuilder_.getMessageList();
+      }
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public int getWatchedCount() {
+      if (watchedBuilder_ == null) {
+        return watched_.size();
+      } else {
+        return watchedBuilder_.getCount();
+      }
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.WatchedRoom getWatched(int index) {
+      if (watchedBuilder_ == null) {
+        return watched_.get(index);
+      } else {
+        return watchedBuilder_.getMessage(index);
+      }
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder setWatched(
+        int index, com.doodlearena.proto.doodle.lobby.v1.WatchedRoom value) {
+      if (watchedBuilder_ == null) {
+        java.util.Objects.requireNonNull(value);
+        ensureWatchedIsMutable();
+        watched_.set(index, value);
+        onChanged();
+      } else {
+        watchedBuilder_.setMessage(index, value);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder setWatched(
+        int index, com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder builderForValue) {
+      if (watchedBuilder_ == null) {
+        ensureWatchedIsMutable();
+        watched_.set(index, builderForValue.build());
+        onChanged();
+      } else {
+        watchedBuilder_.setMessage(index, builderForValue.build());
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder addWatched(com.doodlearena.proto.doodle.lobby.v1.WatchedRoom value) {
+      if (watchedBuilder_ == null) {
+        java.util.Objects.requireNonNull(value);
+        ensureWatchedIsMutable();
+        watched_.add(value);
+        onChanged();
+      } else {
+        watchedBuilder_.addMessage(value);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder addWatched(
+        int index, com.doodlearena.proto.doodle.lobby.v1.WatchedRoom value) {
+      if (watchedBuilder_ == null) {
+        java.util.Objects.requireNonNull(value);
+        ensureWatchedIsMutable();
+        watched_.add(index, value);
+        onChanged();
+      } else {
+        watchedBuilder_.addMessage(index, value);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder addWatched(
+        com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder builderForValue) {
+      if (watchedBuilder_ == null) {
+        ensureWatchedIsMutable();
+        watched_.add(builderForValue.build());
+        onChanged();
+      } else {
+        watchedBuilder_.addMessage(builderForValue.build());
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder addWatched(
+        int index, com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder builderForValue) {
+      if (watchedBuilder_ == null) {
+        ensureWatchedIsMutable();
+        watched_.add(index, builderForValue.build());
+        onChanged();
+      } else {
+        watchedBuilder_.addMessage(index, builderForValue.build());
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder addAllWatched(
+        java.lang.Iterable<? extends com.doodlearena.proto.doodle.lobby.v1.WatchedRoom> values) {
+      if (watchedBuilder_ == null) {
+        ensureWatchedIsMutable();
+        com.google.protobuf.AbstractMessageLite.Builder.addAll(
+            values, watched_);
+        onChanged();
+      } else {
+        watchedBuilder_.addAllMessages(values);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder clearWatched() {
+      if (watchedBuilder_ == null) {
+        watched_ = java.util.Collections.emptyList();
+        bitField0_ = (bitField0_ & ~0x00000200);
+        onChanged();
+      } else {
+        watchedBuilder_.clear();
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public Builder removeWatched(int index) {
+      if (watchedBuilder_ == null) {
+        ensureWatchedIsMutable();
+        watched_.remove(index);
+        onChanged();
+      } else {
+        watchedBuilder_.remove(index);
+      }
+      return this;
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder getWatchedBuilder(
+        int index) {
+      return internalGetWatchedFieldBuilder().getBuilder(index);
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder getWatchedOrBuilder(
+        int index) {
+      if (watchedBuilder_ == null) {
+        return watched_.get(index);  } else {
+        return watchedBuilder_.getMessageOrBuilder(index);
+      }
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public java.util.List<? extends com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder> 
+         getWatchedOrBuilderList() {
+      if (watchedBuilder_ != null) {
+        return watchedBuilder_.getMessageOrBuilderList();
+      } else {
+        return java.util.Collections.unmodifiableList(watched_);
+      }
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder addWatchedBuilder() {
+      return internalGetWatchedFieldBuilder().addBuilder(
+          com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.getDefaultInstance());
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder addWatchedBuilder(
+        int index) {
+      return internalGetWatchedFieldBuilder().addBuilder(
+          index, com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.getDefaultInstance());
+    }
+    /**
+     * <pre>
+     * A relay's viewers per room it streams. A relay owns no rooms: room_ids and rooms stay empty.
+     * </pre>
+     *
+     * <code>repeated .doodle.lobby.v1.WatchedRoom watched = 10 [json_name = "watched"];</code>
+     */
+    public java.util.List<com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder> 
+         getWatchedBuilderList() {
+      return internalGetWatchedFieldBuilder().getBuilderList();
+    }
+    private com.google.protobuf.RepeatedFieldBuilder<
+        com.doodlearena.proto.doodle.lobby.v1.WatchedRoom, com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder, com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder> 
+        internalGetWatchedFieldBuilder() {
+      if (watchedBuilder_ == null) {
+        watchedBuilder_ = new com.google.protobuf.RepeatedFieldBuilder<
+            com.doodlearena.proto.doodle.lobby.v1.WatchedRoom, com.doodlearena.proto.doodle.lobby.v1.WatchedRoom.Builder, com.doodlearena.proto.doodle.lobby.v1.WatchedRoomOrBuilder>(
+                watched_,
+                ((bitField0_ & 0x00000200) != 0),
+                getParentForChildren(),
+                isClean());
+        watched_ = null;
+      }
+      return watchedBuilder_;
     }
 
     // @@protoc_insertion_point(builder_scope:doodle.lobby.v1.HeartbeatRequest)

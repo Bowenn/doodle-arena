@@ -6,7 +6,7 @@ from doodle.lobby.v1 import registry_pb2 as doodle_dot_lobby_dot_v1_dot_registry
 
 
 class RegistryServiceStub:
-    """RegistryService is served by the lobby and called by every game server.
+    """RegistryService is served by the lobby and called by every game server and relay.
     """
 
     def __init__(self, channel):
@@ -23,7 +23,7 @@ class RegistryServiceStub:
 
 
 class RegistryServiceServicer:
-    """RegistryService is served by the lobby and called by every game server.
+    """RegistryService is served by the lobby and called by every game server and relay.
     """
 
     def Heartbeat(self, request, context):
@@ -51,7 +51,7 @@ def add_RegistryServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class RegistryService:
-    """RegistryService is served by the lobby and called by every game server.
+    """RegistryService is served by the lobby and called by every game server and relay.
     """
 
     @staticmethod

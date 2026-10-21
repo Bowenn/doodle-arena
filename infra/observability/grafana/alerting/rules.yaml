@@ -296,6 +296,41 @@ groups:
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/slow-broadcasts.md
           __dashboardUid__: da-game-server
           __panelId__: "13"
+      - uid: slow-relay-broadcast
+        title: SlowRelayBroadcast
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Viewers of live rooms (ADR 0017): from the owner's commit to the write to the
+              # viewer's socket, over every viewer of every relay. p99, the M6 target's own
+              # percentile (250 ms). Only with more than 100 viewers, so a handful of viewers on
+              # slow phones isn't an incident.
+              expr: >-
+                histogram_quantile(0.99, sum by (le) (rate(relay_broadcast_latency_milliseconds_bucket[5m])))
+                and on() (sum(relay_viewers) > 100)
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [250]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: game-server
+        annotations:
+          summary: "Viewer broadcast latency p99 is {{ $values.A }} ms: live-room viewers see the drawing late."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/slow-relay-broadcast.md
+          __dashboardUid__: da-game-server
+          __panelId__: "16"
       - uid: outbox-stuck
         title: OutboxStuck
         condition: C

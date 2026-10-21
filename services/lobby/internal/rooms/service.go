@@ -54,6 +54,10 @@ var (
 	ErrInvalidSettings = errors.New("invalid room settings")
 	ErrNoServers       = errors.New("no game server can take the room")
 	ErrRoomUnavailable = errors.New("the room's game server is not reachable")
+	// ErrNotLive means the room exists but can't be watched (ADR 0017).
+	ErrNotLive = errors.New("the room is not live")
+	// ErrNoRelays means no relay can take a viewer right now.
+	ErrNoRelays = errors.New("no relay can take a viewer")
 )
 
 // Servers is the part of the registry the service reads.
@@ -62,9 +66,10 @@ type Servers interface {
 	Server(ctx context.Context, id string) (registry.Server, error)
 }
 
-// TicketSigner mints join tickets (ADR 0005).
+// TicketSigner mints join tickets (ADR 0005) and viewer tickets (ADR 0017).
 type TicketSigner interface {
 	Sign(userID, name, roomID string) (string, time.Time, error)
+	SignViewer(userID, name, roomID string) (string, time.Time, error)
 }
 
 // User is the verified caller: id and display name from the access token.
@@ -87,6 +92,14 @@ type Listing struct {
 	Players uint32 // connected
 	Seats   uint32 // held, connected or not: what decides whether the room is full
 	Phase   registry.Phase
+	Viewers uint32 // watching through relays, for a live room
+}
+
+// CreateOptions are what the host chooses for a new room.
+type CreateOptions struct {
+	Public   bool
+	Live     bool // viewers may watch it (ADR 0017)
+	Settings Settings
 }
 
 // Service is the room logic behind the REST API.
@@ -100,6 +113,7 @@ type Service struct {
 	tracer      trace.Tracer
 	allocations metric.Int64Counter
 	reassigns   metric.Int64Counter
+	watches     metric.Int64Counter
 	// lockHolder re-checks the reassigner lock before each move (RunReassigner sets it).
 	lockHolder func(context.Context) bool
 
@@ -109,6 +123,16 @@ type Service struct {
 	// is a latency optimisation, not shared state.
 	mu      sync.Mutex
 	suspect map[string]time.Time
+	// issued counts the viewer tickets this lobby gave each relay since that relay's last
+	// heartbeat (keyed by it), so a burst of viewers between two heartbeats spreads over the
+	// relays instead of all going to the one that was least loaded 2 seconds ago. Per process,
+	// like suspect: it corrects a stale report, it isn't shared state.
+	issued map[string]issuedSince
+}
+
+type issuedSince struct {
+	beat  time.Time // the relay heartbeat the count started from
+	count uint32
 }
 
 // NewService wires the room service. Metrics and spans go to the global OpenTelemetry
@@ -126,9 +150,16 @@ func NewService(store *Store, servers Servers, alloc Allocator, tickets TicketSi
 	if err != nil {
 		return nil, fmt.Errorf("lobby.reassignments: %w", err)
 	}
+	watches, err := otel.Meter("lobby").Int64Counter("lobby.watches",
+		metric.WithDescription("Viewer tickets asked for, by result: success, not_live, no_relays or error"),
+		metric.WithUnit("{request}"))
+	if err != nil {
+		return nil, fmt.Errorf("lobby.watches: %w", err)
+	}
 	return &Service{
 		store: store, servers: servers, alloc: alloc, tickets: tickets, now: now, log: log,
-		tracer: otel.Tracer("lobby"), allocations: allocations, reassigns: reassigns, suspect: make(map[string]time.Time),
+		tracer: otel.Tracer("lobby"), allocations: allocations, reassigns: reassigns, watches: watches,
+		suspect: make(map[string]time.Time), issued: map[string]issuedSince{},
 	}, nil
 }
 
@@ -166,19 +197,25 @@ func newRoomID() string {
 	return strings.ToLower(roomIDEncoding.EncodeToString(b[:]))
 }
 
-// Create allocates a new room on the least-loaded healthy game server. If a server is full,
+// Create allocates a new room that isn't live (see CreateRoom).
+func (s *Service) Create(ctx context.Context, hostID string, public bool, settings Settings) (Room, error) {
+	return s.CreateRoom(ctx, hostID, CreateOptions{Public: public, Settings: settings})
+}
+
+// CreateRoom allocates a new room on the least-loaded healthy game server. If a server is full,
 // draining or unreachable, it tries the next one, up to maxAttempts servers.
-func (s *Service) Create(ctx context.Context, hostID string, public bool, settings Settings) (room Room, err error) {
+func (s *Service) CreateRoom(ctx context.Context, hostID string, o CreateOptions) (room Room, err error) {
 	ctx, span := s.tracer.Start(ctx, "lobby.create_room")
 	defer func() { endSpan(span, err) }()
 
-	settings, err = settings.Resolve()
+	public := o.Public
+	settings, err := o.Settings.Resolve()
 	if err != nil {
 		return Room{}, err
 	}
 	now := s.now().UTC()
 	room = Room{
-		ID: newRoomID(), HostID: hostID, Mode: ModeClassic, Public: public,
+		ID: newRoomID(), HostID: hostID, Mode: ModeClassic, Public: public, Live: o.Live,
 		Settings: settings, CreatedAt: now, PlacedAt: now,
 	}
 	span.SetAttributes(attribute.String("room.id", room.ID))
@@ -216,7 +253,7 @@ func (s *Service) Create(ctx context.Context, hostID string, public bool, settin
 				return Room{}, err
 			}
 			s.count(ctx, "success")
-			s.log.InfoContext(ctx, "room created", "room_id", room.ID, "user_id", hostID, "server_id", srv.ID, "public", public)
+			s.log.InfoContext(ctx, "room created", "room_id", room.ID, "user_id", hostID, "server_id", srv.ID, "public", public, "live", o.Live)
 			return room, nil
 		}
 		switch status.Code(err) {
@@ -351,6 +388,7 @@ func (s *Service) List(ctx context.Context, after *Cursor, n int) ([]Listing, *C
 	for _, srv := range all {
 		byID[srv.ID] = srv
 	}
+	viewers := registry.Viewers(all)
 	out := make([]Listing, 0, len(page))
 	for _, r := range page {
 		srv, live := byID[r.ServerID]
@@ -364,9 +402,82 @@ func (s *Service) List(ctx context.Context, after *Cursor, n int) ([]Listing, *C
 			}
 			st = registry.Room{ID: r.ID, Phase: registry.PhaseWaiting}
 		}
-		out = append(out, Listing{Room: r, Players: st.Players, Seats: st.Held(), Phase: st.Phase})
+		out = append(out, Listing{Room: r, Players: st.Players, Seats: st.Held(), Phase: st.Phase, Viewers: viewers[r.ID]})
 	}
 	return out, next, nil
+}
+
+// Watch returns a relay's WebSocket URL for a live room and a single-use viewer ticket (ADR
+// 0017). The relay is the least-loaded one: every relay can stream every room, because it reads
+// the room from Redis, wherever the room runs.
+func (s *Service) Watch(ctx context.Context, user User, roomID string) (j Join, err error) {
+	ctx, span := s.tracer.Start(ctx, "lobby.watch_room", trace.WithAttributes(attribute.String("room.id", roomID)))
+	result := "error"
+	defer func() {
+		s.watches.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+		endSpan(span, err)
+	}()
+	room, err := s.store.Get(ctx, roomID)
+	if err != nil {
+		if errors.Is(err, ErrRoomNotFound) {
+			result = "not_live"
+		}
+		return Join{}, err
+	}
+	if !room.Live {
+		result = "not_live"
+		return Join{}, ErrNotLive
+	}
+	all, err := s.servers.Servers(ctx)
+	if err != nil {
+		return Join{}, err
+	}
+	relays := registry.Relays(all)
+	if len(relays) == 0 {
+		result = "no_relays"
+		s.log.WarnContext(ctx, "no relay for a viewer", "room_id", room.ID, "user_id", user.ID)
+		return Join{}, ErrNoRelays
+	}
+	relay := s.pickRelay(relays)
+	ticket, exp, err := s.tickets.SignViewer(user.ID, user.Name, room.ID)
+	if err != nil {
+		return Join{}, err
+	}
+	result = "success"
+	span.SetAttributes(attribute.String("server_id", relay.ID))
+	s.log.InfoContext(ctx, "viewer ticket issued", "room_id", room.ID, "user_id", user.ID, "server_id", relay.ID)
+	return Join{
+		RoomID:    room.ID,
+		WSURL:     strings.TrimRight(relay.WSAddress, "/") + "/rooms/" + room.ID,
+		Ticket:    ticket,
+		ExpiresAt: exp,
+	}, nil
+}
+
+// pickRelay takes the relay with the fewest viewers: those it last reported plus the tickets
+// this lobby issued for it since that report.
+func (s *Service) pickRelay(relays []registry.Server) registry.Server {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	load := func(r registry.Server) uint32 {
+		if is, ok := s.issued[r.ID]; ok && is.beat.Equal(r.SeenAt) {
+			return r.Viewers + is.count
+		}
+		return r.Viewers
+	}
+	best := relays[0]
+	for _, r := range relays[1:] {
+		if load(r) < load(best) {
+			best = r
+		}
+	}
+	is := s.issued[best.ID]
+	if !is.beat.Equal(best.SeenAt) {
+		is = issuedSince{beat: best.SeenAt}
+	}
+	is.count++
+	s.issued[best.ID] = is
+	return best
 }
 
 // QuickPlay puts the player in the fullest waiting public room that has space, or creates a

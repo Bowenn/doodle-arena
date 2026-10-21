@@ -100,9 +100,16 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `game.outbox.requeued` | Counter | `reason` = takeover (left by the previous owner), stale (this server's, failed or dropped) | game-server |
 | `game.events.queued` | UpDownCounter | – (finished rounds and matches waiting for the publisher) | game-server |
 | `game.events.publish.duration` | Histogram (ms) | `topic` (for rounds it includes the stroke-log upload; retries included) | game-server |
+| `relay.viewers` | UpDownCounter | – (viewers connected to this relay, ADR 0017; Prometheus: `relay_viewers`) | game-server (relay) |
+| `relay.rooms` | UpDownCounter | – (rooms this relay streams: one stream per watched room) | game-server (relay) |
+| `relay.broadcast.latency` | Histogram (ms) | – (from the owner's commit of an event, the stream entry's `t`, until the write to a viewer's socket returns; one sample per viewer per event. The M6 target is p99 under 250 ms at 5,000 viewers. The owner's clock against the relay's: the same host locally, NTP across hosts in AWS) | game-server (relay) |
+| `relay.stream.lag` | Histogram (ms) | – (from the owner's commit until the relay read the event with `XREAD`: the part of the latency before the fan-out) | game-server (relay) |
+| `relay.viewers.closed` | Counter | `reason` = slow (its send queue filled), room_ended, shutdown, error | game-server (relay) |
+| `relay.stream.rebuilds` | Counter | `reason` = start (a room's first viewer on this relay), gap (the relay fell behind the stream's trim and reloaded the room) | game-server (relay) |
 | `auth.logins` | Counter | `result` = success, failed | auth |
 | `auth.refreshes` | Counter | `result` = rotated, reuse_detected, expired, invalid | auth |
 | `lobby.allocations` | Counter | `result` = success, no_servers, exhausted (every tried server full or draining), error | lobby |
+| `lobby.watches` | Counter | `result` = success, not_live (no such room, or it isn't live), no_relays, error (viewer tickets, ADR 0017) | lobby |
 | `lobby.reassignments` | Counter | `result` = moved, ended (the game server answered NOT_FOUND), failed (retried on the next pass); `reason` = failover (the server's heartbeats stopped, or it no longer reports the room), drain (the server is shutting down and drains, task 5.5) | lobby |
 | `lobby.servers.healthy` | Gauge | – (game servers whose heartbeat arrived in the last 6 s, draining ones included) | lobby |
 | `lobby.leaderboard.matches` | Counter | `result` = applied, duplicate (the match was counted before: a redelivery), skipped (an unset or unknown `oneof` case, or a malformed message) | lobby |
@@ -173,7 +180,7 @@ The log lines use the services' format with `service=aws-backup`, plus `backup_i
 Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into Grafana's "Doodle Arena" folder (task 5.1). They're read-only in the UI: change the JSON, and Grafana picks it up within 30 seconds.
 
 1. Service overview (`da-overview`): firing alerts, recent error and warning logs from Loki, request rate, server-error share and p95 latency per service (HTTP and gRPC servers together), auth sign-ins and refreshes, the lobby, and, in AWS, the last 30 days of backups and restores from CloudWatch (time, size per store, failures).
-2. Game server (`da-game-server`): connections, rooms, broadcast latency, input and send lag, scheduler latency, guesses, reconnects, takeovers, and the event outbox.
+2. Game server (`da-game-server`): connections, rooms, broadcast latency, input and send lag, scheduler latency, guesses, reconnects, takeovers, the event outbox, and the relays of live rooms (viewers, viewer broadcast latency and stream lag, viewers closed and stream reloads, viewer tickets).
 3. Marketplace (`da-marketplace`): the three invariant gauges and the outbox lag as stats, purchases and conflicts, lock waits, idempotent replays, Stripe webhooks, rewards and minting.
 4. Async pipeline (`da-async-pipeline`): Kafka consumer lag, the outbox lags, Celery job age, the drawing pipeline and moderation, webhook deliveries, the queue age and the dead-letter queue.
 5. Load test (`da-load-test`, task 5.3): what k6 applies and what players feel, next to the game servers' broadcast latency, input and send lag, scheduler latency, rooms, connections and Go runtime, and, in AWS, ECS CPU from CloudWatch. The panels to watch while `make loadtest` runs, and to screenshot for the README.
@@ -187,6 +194,7 @@ The gateway (Nginx) exports traces but no metrics, so the overview shows the ser
 - The gateway creates the root span with `ngx_otel_module`, which ships in the official `nginx` image's `-otel` variant. It starts a trace or continues the browser's `traceparent`.
 - Span names: domain spans are `<service>.<operation>`, for example `market.purchase`, `lobby.quickplay` or `game.round.end` (the game server's prefix is `game`). HTTP, gRPC and database spans keep the names their instrumentation gives them, which follow the OpenTelemetry conventions, such as `POST /api/lobby/rooms/{room_id}/join`.
 - A game server's drain (task 5.5) is one `game.server.drain` span: `rooms.start`, `rooms.left` and `drain.complete` (whether every room moved before `DRAIN_TIMEOUT`), with the `drain started` and `drain finished` logs.
+- A viewer's connection to a relay (ADR 0017) is a `game.ws.connect` span with `ws.role=viewer`; each time a relay loads a room from its snapshot it is a `relay.stream.load` span (`room.id`, `reason` = start or gap, `seq`, `events`). The fan-out itself is measured, not traced: one span per event per viewer would be thousands a second.
 - Span attributes for ids use dots: `room.id`, `match.id`, `user.id`, `round.no` (log fields keep `room_id` and the like). Ids are fine on spans, never on metrics.
 - Sampling:
   - Keep every trace for purchases, Stripe webhooks and rewards.
@@ -210,6 +218,7 @@ Starting rules (tune the thresholds after the first load test):
 | OutboxStuck | `game.outbox.pending > 0` for 10 minutes (Kafka or S3 down, or an entry that can't be published; rewards and drawings are waiting) | warning |
 | OwnershipViolation | `market.ownership.violations > 0` | critical |
 | SlowBroadcasts | p95 of `game.room.input_lag` or of `game.ws.send_lag` above 250 ms for 5 minutes (one alert per lag, labelled `lag` = input or send), while the game servers write more than 10 messages a second (a near-idle stack with one slow phone isn't an incident). Input lag is the way into a room, send lag the way out; together they are most of what players feel. 250 ms from a local run with both game servers capped at 0.25 CPU (evidence log, 2026-10-19): healthy, input lag p95 stays under 1 ms; at 40 rooms its 5-minute p95 sat at 0.8 to 1.9 s, tracking k6's stroke fan-out, and the alert fired 5 minutes after it crossed. Send lag rarely gets there when the server is the cause (its 5-minute p95 peaked at 195 ms), but it's the signal for slow clients or a slow gateway. Until task 5.3 it watched `game.broadcast.duration`, which ends when an event is queued: in the AWS load test pongs waited seconds while it read under 0.1 ms. That metric stays on the dashboards to diagnose the room actor itself. p95 rather than p99, because one client on a slow network can be more than 1% of a small stack's messages; a server that falls behind moves them all | warning |
+| SlowRelayBroadcast | p99 of `relay.broadcast.latency` above 250 ms for 5 minutes while more than 100 viewers watch (ADR 0017): live-room viewers see the drawing late. p99 because it is the M6 target's percentile, and viewers of one room all get the same events, so a slow tail is a slow relay or slow viewers, not a slow room. Players aren't affected: relays only read the room | warning |
 | HighErrorRate | Server errors (HTTP 5xx; gRPC `UNKNOWN`, `DEADLINE_EXCEEDED`, `INTERNAL`, `UNAVAILABLE`, `DATA_LOSS`) above 1% of requests for 5 minutes, per service, when the service had at least 20 requests in those 5 minutes | warning |
 | ConsumerLagGrowing | A consumer group's lag (`kafka_consumer_group_lag_sum`) above 0 and higher than 10 minutes earlier, for 5 minutes | warning |
 | AuthOutboxStuck | `auth.outbox.lag` above 60 s for 5 minutes (Kafka down, or `auth-relay` stopped: a credential revocation isn't reaching the notifier, so a thief's webhooks keep running) | critical |

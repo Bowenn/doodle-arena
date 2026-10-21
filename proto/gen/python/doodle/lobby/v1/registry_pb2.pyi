@@ -7,17 +7,26 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class ServerRole(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    SERVER_ROLE_UNSPECIFIED: _ClassVar[ServerRole]
+    SERVER_ROLE_GAME: _ClassVar[ServerRole]
+    SERVER_ROLE_RELAY: _ClassVar[ServerRole]
+
 class RoomPhase(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     ROOM_PHASE_UNSPECIFIED: _ClassVar[RoomPhase]
     ROOM_PHASE_WAITING: _ClassVar[RoomPhase]
     ROOM_PHASE_PLAYING: _ClassVar[RoomPhase]
+SERVER_ROLE_UNSPECIFIED: ServerRole
+SERVER_ROLE_GAME: ServerRole
+SERVER_ROLE_RELAY: ServerRole
 ROOM_PHASE_UNSPECIFIED: RoomPhase
 ROOM_PHASE_WAITING: RoomPhase
 ROOM_PHASE_PLAYING: RoomPhase
 
 class HeartbeatRequest(_message.Message):
-    __slots__ = ("server_id", "ws_address", "room_ids", "sockets", "draining", "rooms", "control_address")
+    __slots__ = ("server_id", "ws_address", "room_ids", "sockets", "draining", "rooms", "control_address", "role", "viewers", "watched")
     SERVER_ID_FIELD_NUMBER: _ClassVar[int]
     WS_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     ROOM_IDS_FIELD_NUMBER: _ClassVar[int]
@@ -25,6 +34,9 @@ class HeartbeatRequest(_message.Message):
     DRAINING_FIELD_NUMBER: _ClassVar[int]
     ROOMS_FIELD_NUMBER: _ClassVar[int]
     CONTROL_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    ROLE_FIELD_NUMBER: _ClassVar[int]
+    VIEWERS_FIELD_NUMBER: _ClassVar[int]
+    WATCHED_FIELD_NUMBER: _ClassVar[int]
     server_id: str
     ws_address: str
     room_ids: _containers.RepeatedScalarFieldContainer[str]
@@ -32,7 +44,18 @@ class HeartbeatRequest(_message.Message):
     draining: bool
     rooms: _containers.RepeatedCompositeFieldContainer[RoomStatus]
     control_address: str
-    def __init__(self, server_id: _Optional[str] = ..., ws_address: _Optional[str] = ..., room_ids: _Optional[_Iterable[str]] = ..., sockets: _Optional[int] = ..., draining: _Optional[bool] = ..., rooms: _Optional[_Iterable[_Union[RoomStatus, _Mapping]]] = ..., control_address: _Optional[str] = ...) -> None: ...
+    role: ServerRole
+    viewers: int
+    watched: _containers.RepeatedCompositeFieldContainer[WatchedRoom]
+    def __init__(self, server_id: _Optional[str] = ..., ws_address: _Optional[str] = ..., room_ids: _Optional[_Iterable[str]] = ..., sockets: _Optional[int] = ..., draining: _Optional[bool] = ..., rooms: _Optional[_Iterable[_Union[RoomStatus, _Mapping]]] = ..., control_address: _Optional[str] = ..., role: _Optional[_Union[ServerRole, str]] = ..., viewers: _Optional[int] = ..., watched: _Optional[_Iterable[_Union[WatchedRoom, _Mapping]]] = ...) -> None: ...
+
+class WatchedRoom(_message.Message):
+    __slots__ = ("room_id", "viewers")
+    ROOM_ID_FIELD_NUMBER: _ClassVar[int]
+    VIEWERS_FIELD_NUMBER: _ClassVar[int]
+    room_id: str
+    viewers: int
+    def __init__(self, room_id: _Optional[str] = ..., viewers: _Optional[int] = ...) -> None: ...
 
 class RoomStatus(_message.Message):
     __slots__ = ("room_id", "players", "phase", "seats")

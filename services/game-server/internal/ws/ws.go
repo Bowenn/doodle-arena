@@ -180,27 +180,10 @@ func (h *Handler) serve(ctx context.Context, c *websocket.Conn, roomID string) {
 
 // hello reads the first message, checks the ticket and joins the room. On failure it
 // returns a nil conn and the close code to use.
-func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, log *slog.Logger) (*playerConn, *room.Room, websocket.StatusCode, string) {
-	// A timer closes the socket with a proper code; a cancelled Read would only drop it.
-	var timedOut atomic.Bool
-	timer := time.AfterFunc(h.cfg.HelloTimeout, func() {
-		timedOut.Store(true)
-		_ = c.Close(protocol.CloseHelloTimeout, "hello timeout")
-	})
-	typ, data, err := c.Read(context.Background())
-	timer.Stop()
-	switch {
-	case timedOut.Load():
-		return nil, nil, protocol.CloseHelloTimeout, "hello timeout"
-	case err != nil:
-		return nil, nil, websocket.StatusNormalClosure, "read failed"
-	case typ != websocket.MessageText:
-		return nil, nil, closeUnsupported, "text messages only"
-	}
-	msg, err := protocol.DecodeClient(data)
-	hello, ok := msg.(protocol.Hello)
-	if err != nil || !ok {
-		return nil, nil, protocol.CloseBadRequest, "the first message must be hello"
+func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, log *slog.Logger) (*Conn, *room.Room, websocket.StatusCode, string) {
+	hello, code, reason := ReadHello(c, h.cfg.HelloTimeout)
+	if code != 0 {
+		return nil, nil, code, reason
 	}
 
 	t, err := h.cfg.Verifier.Verify(hello.Ticket, roomID)
@@ -227,10 +210,10 @@ func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, l
 		return nil, nil, closeInternal, "try again"
 	}
 
-	pc := newPlayerConn(h.base, c, t.UserID, func() {
+	pc := NewConn(h.base, c, t.UserID, func() {
 		h.slow.Add(context.Background(), 1)
 		log.WarnContext(ctx, "slow client disconnected", "user_id", t.UserID)
-	}, func(lag time.Duration) {
+	}, func(lag time.Duration, _ time.Time) {
 		h.sendLag.Record(context.Background(), float64(lag)/float64(time.Millisecond))
 	})
 	switch err := rm.Join(ctx, pc, t.Name, hello.LastSeq); {
@@ -246,7 +229,34 @@ func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, l
 	return pc, rm, 0, ""
 }
 
-func (h *Handler) readLoop(ctx context.Context, c *websocket.Conn, pc *playerConn, rm *room.Room, log *slog.Logger) {
+// ReadHello reads a socket's first message, which must be hello within timeout. On failure it
+// returns the close code (non-zero) and reason; it doesn't close the socket.
+func ReadHello(c *websocket.Conn, timeout time.Duration) (protocol.Hello, websocket.StatusCode, string) {
+	// A timer closes the socket with a proper code; a cancelled Read would only drop it.
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(timeout, func() {
+		timedOut.Store(true)
+		_ = c.Close(protocol.CloseHelloTimeout, "hello timeout")
+	})
+	typ, data, err := c.Read(context.Background())
+	timer.Stop()
+	switch {
+	case timedOut.Load():
+		return protocol.Hello{}, protocol.CloseHelloTimeout, "hello timeout"
+	case err != nil:
+		return protocol.Hello{}, websocket.StatusNormalClosure, "read failed"
+	case typ != websocket.MessageText:
+		return protocol.Hello{}, closeUnsupported, "text messages only"
+	}
+	msg, err := protocol.DecodeClient(data)
+	hello, ok := msg.(protocol.Hello)
+	if err != nil || !ok {
+		return protocol.Hello{}, protocol.CloseBadRequest, "the first message must be hello"
+	}
+	return hello, 0, ""
+}
+
+func (h *Handler) readLoop(ctx context.Context, c *websocket.Conn, pc *Conn, rm *room.Room, log *slog.Logger) {
 	flood := ratelimit.New(floodBurst, floodPerSecond)
 	for {
 		// Not derived from pc.ctx: cancelling a Read makes the library drop the connection
@@ -284,62 +294,82 @@ func (h *Handler) readLoop(ctx context.Context, c *websocket.Conn, pc *playerCon
 	}
 }
 
-// playerConn is a socket as the room sees it: Send queues without blocking, and one writer
-// goroutine owns all writes and the close.
-type playerConn struct {
+// Conn is a socket as a room (or a relay, ADR 0017) sees it: Send queues without blocking, and
+// one writer goroutine owns all writes and the close.
+type Conn struct {
 	uid        string
 	ws         *websocket.Conn
 	out        chan outMsg
 	ctx        context.Context
 	cancel     context.CancelFunc
 	onSlow     func()
-	onSent     func(lag time.Duration) // after each write that succeeded
+	onSent     func(lag time.Duration, origin time.Time) // after each write that succeeded
 	once       sync.Once
 	code       websocket.StatusCode
 	reason     string
 	writerDone chan struct{}
 }
 
-// outMsg is a queued message and when it was queued.
+// outMsg is a queued message, when it was queued and, for a relay, when its event was
+// committed (zero otherwise).
 type outMsg struct {
 	b      []byte
 	queued time.Time
+	origin time.Time
 }
 
-func newPlayerConn(base context.Context, c *websocket.Conn, uid string, onSlow func(), onSent func(time.Duration)) *playerConn {
+// NewConn starts a socket's writer. onSlow runs when the socket is closed for a full queue,
+// onSent after each successful write, with the time since it was queued and its origin.
+func NewConn(base context.Context, c *websocket.Conn, uid string, onSlow func(), onSent func(lag time.Duration, origin time.Time)) *Conn {
 	ctx, cancel := context.WithCancel(base)
-	pc := &playerConn{uid: uid, ws: c, out: make(chan outMsg, sendQueue), ctx: ctx, cancel: cancel,
+	pc := &Conn{uid: uid, ws: c, out: make(chan outMsg, sendQueue), ctx: ctx, cancel: cancel,
 		onSlow: onSlow, onSent: onSent, code: closeGoingAway, reason: "server shutting down", writerDone: make(chan struct{})}
 	go pc.writer()
 	return pc
 }
 
-func (pc *playerConn) UserID() string { return pc.uid }
+func (pc *Conn) UserID() string { return pc.uid }
 
 // Send implements room.Conn. It never blocks the room: a full queue means the client can't
 // keep up, so it is disconnected (it can reconnect and get a fresh view).
-func (pc *playerConn) Send(b []byte) {
+func (pc *Conn) Send(b []byte) { pc.SendAt(b, time.Time{}) }
+
+// SendAt queues like Send a message whose event was committed at origin: a relay measures its
+// broadcast latency from there (ADR 0017).
+func (pc *Conn) SendAt(b []byte, origin time.Time) {
 	select {
 	case <-pc.ctx.Done():
-	case pc.out <- outMsg{b: b, queued: time.Now()}:
+	case pc.out <- outMsg{b: b, queued: time.Now(), origin: origin}:
 	default:
 		pc.slowClose()
 	}
 }
 
-func (pc *playerConn) slowClose() {
+// CloseWith closes the socket with code, unless it is already closing; it reports whether this
+// call closed it.
+func (pc *Conn) CloseWith(code websocket.StatusCode, reason string) bool {
+	return pc.closeWith(code, reason)
+}
+
+// Wait returns once the writer has closed the socket.
+func (pc *Conn) Wait() { <-pc.writerDone }
+
+// Closing is done once the socket is closing.
+func (pc *Conn) Closing() <-chan struct{} { return pc.ctx.Done() }
+
+func (pc *Conn) slowClose() {
 	if pc.closeWith(closeSlow, "too slow") {
 		pc.onSlow()
 	}
 }
 
 // Close implements room.Conn.
-func (pc *playerConn) Close(code int, reason string) {
+func (pc *Conn) Close(code int, reason string) {
 	pc.closeWith(websocket.StatusCode(code), reason)
 }
 
 // closeWith records the first close reason and stops the writer, which closes the socket.
-func (pc *playerConn) closeWith(code websocket.StatusCode, reason string) bool {
+func (pc *Conn) closeWith(code websocket.StatusCode, reason string) bool {
 	first := false
 	pc.once.Do(func() {
 		first = true
@@ -349,7 +379,7 @@ func (pc *playerConn) closeWith(code websocket.StatusCode, reason string) bool {
 	return first
 }
 
-func (pc *playerConn) writer() {
+func (pc *Conn) writer() {
 	defer close(pc.writerDone)
 	for {
 		// A close wins over queued messages.
@@ -373,7 +403,7 @@ func (pc *playerConn) writer() {
 			default:
 				// The wait in the queue (writers not scheduled, or behind a slow write) plus
 				// the write itself.
-				pc.onSent(time.Since(m.queued))
+				pc.onSent(time.Since(m.queued), m.origin)
 			}
 		case <-pc.ctx.Done():
 			// After a shutdown the base context ends first: the code stays "going away".
