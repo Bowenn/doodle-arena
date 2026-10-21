@@ -222,4 +222,44 @@ describe('Room', () => {
 
     expect(open).toHaveBeenCalledWith('m1')
   })
+
+  it('watches a live room through a relay: nothing to start, draw or guess (ADR 0017)', async () => {
+    const fetchMock = vi.fn((url: string) =>
+      Promise.resolve(
+        url === '/api/auth/refresh'
+          ? json(200, { access_token: 't1', token_type: 'Bearer', expires_in: 900 })
+          : json(200, { room_id: 'r1', ws_url: '/ws/relay-1/rooms/r1', ticket: 'vt', expires_at: '' }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300, x: 0, y: 0, toJSON() {} },
+    )
+    HTMLCanvasElement.prototype.setPointerCapture = () => {}
+    render(<Room roomId="r1" onLeave={() => {}} watch />)
+    await vi.waitFor(() => expect(FakeSocket.all).toHaveLength(1))
+    const ws = FakeSocket.all[0]
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/lobby/rooms/r1/watch')).toBe(true)
+    expect(ws.url).toBe('ws://localhost:3000/ws/relay-1/rooms/r1')
+    ws.open()
+    expect(ws.sent[0]).toEqual({ type: 'hello', data: { ticket: 'vt', last_seq: 0 } })
+    ws.receive('welcome', {
+      user_id: 'v', seq: 5, viewer: true,
+      view: view({ phase: 'drawing', drawer_ids: ['a'], round_no: 1, word_length: 3, mask: '___' }),
+    })
+
+    expect(screen.getByRole('heading', { name: 'Watching room r1' })).toBeTruthy()
+    expect(screen.queryByLabelText('Guess')).toBeNull()
+    expect(screen.getByText("You are watching. Viewers can't guess yet.")).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Start the match' })).toBeNull()
+
+    // The canvas is read-only, and the room's strokes still arrive.
+    const surface = document.querySelector('canvas.overlay')
+    if (surface) {
+      fireEvent.pointerDown(surface, { clientX: 100, clientY: 150, pointerId: 1, button: 0 })
+      fireEvent.pointerUp(surface, { pointerId: 1 })
+    }
+    ws.event(6, 'stroke_batch', { user_id: 'a', stroke_id: 's1', points: [[1, 1, 0]], color: '#000000', width: 5, done: true })
+    expect(ws.sent.filter((m) => m.type !== 'hello' && m.type !== 'ping')).toEqual([])
+  })
 })
