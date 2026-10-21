@@ -208,3 +208,31 @@ func TestParseSignerReadsPEMText(t *testing.T) {
 		t.Fatal("accepted text without a PEM block")
 	}
 }
+
+// ADR 0017: a viewer's ticket opens only a relay, a player's only a game server.
+func TestPlayerAndViewerTicketsDontMix(t *testing.T) {
+	key := newKey(t)
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	s := NewSigner(key, fixedClock(now))
+	v := NewVerifier([]ed25519.PublicKey{key.Public().(ed25519.PublicKey)}, fixedClock(now.Add(time.Second)))
+	player, _, err := s.Sign("u-1", "Ada", "r-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, _, err := s.SignViewer("u-1", "Ada", "r-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(player, "r-1"); err != nil {
+		t.Fatalf("player ticket as a player: %v", err)
+	}
+	if _, err := v.VerifyViewer(viewer, "r-1"); err != nil {
+		t.Fatalf("viewer ticket as a viewer: %v", err)
+	}
+	if _, err := v.Verify(viewer, "r-1"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("viewer ticket as a player: err = %v, want ErrInvalid", err)
+	}
+	if _, err := v.VerifyViewer(player, "r-1"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("player ticket as a viewer: err = %v, want ErrInvalid", err)
+	}
+}

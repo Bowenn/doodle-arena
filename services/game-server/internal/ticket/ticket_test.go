@@ -252,3 +252,39 @@ func TestRedisRedeemerFailsClosed(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 }
+
+// ADR 0017: each role accepts only its own audience, so a viewer's ticket never takes a seat.
+func TestPlayerAndViewerTicketsDontMix(t *testing.T) {
+	key := newKey(t)
+	v := NewVerifier([]ed25519.PublicKey{key.Public().(ed25519.PublicKey)}, clock(now.Add(time.Second)))
+	player := sign(t, key, nil)
+	viewer := sign(t, key, func(c *claims, _ *jwt.Token) { c.Audience = jwt.ClaimStrings{WatchAudience} })
+	if _, err := v.Verify(viewer, "r1"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("viewer ticket on a game server: err = %v, want ErrInvalid", err)
+	}
+	if _, err := v.VerifyViewer(player, "r1"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("player ticket on a relay: err = %v, want ErrInvalid", err)
+	}
+	got, err := v.VerifyViewer(viewer, "r1")
+	if err != nil || got.UserID != "u-1" || got.RoomID != "r1" {
+		t.Fatalf("viewer ticket on a relay: %+v, %v", got, err)
+	}
+}
+
+func TestRedeemViewerIsSingleUseWithoutALease(t *testing.T) {
+	rdb := redistest.New(t)
+	tk := Ticket{ID: "jti-1", UserID: "u-1", RoomID: "r1", ExpiresAt: now.Add(TTL)}
+	if err := RedeemViewer(t.Context(), rdb, tk, now); err != nil {
+		t.Fatalf("first use, no lease anywhere: %v", err)
+	}
+	if err := RedeemViewer(t.Context(), rdb, tk, now); !errors.Is(err, ErrReused) {
+		t.Fatalf("second use: err = %v, want ErrReused", err)
+	}
+	// A player's ticket with the same id is another key: the two never block each other.
+	if n := rdb.Exists(t.Context(), roomstore.TicketKey("r1", "jti-1")).Val(); n != 0 {
+		t.Fatal("a viewer's redemption wrote the players' ticket key")
+	}
+	if ttl := rdb.TTL(t.Context(), roomstore.ViewerTicketKey("r1", "jti-1")).Val(); ttl <= TTL || ttl > TTL+Leeway {
+		t.Fatalf("ttl = %v, want (60s, 65s]", ttl)
+	}
+}

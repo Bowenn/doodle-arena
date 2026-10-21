@@ -74,6 +74,11 @@ func outboxKey(id string) string { return "room:{" + id + "}:outbox" }
 // TicketKey marks a used join ticket of the room (ADR 0005).
 func TicketKey(roomID, ticketID string) string { return "room:{" + roomID + "}:ticket:" + ticketID }
 
+// ViewerTicketKey marks a used viewer ticket of the room (ADR 0017).
+func ViewerTicketKey(roomID, ticketID string) string {
+	return "room:{" + roomID + "}:viewer-ticket:" + ticketID
+}
+
 // LeaseValue is what the lease key holds for an owner.
 func LeaseValue(serverID string, token int64) string {
 	return serverID + ":" + strconv.FormatInt(token, 10)

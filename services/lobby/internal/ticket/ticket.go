@@ -25,8 +25,11 @@ import (
 const (
 	// Issuer is the iss claim of every ticket.
 	Issuer = "doodle-lobby"
-	// Audience is the aud claim: only game servers accept tickets.
+	// Audience is the aud claim of a player's ticket: only game servers accept it.
 	Audience = "doodle-game"
+	// WatchAudience is the aud claim of a viewer's ticket: only relays accept it (ADR 0017), and
+	// a game server, which requires Audience, refuses it, so it never takes a player's seat.
+	WatchAudience = "doodle-watch"
 	// TTL is how long a ticket is valid.
 	TTL = 60 * time.Second
 	// Leeway is the clock skew a verifier allows; tickets are short, so it is small.
@@ -89,8 +92,17 @@ func ParseSigner(data []byte) (*Signer, error) {
 // KeyID is the RFC 7638 thumbprint of the signer's public key, sent as the kid header.
 func (s *Signer) KeyID() string { return s.kid }
 
-// Sign returns a ticket for userID (shown as name) in roomID and its expiry time.
+// Sign returns a player's ticket for userID (shown as name) in roomID and its expiry time.
 func (s *Signer) Sign(userID, name, roomID string) (string, time.Time, error) {
+	return s.sign(Audience, userID, name, roomID)
+}
+
+// SignViewer returns a viewer's ticket to watch roomID on a relay (ADR 0017).
+func (s *Signer) SignViewer(userID, name, roomID string) (string, time.Time, error) {
+	return s.sign(WatchAudience, userID, name, roomID)
+}
+
+func (s *Signer) sign(audience, userID, name, roomID string) (string, time.Time, error) {
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return "", time.Time{}, fmt.Errorf("ticket id: %w", err)
@@ -100,7 +112,7 @@ func (s *Signer) Sign(userID, name, roomID string) (string, time.Time, error) {
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    Issuer,
-			Audience:  jwt.ClaimStrings{Audience},
+			Audience:  jwt.ClaimStrings{audience},
 			Subject:   userID,
 			ID:        hex.EncodeToString(id[:]),
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -134,13 +146,22 @@ func NewVerifier(keys []ed25519.PublicKey, now func() time.Time) *Verifier {
 	return &Verifier{keys: m, now: now}
 }
 
-// Verify checks the signature, issuer, audience, expiry and room, and returns the claims.
-// It doesn't check single use; that needs the game server's Redis.
+// Verify checks a player's ticket: the signature, issuer, audience, expiry and room, and
+// returns the claims. It doesn't check single use; that needs the game server's Redis.
 func (v *Verifier) Verify(token, roomID string) (Claims, error) {
+	return v.verify(Audience, token, roomID)
+}
+
+// VerifyViewer checks a viewer's ticket the same way (audience WatchAudience).
+func (v *Verifier) VerifyViewer(token, roomID string) (Claims, error) {
+	return v.verify(WatchAudience, token, roomID)
+}
+
+func (v *Verifier) verify(audience, token, roomID string) (Claims, error) {
 	parser := jwt.NewParser(
 		jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}),
 		jwt.WithIssuer(Issuer),
-		jwt.WithAudience(Audience),
+		jwt.WithAudience(audience),
 		jwt.WithLeeway(Leeway),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
