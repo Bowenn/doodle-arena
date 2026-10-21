@@ -159,7 +159,7 @@ services:
       WS_ALLOWED_ORIGINS: localhost:8080
     secrets:
       - ticket-public-key
-    networks: [default, kafka]
+    networks: [default, kafka, seaweedfs]
     # SIGTERM drains (task 5.5): the server waits up to DRAIN_TIMEOUT (40 s) for the lobby to
     # move its rooms, so docker stop must wait longer than its 10-second default, like ECS (60 s).
     stop_grace_period: 60s
@@ -200,7 +200,7 @@ services:
       WS_ALLOWED_ORIGINS: localhost:8080
     secrets:
       - ticket-public-key
-    networks: [default, kafka]
+    networks: [default, kafka, seaweedfs]
     # SIGTERM drains (task 5.5): the server waits up to DRAIN_TIMEOUT (40 s) for the lobby to
     # move its rooms, so docker stop must wait longer than its 10-second default, like ECS (60 s).
     stop_grace_period: 60s
@@ -384,6 +384,7 @@ services:
       seaweedfs-buckets:
         condition: service_completed_successfully
     healthcheck: *py-healthcheck
+    networks: [default, seaweedfs]
 
   # The Celery worker: the drawing pipeline (design doc 4.5). Same image, same settings.
   assets-worker:
@@ -417,6 +418,7 @@ services:
       timeout: 15s
       start_period: 20s
       retries: 5
+    networks: [default, seaweedfs]
 
   # Reads RoundFinished from game.rounds.v1 and starts a drawing for each round.
   assets-consumer:
@@ -430,7 +432,7 @@ services:
       SERVICE_INSTANCE_ID: assets-consumer-1
       OTEL_SERVICE_NAME: assets
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-consumer-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
-    networks: [default, kafka]
+    networks: [default, kafka, seaweedfs]
     depends_on:
       otel-lgtm:
         condition: service_healthy
@@ -764,6 +766,7 @@ services:
       interval: 3s
       timeout: 3s
       retries: 30
+    networks: [seaweedfs]
 
   # One-shot job; the game servers and assets depend on it, like kafka-init.
   seaweedfs-buckets:
@@ -775,6 +778,7 @@ services:
       seaweedfs:
         condition: service_healthy
     restart: "no"
+    networks: [seaweedfs]
 
   # ------------------------------------------------------------- observability
 
@@ -843,6 +847,10 @@ services:
 # collector.
 networks:
   kafka:
+  # SeaweedFS's filer, master and volume ports take no credentials, so only its S3 clients
+  # (the game servers and assets) share a network with it (Stage 5 review); the host reaches
+  # only the S3 API, on 127.0.0.1:8333.
+  seaweedfs:
   kafka-otlp:
 
 volumes:

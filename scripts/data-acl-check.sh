@@ -27,5 +27,32 @@ for var in "${vars[@]}"; do
   export "${var}=${value}"
   flags+=(-e "$var")
 done
+status=0
 docker compose -f infra/docker-compose.yml --env-file "$env_file" run --rm --no-deps -T \
-  "${flags[@]}" assets-consumer python - < scripts/drills/data_acl_check.py
+  "${flags[@]}" assets-consumer python - < scripts/drills/data_acl_check.py || status=$?
+
+# SeaweedFS's filer, master and volume ports take no credentials, so the S3 identities above
+# hold only if nothing else can reach them: a service off the seaweedfs network (here the AI
+# service) must not even resolve the host. The control, from assets, must reach the filer.
+probe='import socket, sys
+try:
+    socket.create_connection(("seaweedfs", 8888), timeout=3).close()
+except OSError as e:
+    print(type(e).__name__); sys.exit(1)
+print("reached")'
+echo "SeaweedFS network (its own ports take no credentials):"
+if docker compose -f infra/docker-compose.yml --env-file "$env_file" run --rm --no-deps -T \
+    assets-consumer python -c "$probe" >/dev/null 2>&1; then
+  echo "  ok    assets reaches the filer (control)"
+else
+  echo "  FAIL  assets can't reach the filer: the probe is broken"; status=1
+fi
+if out="$(docker compose -f infra/docker-compose.yml --env-file "$env_file" run --rm --no-deps -T \
+    ai python -c "$probe" 2>&1)"; then
+  echo "  FAIL  the AI service reaches SeaweedFS's filer"; status=1
+elif grep -q gaierror <<<"$out"; then
+  echo "  ok    the AI service can't resolve seaweedfs"
+else
+  echo "  FAIL  the AI service's probe failed for another reason: ${out##*$'\n'}"; status=1
+fi
+exit "$status"
