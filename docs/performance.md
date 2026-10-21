@@ -119,3 +119,25 @@ What `aws-down` adds before the destroy and `aws-up` before the migrations (ADR 
 | AWS | Not measured yet: the first AWS session with task 6.10 records the backup's and the restore's time here | | |
 
 MongoDB is most of it, and it grows with every match (a replay averages 360 KB). A full read for the dump pulls the whole collection through WiredTiger's cache, which is why MongoDB's cache is capped at 1 GB on both stacks (without the cap, the local `mongod` grew to 2.6 GB and was OOM-killed).
+
+## 6. The live room (task 6.1c)
+
+One live room with four players (two drawers, a stroke batch every 50 ms: about 40 events a second) and viewers through two relays (ADR 0017), from `make loadtest-live`. The target is p99 broadcast latency under 250 ms: the relays' `relay.broadcast.latency`, from the owner's commit until the write to a viewer's socket returns. "Viewer p99" is k6's `viewer_fanout`, from the drawer's send until k6 has the message, which also counts k6's own delay in reading.
+
+Local runs on one laptop (Docker Desktop, 10 cores and 8 GB for the VM; the relays and the gateway uncapped), 2026-10-21, numbers over the hold, after every viewer connected:
+
+| Viewers | k6 | Relays' p50 / p95 / p99 | Stream lag p99 | Viewer p99 | Gaps |
+|---|---|---|---|---|---|
+| 2,000 | in the stack's network | 12.6 / 71 / **214 ms** | 96 ms | 660 ms | 0 |
+| 2,500 (best of four) | in the stack's network | 9.3 / – / 49 ms | 33 ms | 206 ms | 0 |
+| 2,500 (the other three) | in the stack's network | 20–37 / 200–460 / 445–990 ms | 237–700 ms | 1.5–17 s | 0 |
+| 2,650, then stopped | on the host | p99 at the 10 s bucket cap | about 2.5 s | p95 18 s | 0 |
+
+What limits it here, in the order it was found:
+
+- **Docker Desktop's proxy between macOS and its VM.** It saturated at about 2,000 viewers (80,000 messages a second). The players' own stroke fan-out, which never touches a relay, went from 4 ms to 1.45 s, while a relay's CPU profile showed under one core busy, half of it in write syscalls. With k6 in a container on the stack's network (as browsers reach the load balancer in AWS), the same load fits.
+- **The load generator.** k6 needs 2 to 5 cores for 2,500 viewers and shares them with the stack, so past 2,000 viewers the relays' p99 depends on that contention. Near 3,000 viewers k6 itself falls behind: 120,000 messages a second outrun its JavaScript event loops, and its backlog grows until the OOM killer stops it (2.4 to 2.9 GB). Exporting k6's per-message samples over OTLP doubled its CPU, so the live test keeps them in k6's summary.
+- **The relays** use under two cores each at 2,500 viewers, about 21,000 writes a second each. Most of their time is the per-viewer write: one goroutine wake-up and one syscall per viewer per event. Coalescing events per viewer is the obvious next step and belongs with task 6.4's batching experiments.
+
+The 5,000-viewer number is measured in AWS (task 6.9), with k6 on a machine of its own and the relays on Fargate.
+

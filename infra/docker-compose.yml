@@ -226,6 +226,8 @@ services:
       <<: *app-env
       ROLE: relay
       SERVICE_INSTANCE_ID: relay-1
+      # Go's profiles, inside the container's network only (cmd/game-server/main.go, servePprof).
+      PPROF_ADDR: ":6060"
       OTEL_SERVICE_NAME: game-server
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=relay-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
       LOBBY_GRPC_ADDR: lobby:9090
@@ -259,6 +261,8 @@ services:
       <<: *app-env
       ROLE: relay
       SERVICE_INSTANCE_ID: relay-2
+      # Go's profiles, inside the container's network only (cmd/game-server/main.go, servePprof).
+      PPROF_ADDR: ":6060"
       OTEL_SERVICE_NAME: game-server
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=relay-2,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
       LOBBY_GRPC_ADDR: lobby:9090
