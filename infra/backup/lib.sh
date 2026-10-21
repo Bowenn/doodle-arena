@@ -49,10 +49,12 @@ PY
 psql_at() { docker exec -i "$PG" psql -U postgres -d "$1" -XAtq -v ON_ERROR_STOP=1 "${@:2}"; }
 
 # mongosh, mongodump and mongorestore as root. The password is expanded inside the container.
+# GOMEMLIMIT keeps the Go tools' heap small: with replays of about 360 KB each, mongorestore
+# grew past 600 MB and was OOM-killed in a 1 GB container (make backup-check).
 mongo_root() {
   local tool="$1"
   shift
-  docker exec -i "$MONGO" sh -c 'tool="$1"; shift; exec "$tool" --quiet --username root --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "$@"' sh "$tool" "$@"
+  docker exec -i -e GOMEMLIMIT=256MiB "$MONGO" sh -c 'tool="$1"; shift; exec "$tool" --quiet --username root --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin "$@"' sh "$tool" "$@"
 }
 
 # Tables other than Postgres' own: none means the database was never migrated or restored.

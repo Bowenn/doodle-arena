@@ -21,6 +21,14 @@ work="$(mktemp -d)"
 pg="backup-check-postgres-$$"
 mongo="backup-check-mongo-$$"
 cleanup() {
+  local status=$? c
+  if ((status != 0)); then
+    echo "backup-check FAILED (exit $status)" >&2
+    for c in "$pg" "$mongo"; do
+      docker inspect -f "$c: {{.State.Status}}, OOM-killed: {{.State.OOMKilled}}" "$c" >&2 2>/dev/null || true
+    done
+    tail -20 "$work"/*.out >&2 2>/dev/null || true
+  fi
   docker rm -f "$pg" "$mongo" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
