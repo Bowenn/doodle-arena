@@ -223,7 +223,7 @@ describe('Room', () => {
     expect(open).toHaveBeenCalledWith('m1')
   })
 
-  it('watches a live room through a relay: nothing to start, draw or guess (ADR 0017)', async () => {
+  it('watches a live room through a relay: nothing to start or draw, and guesses go to the relay (ADR 0017, 0019)', async () => {
     const fetchMock = vi.fn((url: string) =>
       Promise.resolve(
         url === '/api/auth/refresh'
@@ -249,8 +249,7 @@ describe('Room', () => {
     })
 
     expect(screen.getByRole('heading', { name: 'Watching room r1' })).toBeTruthy()
-    expect(screen.queryByLabelText('Guess')).toBeNull()
-    expect(screen.getByText("You are watching. Viewers can't guess yet.")).toBeTruthy()
+    expect(screen.queryByLabelText('Guess')).toBeNull() // a player's box
     expect(screen.queryByRole('button', { name: 'Start the match' })).toBeNull()
 
     // The canvas is read-only, and the room's strokes still arrive.
@@ -261,5 +260,22 @@ describe('Room', () => {
     }
     ws.event(6, 'stroke_batch', { user_id: 'a', stroke_id: 's1', points: [[1, 1, 0]], color: '#000000', width: 5, done: true })
     expect(ws.sent.filter((m) => m.type !== 'hello' && m.type !== 'ping')).toEqual([])
+
+    // The crowd's guesses, from the relay.
+    ws.receive('top_guesses', { round_no: 1, window_end: 1000, guesses: [{ text: 'dog', count: 4 }] })
+    expect(screen.getByRole('region', { name: 'Top guesses' }).textContent).toContain('dog')
+
+    // A guess goes to the relay, which answers privately; once right, the box closes.
+    const box = screen.getByRole<HTMLInputElement>('textbox', { name: 'Viewer guess' })
+    fireEvent.change(box, { target: { value: 'cat' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guess' }))
+    expect(ws.sent.at(-1)).toEqual({ type: 'guess', data: { text: 'cat' } })
+    ws.receive('guess_result', { correct: true })
+    expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Viewer guess' }).disabled).toBe(true)
+    expect(screen.getByText('You guessed it!')).toBeTruthy()
+
+    // The owner announces the round's first correct viewer to everyone.
+    ws.event(7, 'viewer_correct', { user_id: 'v', name: 'Vee', round_no: 1 })
+    expect(screen.getByRole('list', { name: 'Chat' }).textContent).toContain('Vee (watching) guessed it first')
   })
 })

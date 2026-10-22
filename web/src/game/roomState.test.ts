@@ -260,3 +260,53 @@ describe('two drawers', () => {
 function batch(strokeId: string, userId: string) {
   return { stroke_id: strokeId, user_id: userId, points: [[1, 2, 0]] as [number, number, number][], color: '#000000', width: 40, done: false }
 }
+
+describe('viewers (ADR 0019)', () => {
+  const watching = (over: Partial<View> = {}) =>
+    start({ user_id: 'v', seq: 5, viewer: true, view: view({ phase: 'drawing', round_no: 1, drawer_ids: ['a'], ...over }) })
+
+  it("announces the round's first correct viewer, until the next round", () => {
+    let s = watching()
+    s = apply(s, { seq: 6, type: 'viewer_correct', data: { user_id: 'v2', name: 'Vee', round_no: 1 } })
+    expect(s.viewerWinner).toEqual({ user_id: 'v2', name: 'Vee' })
+    expect(s.feed.at(-1)).toEqual({ kind: 'viewer', name: 'Vee' })
+    s = apply(s, { seq: 7, type: 'choosing', data: { round_no: 2, drawer_ids: ['b'], deadline: 1 } })
+    expect(s.viewerWinner).toBeNull()
+  })
+
+  it('takes the winner from a welcome', () => {
+    expect(watching({ viewer_winner: { user_id: 'v2', name: 'Vee' } }).viewerWinner).toEqual({ user_id: 'v2', name: 'Vee' })
+  })
+
+  it("closes a viewer's guesses once right, and answers a wrong one privately", () => {
+    let s = watching()
+    s = roomReducer(s, { type: 'private', msg: { type: 'guess_result', data: { correct: false } } })!
+    expect(s.notice?.text).toBe('Not it. Try again!')
+    expect(s.viewerGuessed).toBe(false)
+    s = roomReducer(s, { type: 'private', msg: { type: 'guess_result', data: { correct: true } } })!
+    expect(s.viewerGuessed).toBe(true)
+    // A reconnect within the round keeps it (the relay remembers it too).
+    s = roomReducer(s, { type: 'welcome', welcome: { user_id: 'v', seq: 9, viewer: true, view: view({ phase: 'drawing', round_no: 1 }) } })!
+    expect(s.viewerGuessed).toBe(true)
+    s = apply(s, { seq: 10, type: 'choosing', data: { round_no: 2, drawer_ids: ['b'], deadline: 1 } })
+    expect(s.viewerGuessed).toBe(false)
+  })
+
+  it("keeps only this round's top guesses", () => {
+    let s = watching()
+    const top = { round_no: 1, window_end: 1000, guesses: [{ text: 'dog', count: 3 }] }
+    s = roomReducer(s, { type: 'private', msg: { type: 'top_guesses', data: top } })!
+    expect(s.topGuesses).toEqual(top)
+    s = roomReducer(s, { type: 'private', msg: { type: 'top_guesses', data: { ...top, round_no: 9 } } })!
+    expect(s.topGuesses).toEqual(top)
+    s = apply(s, { seq: 6, type: 'round_ended', data: { round_no: 1, word: 'apple', scores: [], round_points: {} } })
+    s = apply(s, { seq: 7, type: 'choosing', data: { round_no: 2, drawer_ids: ['b'], deadline: 1 } })
+    expect(s.topGuesses).toBeNull()
+  })
+
+  it("leaves a player's wrong guess to the chat", () => {
+    const s = roomReducer(start(), { type: 'private', msg: { type: 'guess_result', data: { correct: false } } })!
+    expect(s.notice).toBeNull()
+  })
+})
+
