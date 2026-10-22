@@ -83,6 +83,15 @@ app:
     interval: 500ms
     # Published events are deleted after this long (they're on the Kafka topics by then).
     retention: 7d
+  db:
+    replica:
+      # The read replica (ADR 0020); empty: every read goes to the primary.
+      host: ${DB_REPLICA_HOST:}
+      port: ${DB_REPLICA_PORT:5432}
+      # The da_rw_lsn cookie is Secure behind https (AWS).
+      cookie-secure: ${DB_REPLICA_COOKIE_SECURE:false}
+      # A read needs the replica within this of the primary, else it reads the primary.
+      max-lag: 5s
   reconciliation:
     interval: 60s
     # The gauges stop reporting when the last successful run is older than this.

@@ -26,6 +26,11 @@ class Env(BaseSettings):
     db_name: str = "assets"
     db_user: str = "assets"
     db_password: str = ""
+    # The read replica (ADR 0020); empty: every read goes to the primary.
+    db_replica_host: str = ""
+    db_replica_port: int = 5432
+    # A read needs the replica within this many seconds of the primary, else it reads the primary.
+    db_replica_max_lag: float = 5.0
     # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
     auth_jwks_url: str = "http://auth:8080/api/auth/.well-known/jwks.json"
     jwt_issuer: str = "http://localhost:8080/api/auth"
@@ -121,6 +126,17 @@ DATABASES = {
         "CONN_MAX_AGE": 60,
     }
 }
+DB_REPLICA_MAX_LAG = env.db_replica_max_lag
+if env.db_replica_host:
+    # The gallery and drawing pages read here (drawings/replica.py). A replica that is down must
+    # cost a read a second at most before it falls back to the primary.
+    DATABASES["replica"] = {
+        **DATABASES["default"],
+        "HOST": env.db_replica_host,
+        "PORT": env.db_replica_port,
+        "OPTIONS": {"connect_timeout": 1},
+        "TEST": {"MIRROR": "default"},
+    }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 USE_TZ = True

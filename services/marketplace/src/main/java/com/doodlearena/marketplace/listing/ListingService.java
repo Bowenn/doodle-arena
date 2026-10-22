@@ -1,6 +1,8 @@
 package com.doodlearena.marketplace.listing;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -12,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.doodlearena.marketplace.api.ApiException;
+import com.doodlearena.marketplace.db.ReadRouting;
 import com.doodlearena.marketplace.outbox.OutboxWriter;
 import com.doodlearena.proto.doodle.events.v1.EventMeta;
 import com.doodlearena.proto.doodle.events.v1.ListingCancelled;
@@ -34,9 +37,12 @@ public class ListingService {
 
 	private final OutboxWriter outbox;
 
-	public ListingService(JdbcClient db, OutboxWriter outbox) {
+	private final ReadRouting reads;
+
+	public ListingService(JdbcClient db, OutboxWriter outbox, ReadRouting reads) {
 		this.db = db;
 		this.outbox = outbox;
+		this.reads = reads;
 	}
 
 	/** Runs inside the idempotency work's transaction ({@code POST /listings} needs a key). */
@@ -117,27 +123,41 @@ public class ListingService {
 		return cancelled;
 	}
 
+	/** A listing, from the replica unless it hasn't replayed the caller's last write (ADR 0020). */
 	public Listing get(UUID listingId) {
-		return this.db.sql("SELECT " + Listing.COLUMNS + " FROM listings WHERE listing_id = ?")
+		return this.reads.read((db) -> db.sql("SELECT " + Listing.COLUMNS + " FROM listings WHERE listing_id = ?")
 			.param(listingId)
 			.query(Listing::map)
-			.optional()
+			.optional())
 			.orElseThrow(ListingService::notFound);
 	}
 
-	/** Active listings, newest first, below {@code before} when set. */
+	/**
+	 * Active listings, newest first, below {@code before} when set. Only the filters given are in
+	 * the SQL: one statement with "{@code :x IS NULL OR column = :x}" for each would, once the
+	 * driver prepares it on the server and Postgres switches to a generic plan, read every active
+	 * listing to find one seller's (task 6.6: 48 ms instead of 0.06 ms on the seeded data). Each
+	 * shape here has its own index: listings_one_active, listings_seller_idx, listings_active_idx.
+	 */
 	public List<Listing> active(UUID drawingId, String sellerId, UUID before, int limit) {
-		return this.db.sql("SELECT " + Listing.COLUMNS + " FROM listings WHERE status = 'ACTIVE'"
-				+ " AND (CAST(:drawing AS UUID) IS NULL OR drawing_id = :drawing)"
-				+ " AND (CAST(:seller AS TEXT) IS NULL OR seller_id = :seller)"
-				+ " AND (CAST(:before AS UUID) IS NULL OR listing_id < :before)"
-				+ " ORDER BY listing_id DESC LIMIT :limit")
-			.param("drawing", drawingId)
-			.param("seller", sellerId)
-			.param("before", before)
-			.param("limit", limit)
-			.query(Listing::map)
-			.list();
+		StringBuilder sql = new StringBuilder("SELECT " + Listing.COLUMNS + " FROM listings WHERE status = 'ACTIVE'");
+		Map<String, Object> params = new HashMap<>();
+		if (drawingId != null) {
+			sql.append(" AND drawing_id = :drawing");
+			params.put("drawing", drawingId);
+		}
+		if (sellerId != null) {
+			sql.append(" AND seller_id = :seller");
+			params.put("seller", sellerId);
+		}
+		if (before != null) {
+			sql.append(" AND listing_id < :before");
+			params.put("before", before);
+		}
+		sql.append(" ORDER BY listing_id DESC LIMIT :limit");
+		params.put("limit", limit);
+		// From the replica, unless it hasn't replayed the caller's last write yet (ADR 0020).
+		return this.reads.read((db) -> db.sql(sql.toString()).params(params).query(Listing::map).list());
 	}
 
 	public static ApiException notFound() {

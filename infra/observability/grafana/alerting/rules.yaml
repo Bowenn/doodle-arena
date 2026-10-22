@@ -103,6 +103,74 @@ groups:
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/reconciliation-stale.md
           __dashboardUid__: da-marketplace
           __panelId__: "1"
+      - uid: replica-lag-high
+        title: ReplicaLagHigh
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Seconds behind the primary (ADR 0020), 0 when no replica reports.
+              expr: "max(market_db_replica_lag_seconds) or vector(0)"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              # Reads that fell back to the primary because the replica couldn't answer, or was
+              # further behind than max-lag (which also catches a replica cut off from the primary,
+              # whose own lag reads 0).
+              expr: "(sum(increase(market_db_reads_total{reason=~\"replica_error|stale\"}[5m])) or vector(0)) + (sum(increase(assets_db_reads_total{reason=~\"replica_error|stale\"}[5m])) or vector(0))"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 30 || $B > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: marketplace
+        annotations:
+          summary: "The read replica is {{ $values.A }} s behind, can't be reached, or is too stale to read ({{ $values.B }} reads fell back in 5 minutes): reads go to the primary, which carries the replica's load."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/replica-lag.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "14"
+      - uid: ledger-partition-missing
+        title: LedgerPartitionMissing
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "max(market_ledger_default_partition_rows)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+          service: marketplace
+        annotations:
+          summary: "{{ $values.A }} ledger entries are in the default partition: a month's partition is missing, and it can't be created while its rows are there."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/ledger-partitions.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "15"
       - uid: market-outbox-stuck
         title: MarketOutboxStuck
         condition: C

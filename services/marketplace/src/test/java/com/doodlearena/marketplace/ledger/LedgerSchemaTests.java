@@ -14,7 +14,7 @@ import com.doodlearena.marketplace.support.IntegrationTest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** The rules Postgres enforces by itself, whatever the service does (migration V1). */
+/** The rules Postgres enforces by itself, whatever the service does (migrations V1 and V8). */
 @IntegrationTest
 class LedgerSchemaTests {
 
@@ -105,6 +105,38 @@ class LedgerSchemaTests {
 			.hasMessageContaining("append-only");
 		assertThatThrownBy(() -> this.db.sql("TRUNCATE ledger_entries, ledger_transactions CASCADE").update())
 			.hasMessageContaining("append-only");
+	}
+
+	/**
+	 * V8 (task 6.6): the ledger is partitioned by month, and a TRUNCATE of one partition doesn't
+	 * fire the parent's statement trigger, so every partition has its own.
+	 */
+	@Test
+	void noPartitionCanBeTruncated() {
+		java.time.YearMonth month = java.time.YearMonth.now(java.time.ZoneOffset.UTC);
+		String partition = "ledger_entries_" + month.toString().replace('-', '_');
+		assertThatThrownBy(() -> this.db.sql("TRUNCATE " + partition).update()).hasMessageContaining("append-only");
+		assertThatThrownBy(() -> this.db.sql("TRUNCATE ledger_entries_default").update()).hasMessageContaining("append-only");
+	}
+
+	/**
+	 * V8: a ledger transaction's entries share its time (they are written in one database
+	 * transaction, at now()), so it never spans two months: every month sums to zero on its own,
+	 * which is what lets the reconciliation job keep closed months' totals.
+	 */
+	@Test
+	void aTransactionCannotSpanTwoMonths() {
+		long a = issuance();
+		long b = userAccount();
+		this.db.sql("SELECT ledger_ensure_partitions(CAST(now() - interval '40 days' AS DATE), 0)").query().listOfRows();
+		assertThatThrownBy(() -> this.tx.executeWithoutResult((status) -> {
+			UUID id = newTransaction();
+			entry(id, a, -5);
+			this.db.sql("INSERT INTO ledger_entries (tx_id, account_id, amount, created_at) VALUES (?, ?, 5, now() - interval '40 days')")
+				.params(id, b)
+				.update();
+		})).isInstanceOf(DataAccessException.class).hasMessageContaining("unbalanced");
+		assertThat(entriesOf(b)).isZero();
 	}
 
 	@Test

@@ -46,6 +46,8 @@ x-assets-env: &assets-env
   DB_NAME: assets
   DB_USER: assets
   DB_PASSWORD: ${ASSETS_DB_PASSWORD:?}
+  # The gallery and drawing pages read the replica, with read-your-writes by WAL position (ADR 0020).
+  DB_REPLICA_HOST: postgres-replica
   # Redis logical database 1 belongs to assets' Celery (design doc, section 5).
   REDIS_URL: redis://redis:6379/1
   # The assets Redis user: assets:* only (infra/redis/start.sh).
@@ -738,6 +740,8 @@ services:
       DB_NAME: marketplace
       DB_USER: marketplace
       DB_PASSWORD: ${MARKETPLACE_DB_PASSWORD:?}
+      # Read-heavy endpoints read the replica, with read-your-writes by WAL position (ADR 0020).
+      DB_REPLICA_HOST: postgres-replica
       # Access tokens are verified against auth's JWKS (ADR 0001), fetched on the internal network.
       AUTH_JWKS_URL: http://auth:8080/api/auth/.well-known/jwks.json
       JWT_ISSUER: http://localhost:8080/api/auth
@@ -813,6 +817,9 @@ services:
 
   postgres:
     image: postgres:18.6-trixie
+    # The replica's streaming user is let in by the mounted pg_hba.conf (ADR 0020); a replication
+    # slot may keep at most 1 GB of WAL for a replica that is behind.
+    command: ["postgres", "-c", "hba_file=/etc/doodle-arena/pg_hba.conf", "-c", "max_slot_wal_keep_size=1GB"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make up to create .env}
@@ -824,6 +831,7 @@ services:
       # Postgres 18 images keep data under /var/lib/postgresql/<major>/, so mount the parent.
       - postgres-data:/var/lib/postgresql
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./postgres/pg_hba.conf:/etc/doodle-arena/pg_hba.conf:ro
     ports:
       # 15432 on the host, so a Postgres installed on the host (5432) doesn't clash.
       - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
@@ -832,6 +840,42 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  # The replica's streaming user and slot on the primary (ADR 0020), once per start, idempotent.
+  postgres-replication:
+    image: postgres:18.6-trixie
+    entrypoint: ["bash", "/etc/doodle-arena/replication.sh"]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:?}
+    volumes:
+      - ./postgres/replication.sh:/etc/doodle-arena/replication.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # The read replica (ADR 0020): a hot standby streaming from the primary, for the marketplace's
+  # and the assets service's read-heavy endpoints. 15433 on the host, for psql.
+  postgres-replica:
+    image: postgres:18.6-trixie
+    entrypoint: ["bash", "/etc/doodle-arena/replica.sh"]
+    environment:
+      PGDATA: /var/lib/postgresql/18/docker
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:?}
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql
+      - ./postgres/replica.sh:/etc/doodle-arena/replica.sh:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_REPLICA_HOST_PORT:-15433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 90
+    depends_on:
+      postgres-replication:
+        condition: service_completed_successfully
 
   redis:
     image: redis:8.10.2-trixie
@@ -1073,6 +1117,7 @@ networks:
 
 volumes:
   postgres-data:
+  postgres-replica-data:
   redis-data:
   mongo-data:
   kafka-data:

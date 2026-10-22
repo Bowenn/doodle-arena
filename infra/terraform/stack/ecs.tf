@@ -43,6 +43,8 @@ locals {
     DB_HOST            = local.data_host
     DB_NAME            = "assets"
     DB_USER            = "assets"
+    DB_REPLICA_HOST    = local.data_host
+    DB_REPLICA_PORT    = "5433"
     REDIS_URL          = "redis://${local.redis}/1"
     REDIS_USERNAME     = "assets"
     AUTH_JWKS_URL      = local.jwks
@@ -187,6 +189,8 @@ locals {
         DB_HOST         = local.data_host, DB_NAME = "marketplace", DB_USER = "marketplace",
         AUTH_JWKS_URL   = local.jwks, JWT_ISSUER = local.issuer, KAFKA_USERNAME = "marketplace",
         PUBLIC_BASE_URL = local.public_url,
+        # The read replica on the data host (ADR 0020), and its cookie behind https.
+        DB_REPLICA_HOST = local.data_host, DB_REPLICA_PORT = "5433", DB_REPLICA_COOKIE_SECURE = "true",
       })
       secrets = {
         DB_PASSWORD           = local.secret_arn["marketplace-db-password"]

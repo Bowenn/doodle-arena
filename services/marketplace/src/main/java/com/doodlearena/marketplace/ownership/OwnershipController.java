@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.doodlearena.marketplace.api.ApiException;
+import com.doodlearena.marketplace.db.ReadRouting;
 
 /**
  * A drawing's owner and provenance (design doc, section 6.3). Minted drawings were approved, and
@@ -31,27 +31,29 @@ public class OwnershipController {
 
 	private static final int MAX_LIMIT = 50;
 
-	private final JdbcClient db;
+	private final ReadRouting reads;
 
-	public OwnershipController(JdbcClient db) {
-		this.db = db;
+	public OwnershipController(ReadRouting reads) {
+		this.reads = reads;
 	}
 
 	@GetMapping("/api/market/drawings/{id}/ownership-history")
 	public OwnershipHistory history(@PathVariable String id) {
 		UUID drawingId = parse(id);
-		Map<String, Object> ownership = this.db.sql("SELECT owner_id, version FROM ownership WHERE drawing_id = ?")
+		// The replica, unless it hasn't replayed the caller's last write yet (ADR 0020).
+		return this.reads.read((db) -> {
+		Map<String, Object> ownership = db.sql("SELECT owner_id, version FROM ownership WHERE drawing_id = ?")
 			.param(drawingId)
 			.query()
 			.listOfRows()
 			.stream()
 			.findFirst()
 			.orElseThrow(OwnershipController::notFound);
-		List<String> authors = this.db.sql("SELECT user_id FROM drawing_authors WHERE drawing_id = ? ORDER BY author_order")
+		List<String> authors = db.sql("SELECT user_id FROM drawing_authors WHERE drawing_id = ? ORDER BY author_order")
 			.param(drawingId)
 			.query(String.class)
 			.list();
-		List<HistoryEvent> events = this.db.sql("""
+		List<HistoryEvent> events = db.sql("""
 				SELECT e.kind, e.from_owner, e.to_owner, e.sale_id, l.price, e.created_at
 				FROM ownership_events e LEFT JOIN listings l ON l.sale_id = e.sale_id
 				WHERE e.drawing_id = ? ORDER BY e.event_id""")
@@ -62,6 +64,7 @@ public class OwnershipController {
 			.list();
 		return new OwnershipHistory(drawingId, (String) ownership.get("owner_id"), (Long) ownership.get("version"), authors,
 				events);
+		});
 	}
 
 	/**
@@ -79,7 +82,8 @@ public class OwnershipController {
 			throw ApiException.invalidRequest("limit must be between 1 and " + MAX_LIMIT);
 		}
 		Cursor after = (cursor == null || cursor.isEmpty()) ? null : Cursor.decode(cursor);
-		List<OwnedDrawing> rows = this.db.sql("""
+		// The replica, unless it hasn't replayed the caller's last purchase yet (ADR 0020).
+		List<OwnedDrawing> rows = this.reads.read((db) -> db.sql("""
 				SELECT o.drawing_id, o.version, o.minted_at, o.updated_at, l.listing_id, l.price, l.created_at AS listed_at
 				FROM ownership o
 				LEFT JOIN listings l ON l.drawing_id = o.drawing_id AND l.status = 'ACTIVE'
@@ -100,7 +104,7 @@ public class OwnershipController {
 						rs.getObject("minted_at", OffsetDateTime.class).toInstant(),
 						rs.getObject("updated_at", OffsetDateTime.class).toInstant(), listing);
 			})
-			.list();
+			.list());
 		List<OwnedDrawing> page = rows.subList(0, Math.min(limit, rows.size()));
 		String next = (rows.size() > limit)
 				? new Cursor(page.getLast().updatedAt(), page.getLast().drawingId()).encode() : null;
