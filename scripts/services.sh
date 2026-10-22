@@ -3,7 +3,7 @@
 
 GO_SERVICES=(lobby game-server notifier)
 PY_SERVICES=(auth ai assets)
-JAVA_SERVICES=(marketplace)
+JAVA_SERVICES=(marketplace analytics)
 # Not services, but checked by make test and make lint too.
 EXTRA_MODULES=(libs-go proto eventctl ci secrets observability terraform)
 ALL_SERVICES=("${GO_SERVICES[@]}" "${PY_SERVICES[@]}" "${JAVA_SERVICES[@]}" web "${EXTRA_MODULES[@]}")
