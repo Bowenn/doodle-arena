@@ -12,7 +12,7 @@ import java.util.Properties;
 public record Config(
 		String brokers, String username, String password, String caPem, String group,
 		String guessesTopic, String topGuessesTopic, Duration window, Duration slide, int topN,
-		Duration outOfOrderness, boolean fromEarliest) {
+		Duration outOfOrderness, boolean fromEarliest, String salesTopic, String flagsTopic, Duration washWindow) {
 
 	/** Reads the environment, with the local stack's defaults. */
 	public static Config fromEnv(Map<String, String> env) {
@@ -30,7 +30,11 @@ public record Config(
 				Duration.ofSeconds(Long.parseLong(env.getOrDefault("GUESSES_OUT_OF_ORDERNESS_SECONDS", "2"))),
 				// Where a job without a checkpoint or committed offsets starts: the end, unless a
 				// test asks for the whole topic.
-				"earliest".equals(env.get("GUESSES_START")));
+				"earliest".equals(env.get("GUESSES_START")),
+				env.getOrDefault("SALES_TOPIC", "market.sales.v1"),
+				env.getOrDefault("FLAGS_TOPIC", "analytics.flags.v1"),
+				// How far back a loop of sales counts as wash trading (ADR 0018: 7 days).
+				Duration.ofHours(Long.parseLong(env.getOrDefault("WASH_TRADE_WINDOW_HOURS", "168"))));
 	}
 
 	/**

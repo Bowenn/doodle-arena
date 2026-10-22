@@ -5,6 +5,11 @@ import com.doodlearena.analytics.guesses.GuessDeserializer;
 import com.doodlearena.analytics.guesses.TopGuessesQuery;
 import com.doodlearena.analytics.guesses.TopGuessesSerializer;
 import com.doodlearena.analytics.guesses.WindowTop;
+import com.doodlearena.analytics.wash.Flag;
+import com.doodlearena.analytics.wash.FlagSerializer;
+import com.doodlearena.analytics.wash.Sale;
+import com.doodlearena.analytics.wash.SaleDeserializer;
+import com.doodlearena.analytics.wash.WashTradeDetector;
 import java.time.Duration;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.connector.base.DeliveryGuarantee;
@@ -22,6 +27,7 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
  *
  * <ul>
  *   <li>Top guesses: live.guesses.v1 to live.top-guesses.v1 (TopGuessesQuery).
+ *   <li>Wash trading: market.sales.v1 to analytics.flags.v1 (WashTradeDetector).
  * </ul>
  */
 public final class AnalyticsJob {
@@ -68,5 +74,33 @@ public final class AnalyticsJob {
 				.setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
 				.build())
 				.name("live.top-guesses.v1").uid("top-guesses-sink");
+
+		// A new group reads every sale still on the topic: the history is what a loop is made of.
+		KafkaSource<Sale> saleSource = KafkaSource.<Sale>builder()
+				.setBootstrapServers(cfg.brokers())
+				.setTopics(cfg.salesTopic())
+				.setGroupId(cfg.group())
+				.setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
+				.setDeserializer(new SaleDeserializer())
+				.setProperties(cfg.kafkaAuth())
+				.build();
+		// Event time is the sale's commit time. Watermarks only clear old sales from state (the
+		// detector compares the sales' own times), and sales are rare, so partitions go idle.
+		DataStream<Sale> sales = env.fromSource(saleSource,
+				WatermarkStrategy.<Sale>forBoundedOutOfOrderness(Duration.ofSeconds(5))
+						.withTimestampAssigner((s, ts) -> s.completedAtMs)
+						.withIdleness(Duration.ofMinutes(1)),
+				"market.sales.v1").uid("sales-source");
+		DataStream<Flag> flags = sales.keyBy(s -> s.drawingId)
+				.process(new WashTradeDetector(cfg.washWindow()))
+				.name("wash trading").uid("wash-trades");
+		flags.sinkTo(KafkaSink.<Flag>builder()
+				.setBootstrapServers(cfg.brokers())
+				.setKafkaProducerConfig(cfg.kafkaAuth())
+				.setRecordSerializer(new FlagSerializer(cfg.flagsTopic()))
+				// At-least-once (ADR 0018): a repeated flag carries the same flag_id.
+				.setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
+				.build())
+				.name("analytics.flags.v1").uid("flags-sink");
 	}
 }
