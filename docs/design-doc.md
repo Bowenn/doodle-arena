@@ -328,6 +328,7 @@ Every message on a topic is that topic's wrapper message: one `oneof event` with
 | `notifier.dlq.v1` | `DeadLetterEvent` | `DeliveryDead` | notifier | alerting, humans | `endpoint_id` | 4 |
 | `live.guesses.v1` | `ViewerGuessEvent` | `ViewerGuess` | game-server relays | analytics | `room_id` | 6 |
 | `live.top-guesses.v1` | `TopGuessesEvent` | `TopGuesses` | analytics | game-server relays (task 6.2) | `room_id` | 6 |
+| `analytics.flags.v1` | `AnalyticsFlagEvent` | `WashTradeFlagged` | analytics | humans, the analytics dashboard and alerts | `drawing_id` | 6 |
 
 Key payload fields:
 
@@ -338,6 +339,7 @@ Key payload fields:
 - `CoinsCredited`: `user_id`, `amount`, `reason` (`stripe_purchase` or `reward`), `reference`.
 - `ViewerGuess`: `room_id`, `round_no`, `text` (normalized as in section 6.4), `guessed_at` (the event time). Only wrong guesses are published: the top guesses are shown to every viewer.
 - `TopGuesses`: `room_id`, `round_no`, `window_end`, `guesses[]` with `text` and `count`, most common first.
+- `WashTradeFlagged`: `flag_id` (derived from the rule and the sales), `rule` (`ROUND_TRIP` or `CYCLE`), `drawing_id`, `account_ids` (the loop in order, the first account repeated at the end), `sale_ids`, `first_sale_at`, `last_sale_at`, `volume` (coins paid across the loop).
 
 `RoundFinished` uses the claim-check pattern. A round's stroke log can be large, so the event carries only the object key, and the log itself lives in the `round-logs` bucket. This also avoids an ordering problem: if strokes travelled on their own topic, the assets service couldn't know when it had all of them. The object is a gzip-compressed `doodle.game.v1.StrokeLog` protobuf, so its format is versioned and checked by Buf like every other contract.
 
