@@ -20,7 +20,7 @@ from django.views.defaults import server_error as django_server_error
 from opentelemetry import trace
 
 from config.authn import Claims, InvalidTokenError, bearer_token, verifier
-from drawings import storage
+from drawings import replica, storage
 from drawings.models import Drawing, Status
 
 log = logging.getLogger(__name__)
@@ -111,7 +111,9 @@ def lookup_drawings(request: HttpRequest, claims: Claims, raw: str) -> HttpRespo
     ids = [i for i in parsed if i is not None]
     if not parts or len(parts) > MAX_IDS or len(ids) != len(parts):
         return error(request, 400, "INVALID_REQUEST", f"ids must be 1 to {MAX_IDS} drawing ids")
-    found = {d.id: d for d in visible(claims).filter(id__in=ids)}
+    found = replica.read(
+        request, lambda db: {d.id: d for d in visible(claims).using(db).filter(id__in=ids)}
+    )
     ordered = [found[i] for i in dict.fromkeys(ids) if i in found]
     return JsonResponse({"drawings": [represent(d) for d in ordered], "next_cursor": None})
 
@@ -146,7 +148,8 @@ def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
         drawings = drawings.filter(match_id=match)  # the (match_id, round_no) unique index
     if cursor is not None:
         drawings = drawings.filter(id__lt=cursor)  # keyset: UUIDv7 ids sort by creation time
-    page = list(drawings.order_by("-id")[: limit + 1])
+    # The replica, unless it hasn't replayed the caller's last write yet (ADR 0020).
+    page = replica.read(request, lambda db: list(drawings.using(db).order_by("-id")[: limit + 1]))
     more = len(page) > limit
     page = page[:limit]
     return JsonResponse(
@@ -159,7 +162,9 @@ def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
 
 @authenticated
 def get_drawing(request: HttpRequest, claims: Claims, drawing_id: uuid.UUID) -> HttpResponse:
-    drawing = visible(claims).filter(pk=drawing_id).first()
+    drawing = replica.read(
+        request, lambda db: visible(claims).using(db).filter(pk=drawing_id).first()
+    )
     if drawing is None:
         return error(request, 404, "DRAWING_NOT_FOUND", "no such drawing")
     return JsonResponse(represent(drawing))
