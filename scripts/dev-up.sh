@@ -46,6 +46,13 @@ fi
 # --renew-anon-volumes refreshes web's node_modules volume after a dependency change.
 # Data lives in named volumes, which it never touches. --remove-orphans removes the containers
 # of services that were renamed or removed (kafka-topics became kafka-init).
+# Opt-in parts of the stack (compose profiles), to keep the Docker VM's memory for the rest:
+#   PROFILES=live make up             also the relays (live rooms, ADR 0017)
+#   PROFILES=live,analytics make up   and Flink (ADR 0018)
+# COMPOSE_PROFILES in .env does the same for every make up.
+if [[ -n "${PROFILES:-}" ]]; then
+  export COMPOSE_PROFILES="$PROFILES"
+fi
 docker compose -f infra/docker-compose.yml --env-file .env up -d --build --wait --renew-anon-volumes --remove-orphans "$@"
 
 cat <<'EOF'

@@ -216,6 +216,18 @@ Stateless.
 - Job 1: top guesses per live room over a sliding window, read from `live.guesses.v1` and written to `live.top-guesses.v1`.
 - Job 2: wash-trading detection over `market.sales.v1`, such as the same accounts trading back and forth or circular trades within a time window. Flags go to a dashboard and an alert.
 
+How it runs (ADR 0018, task 6.5):
+
+- **One Flink application in application mode.** The job jar sits in a custom image built from the official `flink:2.2.1-java21`. It runs as one JobManager and one TaskManager container (`analytics-jobmanager`, `analytics-taskmanager`, compose profile `analytics`), and on ECS in AWS (task 6.9). Both pipelines are one Flink job, `analytics`, so they share one checkpoint.
+- **Top guesses in Flink SQL.**
+  - The relays' `guessed_at` is the event time, with 2 seconds of out-of-orderness. An idle partition stops holding the watermark back after 10 seconds.
+  - A hopping window TVF (30 s long, every 2 s) counts each guess per room and round. A window Top-N (`ROW_NUMBER`) keeps the 5 most common, and a second aggregation over the same windows folds them into one row.
+  - Each window becomes one `TopGuesses`, which replaces the room's previous list. Its `event_id` is derived from the room, round and window end, so a replayed window carries the same id.
+  - A guess behind the watermark belongs to a window already reported. It is dropped and counted (`analytics.guesses.late`).
+- **Wash trading in the DataStream API** (task 6.5b): rules R1 (round trip) and R3 (cycle) within 7 days, in keyed state with event-time timers.
+- **State and delivery.** Checkpoints go every 30 seconds to the `analytics-checkpoints` bucket, with the HashMap state backend. The Kafka sinks are at-least-once: exactly-once would hold every top-guesses list back until the next checkpoint. Kafka offsets live in the checkpoints. They are committed to the group `analytics` only so that its lag can be watched.
+- **Restarts.** Flink restarts the job with exponential delay. A restart replays from the last checkpoint, so a window can be emitted twice.
+
 ### 4.10 Web app (React + Canvas)
 
 Pages: login, lobby, room (canvas, guesses, scores, timer), the weekly leaderboard (`/leaderboard`: ranks, names and points for one ISO week, your own row highlighted, previous and next week), gallery and replays, marketplace, wallet (buy coins), and developer settings (API keys and webhooks). Follows `.claude/rules/web.md`.
@@ -264,6 +276,7 @@ The economy pages (task 4.8):
 | MongoDB | `assets.replays` (user `assets`, `readWrite` on `assets` only) | Stroke logs for replays | assets |
 | Object storage | `round-logs` bucket | Raw round stroke logs; a lifecycle rule deletes them after 7 days. Assets reads them: the claim check in `RoundFinished` (D13) is the one deliberate exception to "no service reads another's bucket" | game-server |
 | Object storage | `drawings` bucket | PNGs and thumbnails, content-addressed | assets |
+| Object storage | `analytics-checkpoints` bucket | Flink's checkpoints (ADR 0018) | analytics |
 | Elasticsearch | `drawings` index | Search over drawings and listings (Stage 6) | assets |
 | Kafka | Topics in section 6.2 | Events between services | Each topic's producer |
 
@@ -278,6 +291,7 @@ The owners are enforced, not just agreed on (task 5.5):
 - **Object storage:** one SeaweedFS identity per service, scoped to its buckets (`infra/seaweedfs/entrypoint.sh`). In AWS, the IAM task roles do the same (`infra/terraform/stack/iam.tf`).
   - game-server may only write `round-logs`.
   - assets may only read it, and read and write `drawings`.
+  - analytics may only read and write `analytics-checkpoints`.
 - **MongoDB:** the `assets` user with `readWrite` on `assets` only.
 - **Kafka:** per-topic ACLs (ADR 0013).
 
@@ -313,7 +327,7 @@ Every message on a topic is that topic's wrapper message: one `oneof event` with
 | `auth.users.v1` | `UserEvent` | `CredentialsRevoked` | auth (outbox, `auth-relay`) | notifier (group `notifier-auth`) | `user_id` | 4 |
 | `notifier.dlq.v1` | `DeadLetterEvent` | `DeliveryDead` | notifier | alerting, humans | `endpoint_id` | 4 |
 | `live.guesses.v1` | `ViewerGuessEvent` | `ViewerGuess` | game-server relays | analytics | `room_id` | 6 |
-| `live.top-guesses.v1` | `TopGuessesEvent` | `TopGuesses` | analytics | game-server | `room_id` | 6 |
+| `live.top-guesses.v1` | `TopGuessesEvent` | `TopGuesses` | analytics | game-server relays (task 6.2) | `room_id` | 6 |
 
 Key payload fields:
 
@@ -322,6 +336,8 @@ Key payload fields:
 - `DrawingApproved`: `drawing_id`, `match_id`, `round_no`, `author_ids`, `initial_owner_id`, `sha256`, `image_key`, `thumb_key`.
 - `SaleCompleted`: `sale_id`, `listing_id`, `drawing_id`, `seller_id`, `buyer_id`, `price`, `royalties[]` with `user_id` and `amount`, `completed_at`.
 - `CoinsCredited`: `user_id`, `amount`, `reason` (`stripe_purchase` or `reward`), `reference`.
+- `ViewerGuess`: `room_id`, `round_no`, `text` (normalized as in section 6.4), `guessed_at` (the event time). Only wrong guesses are published: the top guesses are shown to every viewer.
+- `TopGuesses`: `room_id`, `round_no`, `window_end`, `guesses[]` with `text` and `count`, most common first.
 
 `RoundFinished` uses the claim-check pattern. A round's stroke log can be large, so the event carries only the object key, and the log itself lives in the `round-logs` bucket. This also avoids an ordering problem: if strokes travelled on their own topic, the assets service couldn't know when it had all of them. The object is a gzip-compressed `doodle.game.v1.StrokeLog` protobuf, so its format is versioned and checked by Buf like every other contract.
 
@@ -761,6 +777,7 @@ Releases:
 | D50 | AWS data survives a session through a logical backup and restore (ADR 0016, task 6.10): `aws-down` drains the writers, dumps the four Postgres databases and assets' MongoDB database, and copies the drawings bucket to a backup bucket in the bootstrap root, then destroys the stack only if every step succeeded; `aws-up` restores the latest backup before the migrations; `notifier-secret-key` moves to the bootstrap root | The stack stays stateless and per-session (ADR 0003), so new passwords and keys each session don't matter; every start is a restore test with a known recovery point (the last teardown); a kept disk or snapshot (Options A and B) would carry credentials the stack regenerates, and running the stack around the clock costs $220–580 a month |
 | D51 | How 6.10 implements ADR 0016: the dumps run on the data host through SSM Run Command, and its role may only put objects (never read them, never write a manifest); restores download through presigned URLs that the human signs; `manifest.json`, written last by the human, marks a backup complete and holds every dump's SHA-256 and every table's rows, which the restore must match; the schema check compares migration ids, not commits; the newest 10 backups are kept, by count; telemetry goes to CloudWatch (`DoodleArena/Backups`, `/doodle-arena/backups`) | otel-lgtm can use the host's role and takes public browser traffic, so it must not read every account and wallet; a commit-ancestry check would refuse a backup after a rebase; an age-based expiry would delete the only backup after a long break; the stack's own collector is destroyed seconds after a backup |
 | D52 | Live rooms through relays (ADR 0017, task 6.1): the lobby places viewers on the least-loaded relay (its reported viewers plus the tickets issued since); viewers sign in and use tickets with their own audience (`doodle-watch`); a host opts in with `live`; relays read rooms with `XREAD` and never write them; the target is 5,000 viewers on one room with p99 under 250 ms | Load-aware placement and viewer counts in the control plane, like rooms on game servers; one audience per role means a viewer's ticket can't take a seat even on an older server; a relay that only reads leaves the owner's write path unchanged, whoever owns the room |
+| D53 | Analytics on Flink (ADR 0018, task 6.5): Flink 2.2.1 in application mode, one JobManager and one TaskManager, both pipelines in one job; top guesses in Flink SQL (a hopping window TVF and a window Top-N) on event time; wash trading (R1 round trip, R3 cycle) in the DataStream API; checkpoints every 30 s to an object-store bucket of its own; at-least-once Kafka sinks whose outputs replace or dedupe; Flink's OpenTelemetry reporter for metrics; opt-in compose profiles (`live`, `analytics`) with memory caps | Real Flink as it runs on Kubernetes or ECS, with each API where it fits; no Kafka connector supports Flink 2.3 yet; an exactly-once sink would delay a live list by a checkpoint; a deterministic id makes a repeat harmless; the full stack no longer fits an 8 GB Docker VM, so the heavy parts start only when needed |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 

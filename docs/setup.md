@@ -18,7 +18,7 @@ Things the humans prepare. Claude Code can install packages and write config, bu
 
 | Tool | Version | Needed from | Notes |
 |---|---|---|---|
-| Docker (Desktop, OrbStack or Colima) with Compose | current | Stage 1 | Give the VM at least 8 GB of memory |
+| Docker (Desktop, OrbStack or Colima) with Compose | current | Stage 1 | Give the VM at least 8 GB of memory, 11 GB with both opt-in profiles (`PROFILES=live,analytics`) |
 | Git | current | Stage 1 | |
 | Go | 1.27.x | Stage 1 | Each module's `go.mod` pins the toolchain |
 | JDK | Temurin 25 (LTS) | Stage 1 | The Gradle wrapper (9.8.x) downloads Gradle itself |
@@ -46,8 +46,9 @@ Images are pinned to exact tags in `infra/docker-compose.yml`. Versions were che
 | Telemetry | `grafana/otel-lgtm:0.36.0` | See ADR 0003 |
 | Kafka lag collector | `otel/opentelemetry-collector-contrib:0.162.0` (the collector version inside otel-lgtm 0.36.0) | The same container, or the collector of the AWS telemetry setup (ADR 0003) |
 | Load generator | `grafana/k6:2.3.0` for the live-room test, inside the stack's network (`scripts/loadtest.sh live`); the same k6 version CI installs with `setup-k6` | k6 on a machine outside AWS |
+| Stream processing | `flink:2.2.1-java21` with the Kafka connector `5.0.0-2.2` (no connector supports Flink 2.3 yet; ADR 0018) | The same image on ECS (task 6.9), or Amazon Managed Service for Apache Flink |
 | Gateway | `nginx:1.30.6-otel` (the variant with the OpenTelemetry and njs modules) | Container behind a load balancer |
-| Service build images | `golang:1.27.2-trixie`, `eclipse-temurin:25.0.4.1_1-jdk`, `python:3.14.8-slim-trixie`, `node:24.22.0-trixie-slim` (the web app) | Same images in CI |
+| Service build images | `golang:1.27.2-trixie`, `eclipse-temurin:25.0.4.1_1-jdk` (`21.0.12.1_1-jdk` for analytics, Flink's Java), `python:3.14.8-slim-trixie`, `node:24.22.0-trixie-slim` (the web app) | Same images in CI |
 | Service runtime images | Go: `gcr.io/distroless/static-debian13:nonroot`, pinned by digest (distroless has no version tags); Java: `eclipse-temurin:25.0.4.1_1-jre`; Python: the build image | Same images on ECS or EC2 |
 
 All of these images are built for both `amd64` and `arm64`, so they run on Apple silicon and on Graviton instances. If Lambda is used in Stage 7, its managed runtimes `python3.14`, `nodejs24.x`, `java25` and `provided.al2023` (for Go) all match these versions.

@@ -25,6 +25,7 @@ locals {
     KAFKA_NOTIFIER_PASSWORD    = "stack/kafka-notifier-password"
     KAFKA_AUTH_PASSWORD        = "stack/kafka-auth-password"
     KAFKA_METRICS_PASSWORD     = "stack/kafka-metrics-password"
+    KAFKA_ANALYTICS_PASSWORD   = "stack/kafka-analytics-password"
     # Redis (task 5.5): one ACL user per service and key prefix.
     REDIS_ADMIN_PASSWORD       = "stack/redis-admin-password"
     REDIS_LOBBY_PASSWORD       = "stack/redis-lobby-password"

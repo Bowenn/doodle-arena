@@ -95,6 +95,8 @@ func TestTopicKeys(t *testing.T) {
 		{"market.sales.v1", &eventsv1.SaleEvent{Event: &eventsv1.SaleEvent_SaleCompleted{SaleCompleted: &eventsv1.SaleCompleted{DrawingId: "d_3"}}}, "d_3"},
 		{"market.wallet.v1", &eventsv1.WalletEvent{Event: &eventsv1.WalletEvent_CoinsCredited{CoinsCredited: &eventsv1.CoinsCredited{UserId: "u_1"}}}, "u_1"},
 		{"notifier.dlq.v1", &eventsv1.DeadLetterEvent{Event: &eventsv1.DeadLetterEvent_DeliveryDead{DeliveryDead: &eventsv1.DeliveryDead{EndpointId: "ep_1"}}}, "ep_1"},
+		{"live.guesses.v1", &eventsv1.ViewerGuessEvent{Event: &eventsv1.ViewerGuessEvent_ViewerGuess{ViewerGuess: &eventsv1.ViewerGuess{RoomId: "r_3"}}}, "r_3"},
+		{"live.top-guesses.v1", &eventsv1.TopGuessesEvent{Event: &eventsv1.TopGuessesEvent_TopGuesses{TopGuesses: &eventsv1.TopGuesses{RoomId: "r_4"}}}, "r_4"},
 	}
 	if len(tests) != len(topics) {
 		t.Fatalf("test covers %d topics, registry has %d", len(tests), len(topics))
@@ -215,4 +217,30 @@ func headerValue(r *kgo.Record, key string) string {
 		}
 	}
 	return ""
+}
+
+func TestGuessRecordsAreViewerGuessesOfOneRoom(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	records, err := guessRecords("r_9", 2, []string{"Dog!", "cat"}, now, func() string { return "id" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("%d records", len(records))
+	}
+	var e eventsv1.ViewerGuessEvent
+	if err := proto.Unmarshal(records[0].Value, &e); err != nil {
+		t.Fatal(err)
+	}
+	g := e.GetViewerGuess()
+	if string(records[0].Key) != "r_9" || records[0].Topic != "live.guesses.v1" {
+		t.Fatalf("record %s key %s", records[0].Topic, records[0].Key)
+	}
+	// Normalized as the relays will publish them (design doc 6.4).
+	if g.GetText() != "dog" || g.GetRoundNo() != 2 || !g.GetGuessedAt().AsTime().Equal(now) || g.GetMeta().GetEventType() != "ViewerGuess" {
+		t.Fatalf("guess = %v", g)
+	}
+	if _, err := guessRecords("r_9", 1, []string{"!!!"}, now, func() string { return "id" }); err == nil {
+		t.Fatal("a guess with no letters: want an error")
+	}
 }

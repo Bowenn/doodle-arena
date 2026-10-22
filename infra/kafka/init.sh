@@ -62,6 +62,8 @@ TOPICS=(
   market.wallet.v1
   notifier.dlq.v1
   auth.users.v1
+  live.guesses.v1
+  live.top-guesses.v1
 )
 
 # principal -> the variable holding its password. broker and kafka-init are super users
@@ -76,6 +78,7 @@ USERS=(
   notifier:KAFKA_NOTIFIER_PASSWORD
   auth:KAFKA_AUTH_PASSWORD
   kafka-metrics:KAFKA_METRICS_PASSWORD
+  analytics:KAFKA_ANALYTICS_PASSWORD
   dev-tools:KAFKA_DEV_TOOLS_PASSWORD
 )
 
@@ -93,9 +96,11 @@ notifier      Read     --topic market.sales.v1 --topic market.wallet.v1 --topic 
 notifier      Write    --topic notifier.dlq.v1
 auth          Write    --topic auth.users.v1
 kafka-metrics Describe --topic * --group *
+analytics     Read     --topic live.guesses.v1 --group analytics
+analytics     Write    --topic live.top-guesses.v1
 dev-tools     Read     --topic *
 dev-tools     Read     --group dev-tools- --resource-pattern-type prefixed
-dev-tools     Write    --topic game.rounds.v1 --topic game.matches.v1
+dev-tools     Write    --topic game.rounds.v1 --topic game.matches.v1 --topic live.guesses.v1
 EOF
 )
 

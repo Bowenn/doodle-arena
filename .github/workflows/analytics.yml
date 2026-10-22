@@ -1,0 +1,50 @@
+# Analytics (Flink, ADR 0018): lint, test (a mini-cluster and a real Kafka), Docker build.
+name: analytics
+
+on:
+  pull_request:
+    paths:
+      - services/analytics/**
+      - proto/doodle/**
+      - proto/gen/java/**
+      - .github/workflows/analytics.yml
+      - .github/workflows/_java.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  push:
+    branches: [master]
+    paths:
+      - services/analytics/**
+      - proto/doodle/**
+      - proto/gen/java/**
+      - .github/workflows/analytics.yml
+      - .github/workflows/_java.yml
+      - scripts/test.sh
+      - scripts/lint.sh
+      - scripts/services.sh
+      - .github/workflows/_docker.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let every run on master finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  java:
+    uses: ./.github/workflows/_java.yml
+    with:
+      service: analytics
+
+  docker:
+    uses: ./.github/workflows/_docker.yml
+    with:
+      service: analytics
+      # The repository root, for the generated contracts in proto/gen/java.
+      context: .
+      file: services/analytics/Dockerfile

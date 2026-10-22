@@ -23,7 +23,7 @@ type topic struct {
 	key func(proto.Message) (string, error)
 }
 
-// topics lists every week-1 topic. Keys follow the catalog's Key column.
+// topics lists the catalog's topics (design doc 6.2). Keys follow the catalog's Key column.
 var topics = map[string]topic{
 	"game.rounds.v1":     {"game.rounds.v1", func() proto.Message { return &eventsv1.RoundEvent{} }, fieldKey("room_id")},
 	"game.matches.v1":    {"game.matches.v1", func() proto.Message { return &eventsv1.MatchEvent{} }, fieldKey("room_id")},
@@ -32,6 +32,9 @@ var topics = map[string]topic{
 	"market.sales.v1":    {"market.sales.v1", func() proto.Message { return &eventsv1.SaleEvent{} }, fieldKey("drawing_id")},
 	"market.wallet.v1":   {"market.wallet.v1", func() proto.Message { return &eventsv1.WalletEvent{} }, fieldKey("user_id")},
 	"notifier.dlq.v1":    {"notifier.dlq.v1", func() proto.Message { return &eventsv1.DeadLetterEvent{} }, fieldKey("endpoint_id")},
+	// Stage 6: live rooms (ADR 0017, ADR 0018).
+	"live.guesses.v1":     {"live.guesses.v1", func() proto.Message { return &eventsv1.ViewerGuessEvent{} }, fieldKey("room_id")},
+	"live.top-guesses.v1": {"live.top-guesses.v1", func() proto.Message { return &eventsv1.TopGuessesEvent{} }, fieldKey("room_id")},
 }
 
 // eventOf returns the event inside a wrapper: the message in its single "event" oneof.

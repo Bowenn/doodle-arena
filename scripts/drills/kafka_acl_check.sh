@@ -64,6 +64,7 @@ assets="$(props assets "$KAFKA_ASSETS_PASSWORD")"
 marketplace="$(props marketplace "$KAFKA_MARKETPLACE_PASSWORD")"
 notifier="$(props notifier "$KAFKA_NOTIFIER_PASSWORD")"
 game_server="$(props game-server "$KAFKA_GAME_SERVER_PASSWORD")"
+analytics="$(props analytics "$KAFKA_ANALYTICS_PASSWORD")"
 wrong="$(props marketplace "not-the-password" wrong-password)"
 network_admin="$(props admin "$KAFKA_ADMIN_PASSWORD" network-admin)"
 
@@ -82,6 +83,10 @@ expect "assets can't write game.matches.v1" "TOPIC_AUTHORIZATION_FAILED|Topic au
   bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $assets --topic game.matches.v1 --producer-property enable.idempotence=false"
 expect "game-server can't write assets.drawings.v1 (mint a drawing)" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
   bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $game_server --topic assets.drawings.v1 --producer-property enable.idempotence=false"
+expect "analytics can't write live.guesses.v1 (forge viewers' guesses)" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
+  bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $analytics --topic live.guesses.v1 --producer-property enable.idempotence=false"
+expect "analytics can't write game.matches.v1" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
+  bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $analytics --topic game.matches.v1 --producer-property enable.idempotence=false"
 expect "assets can't join group marketplace (skip its records)" "Not authorized to access group|GroupAuthorization" \
   "$BIN/kafka-console-consumer.sh" --bootstrap-server "$BOOTSTRAP" --command-config "$assets" \
   --topic game.rounds.v1 --group marketplace --max-messages 1 --timeout-ms 10000

@@ -10,7 +10,7 @@ until echo "cluster.check" | weed shell -master="$MASTER" >/dev/null 2>&1; do
   sleep 1
 done
 
-for bucket in round-logs drawings; do
+for bucket in round-logs drawings analytics-checkpoints; do
   if echo "s3.bucket.list" | weed shell -master="$MASTER" 2>/dev/null | grep -qw "$bucket"; then
     echo "bucket $bucket exists"
   else

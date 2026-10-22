@@ -4,11 +4,20 @@
 # refuses new data with a retryable error and the services' exporters back off, instead of
 # filling the Docker VM while a backend (Tempo) is down and the export queue grows. A healthy
 # pipeline at 80 rooms uses about 150-300 MiB.
+#
+# The services' metrics pipeline also turns delta sums into cumulative ones, because Prometheus
+# drops deltas. Only Flink sends them (its OpenTelemetry reporter reports each counter's change
+# since the last report, ADR 0018); the other services' cumulative metrics pass through unchanged.
 processors:
   memory_limiter:
     check_interval: 1s
     limit_mib: 1024
     spike_limit_mib: 256
+  # Flink's counters: one stream per counter, operator and subtask, a few hundred. A restarted
+  # job gets new ids and new streams; the old ones go stale and are dropped after max_stale.
+  delta_to_cumulative/services:
+    max_stale: 10m
+    max_streams: 5000
 
 # The merge replaces lists, so each pipeline names both processors; memory_limiter goes first.
 service:
@@ -16,6 +25,6 @@ service:
     traces:
       processors: [memory_limiter, batch]
     metrics:
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, delta_to_cumulative/services, batch]
     logs:
       processors: [memory_limiter, batch]
