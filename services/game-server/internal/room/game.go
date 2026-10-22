@@ -41,6 +41,18 @@ const (
 	GuessRateLimited = "rate_limited"
 )
 
+// Results of a viewer's correct guess reaching the owner, for the game.viewer_correct metric.
+const (
+	ViewerAnnounced = "announced" // the round's first correct viewer
+	ViewerIgnored   = "ignored"   // the round already had one, it ended, or the viewer plays here
+)
+
+// ViewerWinner is the first viewer of a live room to guess a round's word (ADR 0019).
+type ViewerWinner struct {
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
+}
+
 // Guess limit per player: a burst of 5, then 1 per second.
 const (
 	guessBurst     = 5
@@ -146,6 +158,7 @@ type Game struct {
 	hintsGiven   int
 	revealed     map[int]bool
 	correct      int
+	viewerWinner ViewerWinner // the round's first correct viewer; zero until one guessed it
 	roundPoints  map[string]int
 	canvas       []CanvasBatch
 	canvasPoints int
@@ -461,6 +474,25 @@ func (g *Game) handleGuess(now time.Time, p *player, text string) string {
 	}
 }
 
+// ViewerCorrect takes a viewer's correct guess that a relay forwarded (ADR 0019). The relay
+// already checked the word; the owner decides who was first, in the order guesses reach it:
+// the first one for the round being drawn is announced to everyone with viewer_correct, and
+// anything else is ignored. The round is named by match and number: numbers start again with
+// every match, and an old match's guess must never win a new round. A player of this room
+// can't win as a viewer (a drawer watching their own room knows the word). It returns
+// ViewerAnnounced or ViewerIgnored.
+func (g *Game) ViewerCorrect(matchID string, roundNo int, uid, name string) string {
+	if g.phase != PhaseDrawing || matchID != g.matchID || roundNo != g.roundNo || g.viewerWinner.UserID != "" || uid == "" {
+		return ViewerIgnored
+	}
+	if _, plays := g.players[uid]; plays {
+		return ViewerIgnored
+	}
+	g.viewerWinner = ViewerWinner{UserID: uid, Name: name}
+	g.emit("viewer_correct", map[string]any{"user_id": uid, "name": name, "round_no": roundNo})
+	return ViewerAnnounced
+}
+
 // Advance fires everything that is due at now: phase deadlines, hints, expired seats and
 // closing an empty room. A wake-up with nothing due does nothing.
 func (g *Game) Advance(now time.Time) {
@@ -651,6 +683,7 @@ func (g *Game) creditDrawers() {
 func (g *Game) resetRound() {
 	g.drawers, g.word, g.options = nil, "", nil
 	g.hintsGiven, g.correct, g.canvasPoints = 0, 0, 0
+	g.viewerWinner = ViewerWinner{}
 	g.revealed = map[int]bool{}
 	g.roundPoints = map[string]int{}
 	g.canvas = nil
@@ -801,7 +834,10 @@ type View struct {
 	WordLength int            `json:"word_length,omitempty"`
 	Mask       string         `json:"mask,omitempty"`
 	Word       string         `json:"word,omitempty"` // only after the round ended
-	Strokes    []CanvasBatch  `json:"strokes,omitempty"`
+	// ViewerWinner is the round's first correct viewer (ADR 0019), while the round runs or is
+	// being revealed.
+	ViewerWinner *ViewerWinner `json:"viewer_winner,omitempty"`
+	Strokes      []CanvasBatch `json:"strokes,omitempty"`
 }
 
 // ViewFor builds uid's view. It never contains the word while a round is running, not even
@@ -829,6 +865,10 @@ func (g *Game) ViewFor(uid string) View {
 		v.Mask = mask(g.word, g.revealed)
 	case PhaseReveal, PhaseMatchEnd:
 		v.Word = g.word
+	}
+	if g.viewerWinner.UserID != "" && (g.phase == PhaseDrawing || g.phase == PhaseReveal) {
+		w := g.viewerWinner
+		v.ViewerWinner = &w
 	}
 	return v
 }

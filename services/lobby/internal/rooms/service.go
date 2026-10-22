@@ -236,6 +236,7 @@ func (s *Service) CreateRoom(ctx context.Context, hostID string, o CreateOptions
 		RoomId:     room.ID,
 		HostUserId: hostID,
 		Mode:       gamev1.GameMode_GAME_MODE_CLASSIC,
+		Live:       room.Live,
 		Settings: &gamev1.RoomSettings{
 			MaxPlayers: settings.MaxPlayers, ChooseSeconds: settings.ChooseSeconds,
 			DrawSeconds: settings.DrawSeconds, WordOptions: settings.WordOptions,

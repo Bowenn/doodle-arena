@@ -216,7 +216,9 @@ services:
     healthcheck: *go-healthcheck
 
   # Relays (ADR 0017): the game server's binary in its relay role, streaming live rooms to
-  # viewers. They read rooms from Redis and never write them: no Kafka, no S3, no control port.
+  # viewers. They read rooms from Redis and never write room state (no S3, no control port).
+  # Viewer guesses (ADR 0019): correct ones go to the room's owner through Redis, wrong ones to
+  # live.guesses.v1, and top guesses come back from live.top-guesses.v1, with relays' own users.
   relay-1:
     <<: *app
     # Only with PROFILES=live (make up): live rooms are opt-in locally, to save the Docker VM's memory.
@@ -235,9 +237,12 @@ services:
       LOBBY_GRPC_ADDR: lobby:9090
       WS_ADDRESS: /ws/relay-1
       REDIS_ADDR: redis:6379
-      # The game-server Redis user: it reads room:* and marks viewer tickets used there.
-      REDIS_USERNAME: game-server
-      REDIS_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
+      # The relay Redis user: it reads room:* and writes only viewer tickets and viewer guesses.
+      REDIS_USERNAME: relay
+      REDIS_PASSWORD: ${REDIS_RELAY_PASSWORD:?}
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_USERNAME: relay
+      KAFKA_PASSWORD: ${KAFKA_RELAY_PASSWORD:?}
       TICKET_PUBLIC_KEY_PATH: /run/secrets/ticket-public-key
       WS_ALLOWED_ORIGINS: localhost:8080
     secrets:
@@ -245,15 +250,20 @@ services:
     # Thousands of viewer sockets (task 6.1's target is 5,000 on one room).
     ulimits:
       nofile: {soft: 65535, hard: 65535}
+    networks: [default, kafka]
     depends_on:
       redis:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       otel-lgtm:
         condition: service_healthy
     healthcheck: *go-healthcheck
 
   # Relays (ADR 0017): the game server's binary in its relay role, streaming live rooms to
-  # viewers. They read rooms from Redis and never write them: no Kafka, no S3, no control port.
+  # viewers. They read rooms from Redis and never write room state (no S3, no control port).
+  # Viewer guesses (ADR 0019): correct ones go to the room's owner through Redis, wrong ones to
+  # live.guesses.v1, and top guesses come back from live.top-guesses.v1, with relays' own users.
   relay-2:
     <<: *app
     # Only with PROFILES=live (make up): live rooms are opt-in locally, to save the Docker VM's memory.
@@ -272,9 +282,12 @@ services:
       LOBBY_GRPC_ADDR: lobby:9090
       WS_ADDRESS: /ws/relay-2
       REDIS_ADDR: redis:6379
-      # The game-server Redis user: it reads room:* and marks viewer tickets used there.
-      REDIS_USERNAME: game-server
-      REDIS_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
+      # The relay Redis user: it reads room:* and writes only viewer tickets and viewer guesses.
+      REDIS_USERNAME: relay
+      REDIS_PASSWORD: ${REDIS_RELAY_PASSWORD:?}
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_USERNAME: relay
+      KAFKA_PASSWORD: ${KAFKA_RELAY_PASSWORD:?}
       TICKET_PUBLIC_KEY_PATH: /run/secrets/ticket-public-key
       WS_ALLOWED_ORIGINS: localhost:8080
     secrets:
@@ -282,9 +295,12 @@ services:
     # Thousands of viewer sockets (task 6.1's target is 5,000 on one room).
     ulimits:
       nofile: {soft: 65535, hard: 65535}
+    networks: [default, kafka]
     depends_on:
       redis:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       otel-lgtm:
         condition: service_healthy
     healthcheck: *go-healthcheck
@@ -826,6 +842,7 @@ services:
       REDIS_LOBBY_PASSWORD: ${REDIS_LOBBY_PASSWORD:?}
       REDIS_GAME_SERVER_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
       REDIS_ASSETS_PASSWORD: ${REDIS_ASSETS_PASSWORD:?}
+      REDIS_RELAY_PASSWORD: ${REDIS_RELAY_PASSWORD:?}
     volumes:
       - redis-data:/data
       - ./redis/start.sh:/etc/doodle-arena/redis-start.sh:ro
@@ -933,6 +950,7 @@ services:
       KAFKA_AUTH_PASSWORD: ${KAFKA_AUTH_PASSWORD:?}
       KAFKA_METRICS_PASSWORD: ${KAFKA_METRICS_PASSWORD:?}
       KAFKA_ANALYTICS_PASSWORD: ${KAFKA_ANALYTICS_PASSWORD:?}
+      KAFKA_RELAY_PASSWORD: ${KAFKA_RELAY_PASSWORD:?}
       KAFKA_DEV_TOOLS_PASSWORD: ${KAFKA_DEV_TOOLS_PASSWORD:?}
     volumes:
       - ./kafka/init.sh:/init.sh:ro

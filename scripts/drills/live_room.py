@@ -4,7 +4,11 @@ viewers watch it through the relays. It checks the things that make a relay corr
   - every viewer gets the same events as the players, in seq order, with none missing;
   - no viewer sees the word before round_ended;
   - a viewer that reconnects with its last seq resumes on a relay without a full welcome;
-  - a player's ticket can't watch, and a viewer's ticket can't play.
+  - a player's ticket can't watch, and a viewer's ticket can't play;
+  - viewers guess (ADR 0019): wrong guesses are answered privately and, when the analytics
+    profile runs, come back as top guesses; when every viewer guesses the word at once, the
+    room announces exactly one of them (viewer_correct) to players and viewers; a viewer who
+    got it can't guess again, and a player watching their own room can't guess as a viewer.
 
 It also prints how much later a viewer gets an event than a player (the relay's hop).
 
@@ -139,7 +143,7 @@ async def main(n_viewers, hold):
         "live-host",
         {
             "live": True,
-            "settings": {"draw_seconds": int(max(30, hold + 20)), "choose_seconds": 10},
+            "settings": {"draw_seconds": int(max(60, hold + 40)), "choose_seconds": 10},
         },
     )
     rid = room["room_id"]
@@ -205,6 +209,7 @@ async def main(n_viewers, hold):
             await v.ws.close()
             await v.connect(last_seq=last)
             tasks.append(asyncio.create_task(v.run()))
+    ok &= await viewer_guesses(viewers, drawer, rid, word)
     guesser = guest if drawer is host else host
     await guesser.send("guess", {"text": word})
     for _ in range(100):  # the round ends once everyone guessed
@@ -219,6 +224,16 @@ async def main(n_viewers, hold):
     player_seqs = host.seqs()
     player_at = {e["seq"]: t for t, e in host.events()}
     lag = []
+    announced = [e for _, e in host.events() if e["type"] == "viewer_correct"]
+    seen = [any(e["type"] == "viewer_correct" for _, e in v.events()) for v in viewers]
+    print(
+        f"  viewer_correct: {len(announced)} announced "
+        f"({announced[0]['data']['name'] if announced else '-'}), seen by {sum(seen)}/{len(viewers)} viewers"
+    )
+    ok &= len(announced) == 1 and all(seen)
+    ok &= bool(announced) and announced[0]["data"]["user_id"] in {
+        v.user for v in viewers
+    }
     for v in viewers:
         seqs = v.seqs()
         early = [
@@ -246,6 +261,87 @@ async def main(n_viewers, hold):
         )
     print("OK" if ok else "FAILED")
     sys.exit(0 if ok else 1)
+
+
+async def viewer_guesses(viewers, drawer, rid, word):
+    """Viewers guess wrong, then all guess the word at once (ADR 0019). Returns whether every
+    check passed; the announcement itself is checked after the round."""
+    ok = True
+    mark = [len(v.msgs) for v in viewers]
+
+    def answers(v, i, typ):
+        return [m["data"] for _, m in v.msgs[mark[i] :] if m["type"] == typ]
+
+    wrong = ["apple", "banana", "cherry", "apple", "banana", "apple"]
+    for i, v in enumerate(viewers):
+        await v.send("guess", {"text": wrong[i % len(wrong)]})
+    await asyncio.sleep(1)
+    results = [answers(v, i, "guess_result") for i, v in enumerate(viewers)]
+    right = sum(1 for r in results if r and not r[0]["correct"])
+    print(f"  wrong viewer guesses answered privately: {right}/{len(viewers)}")
+    ok &= right == len(viewers)
+
+    # The top guesses come back from analytics (ADR 0018) when its profile runs. Event time only
+    # moves with new guesses, so one viewer keeps guessing (the bucket refills 1 a second).
+    if analytics_running():
+        top = None
+        for k in range(25):
+            await viewers[-1].send("guess", {"text": f"tick{'x' * (k % 3)}"})
+            await asyncio.sleep(1.1)
+            top = next((t for v in viewers for t in v.private("top_guesses")), None)
+            if top:
+                break
+        print(
+            f"  top guesses on the watch page: {top['guesses'] if top else 'none in 27 s'}"
+        )
+        ok &= bool(top) and any(g["text"] == "apple" for g in top["guesses"])
+        ok &= not any(
+            word in json.dumps(t) for v in viewers for t in v.private("top_guesses")
+        )
+    else:
+        print(
+            "  top guesses: skipped (start the analytics profile: PROFILES=live,analytics make up)"
+        )
+
+    # A player watching their own room is refused; the drawer knows the word.
+    me = Socket(drawer.user, rid, True)
+    await me.connect()
+    me_task = asyncio.create_task(me.run())
+    await asyncio.sleep(0.5)
+    await me.send("guess", {"text": word[:-1]})
+    await asyncio.sleep(0.5)
+    refused = [e for e in me.private("error") if e["code"] == "player"]
+    print(f"  the drawer guessing as a viewer: {'refused' if refused else 'ACCEPTED'}")
+    ok &= bool(refused)
+    await me.ws.close()
+    await asyncio.gather(me_task, return_exceptions=True)
+
+    # Everyone at once: the room's owner decides who was first.
+    await asyncio.gather(*(v.send("guess", {"text": word.upper()}) for v in viewers))
+    await asyncio.sleep(1.5)
+    correct = sum(
+        1
+        for i, v in enumerate(viewers)
+        if {"correct": True} in answers(v, i, "guess_result")
+    )
+    await viewers[0].send("guess", {"text": "again"})
+    await asyncio.sleep(0.5)
+    again = [e["code"] for e in answers(viewers[0], 0, "error")]
+    print(
+        f"  the word from every viewer: {correct}/{len(viewers)} correct; a second guess: {again}"
+    )
+    ok &= correct == len(viewers) and "already_guessed" in again
+    return ok
+
+
+def analytics_running():
+    try:
+        with urllib.request.urlopen(
+            "http://localhost:8081/jobs/overview", timeout=2
+        ) as r:
+            return any(j["state"] == "RUNNING" for j in json.loads(r.read())["jobs"])
+    except OSError:
+        return False
 
 
 def spiral(i):

@@ -17,6 +17,10 @@ type metrics struct {
 	lag       metric.Float64Histogram
 	closes    metric.Int64Counter
 	rebuilds  metric.Int64Counter
+	guesses   metric.Int64Counter
+	publishes metric.Int64Counter
+	forwards  metric.Int64Counter
+	tops      metric.Int64Counter
 }
 
 // Latency buckets in ms, from a local fan-out to a viewer far behind.
@@ -53,6 +57,27 @@ func newMetrics(m metric.Meter) (*metrics, error) {
 		metric.WithUnit("{load}")); err != nil {
 		return nil, err
 	}
+	// Viewer guesses (ADR 0019).
+	if out.guesses, err = m.Int64Counter("relay.viewer_guesses",
+		metric.WithDescription("Viewers' guesses by result: correct, wrong, close, not_drawing, rate_limited or already_guessed"),
+		metric.WithUnit("{guess}")); err != nil {
+		return nil, err
+	}
+	if out.publishes, err = m.Int64Counter("relay.guesses.published",
+		metric.WithDescription("Wrong viewer guesses sent to live.guesses.v1, by result: success, failed or dropped (the client's buffer was full)"),
+		metric.WithUnit("{guess}")); err != nil {
+		return nil, err
+	}
+	if out.forwards, err = m.Int64Counter("relay.correct_guesses.forwarded",
+		metric.WithDescription("Correct viewer guesses handed to the room's owner through Redis, by result: success, failed or dropped (queue full)"),
+		metric.WithUnit("{guess}")); err != nil {
+		return nil, err
+	}
+	if out.tops, err = m.Int64Counter("relay.top_guesses.received",
+		metric.WithDescription("Top-guesses lists read from live.top-guesses.v1, by result: shown, stale, not_watched, dropped or unreadable"),
+		metric.WithUnit("{list}")); err != nil {
+		return nil, err
+	}
 	return &out, nil
 }
 
@@ -67,4 +92,20 @@ func (m *metrics) closed(ctx context.Context, reason string) {
 
 func (m *metrics) rebuild(ctx context.Context, reason string) {
 	m.rebuilds.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
+}
+
+func (m *metrics) viewerGuess(ctx context.Context, result string) {
+	m.guesses.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+}
+
+func (m *metrics) published(ctx context.Context, result string) {
+	m.publishes.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+}
+
+func (m *metrics) forwarded(ctx context.Context, result string) {
+	m.forwards.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+}
+
+func (m *metrics) topGuesses(ctx context.Context, result string) {
+	m.tops.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
 }

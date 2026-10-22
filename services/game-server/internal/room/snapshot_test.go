@@ -114,6 +114,11 @@ func TestSnapshotPlusEventsRebuildsTheGame(t *testing.T) {
 						text = "hi"
 					}
 					r.g.Handle(r.now, uid, protocol.Guess{Text: text})
+				case n < 79:
+					// A viewer's correct guess from a relay (ADR 0019): this round's or a stale
+					// one, by a viewer or by someone who plays here.
+					viewer := []string{"v0", "v1", uid}[act.IntN(3)]
+					r.g.ViewerCorrect(r.g.matchID, r.g.roundNo-act.IntN(2), viewer, "Viewer "+viewer)
 				default:
 					r.now = r.now.Add(time.Duration(act.IntN(4000)) * time.Millisecond)
 					r.g.Advance(r.now)

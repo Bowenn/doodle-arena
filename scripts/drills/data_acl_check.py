@@ -80,6 +80,7 @@ def main() -> int:
     lobby = rds("lobby", env["REDIS_LOBBY_PASSWORD"])
     game = rds("game-server", env["REDIS_GAME_SERVER_PASSWORD"])
     assets = rds("assets", env["REDIS_ASSETS_PASSWORD"])
+    relay = rds("relay", env["REDIS_RELAY_PASSWORD"])
     perm = (redis.exceptions.NoPermissionError,)
     auth = (redis.exceptions.AuthenticationError, redis.exceptions.ResponseError)
     probe = f"acl-check-{uuid.uuid4().hex[:8]}"
@@ -98,6 +99,17 @@ def main() -> int:
     check("game-server can't queue a Celery task (assets:*)", lambda: game.lpush("assets:celery", "x"), perm)
     check("lobby can't queue a Celery task (assets:*)", lambda: lobby.lpush("assets:celery", "x"), perm)
     check("game-server can't FLUSHALL", lambda: game.flushall(), perm)
+    # Relays face the public (ADR 0019): they read rooms and write only viewer tickets and guesses.
+    check("relay reads a room's events (control)", lambda: relay.xrange(f"room:{{{probe}}}:events", count=1), None)
+    check("relay redeems a viewer ticket (control)",
+          lambda: relay.set(f"room:{{{probe}}}:viewer-ticket:x", "1", nx=True, ex=60), None)
+    check("relay adds a viewer's correct guess (control)",
+          lambda: relay.xadd(f"room:{{{probe}}}:viewer-guesses", {"user_id": "u_x"}, maxlen=10), None)
+    check("relay can't write a room's events (forge an event)",
+          lambda: relay.xadd(f"room:{{{probe}}}:events", {"t": "1"}), perm)
+    check("relay can't take a room's lease", lambda: relay.set(f"room:{{{probe}}}:lease", "x"), perm)
+    check("relay can't redeem a player's join ticket", lambda: relay.set(f"room:{{{probe}}}:ticket:x", "1", nx=True), perm)
+    check("relay can't read lobby:names", lambda: relay.hgetall("lobby:names"), perm)
     check("lobby can't list every key (KEYS)", lambda: lobby.keys("*"), perm)
     check("lobby can't list key names with SCAN", lambda: lobby.scan(0), perm)
     check("assets can't list key names with RANDOMKEY", lambda: assets.randomkey(), perm)

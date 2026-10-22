@@ -32,6 +32,7 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/ticket"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/ws"
 	"github.com/coder/websocket"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -53,7 +54,7 @@ const (
 	// reconnecting don't restart it.
 	linger     = 30 * time.Second
 	retryAfter = 500 * time.Millisecond
-	// Viewers only ping (task 6.2 adds guesses): a lower flood limit than players'.
+	// Viewers ping and guess (ADR 0019); guesses also have their own bucket (guesses.go).
 	floodBurst     = 20
 	floodPerSecond = 5
 	idleTimeout    = 60 * time.Second
@@ -83,6 +84,14 @@ type Config struct {
 	HelloTimeout time.Duration
 	Log          *slog.Logger
 	Meter        metric.Meter
+	// Forwarder passes viewers' correct guesses to their rooms' owners (ADR 0019);
+	// roomstore.Store. nil: correct guesses are only answered.
+	Forwarder Forwarder
+	// Kafka is the relay's client (its own user, relay): wrong guesses out, top guesses in.
+	// nil: neither (tests).
+	Kafka *kgo.Client
+	// Publisher overrides the Kafka publisher (tests).
+	Publisher Publisher
 }
 
 // Relay serves viewers' WebSockets and runs a stream per watched room.
@@ -103,6 +112,7 @@ type Relay struct {
 	running  sync.WaitGroup // stream goroutines
 	draining atomic.Bool
 	viewers  atomic.Int64
+	forwards chan forward // correct guesses waiting for Redis (guesses.go)
 }
 
 // New returns a relay.
@@ -114,9 +124,17 @@ func New(cfg Config) (*Relay, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Publisher == nil && cfg.Kafka != nil {
+		cfg.Publisher = kafkaPublisher{client: cfg.Kafka, metrics: m}
+	}
 	base, cancel := context.WithCancel(context.Background())
-	return &Relay{cfg: cfg, metrics: m, tracer: otel.Tracer("game-server"), base: base, cancel: cancel,
-		streams: map[string]*stream{}}, nil
+	r := &Relay{cfg: cfg, metrics: m, tracer: otel.Tracer("game-server"), base: base, cancel: cancel,
+		streams: map[string]*stream{}, forwards: make(chan forward, forwardQueue)}
+	if cfg.Forwarder != nil {
+		r.running.Add(1)
+		go func() { defer r.running.Done(); r.forwardGuesses(base) }()
+	}
+	return r, nil
 }
 
 // Drain makes heartbeats report this relay as draining, so the lobby sends it no new viewers.
@@ -191,7 +209,7 @@ func (r *Relay) serve(ctx context.Context, c *websocket.Conn, roomID string) {
 	log := r.cfg.Log.With("room_id", roomID)
 	ctx, span := r.tracer.Start(ctx, "game.ws.connect", trace.WithAttributes(
 		attribute.String("room.id", roomID), attribute.String("ws.role", "viewer")))
-	conn, st, code, reason := r.hello(ctx, c, roomID, log)
+	conn, st, name, code, reason := r.hello(ctx, c, roomID, log)
 	if conn == nil {
 		span.SetStatus(codes.Error, reason)
 		span.End()
@@ -201,29 +219,29 @@ func (r *Relay) serve(ctx context.Context, c *websocket.Conn, roomID string) {
 	span.SetAttributes(attribute.String("user.id", conn.UserID()))
 	span.End()
 
-	r.readLoop(ctx, c, conn, log)
+	r.readLoop(ctx, c, conn, st, name, log)
 	st.leave(conn)
 	conn.CloseWith(websocket.StatusNormalClosure, "")
 	conn.Wait()
 }
 
-func (r *Relay) hello(ctx context.Context, c *websocket.Conn, roomID string, log *slog.Logger) (*ws.Conn, *stream, websocket.StatusCode, string) {
+func (r *Relay) hello(ctx context.Context, c *websocket.Conn, roomID string, log *slog.Logger) (*ws.Conn, *stream, string, websocket.StatusCode, string) {
 	hello, code, reason := ws.ReadHello(c, r.cfg.HelloTimeout)
 	if code != 0 {
-		return nil, nil, code, reason
+		return nil, nil, "", code, reason
 	}
 	t, err := r.cfg.Verifier.VerifyViewer(hello.Ticket, roomID)
 	if err != nil {
 		log.WarnContext(ctx, "viewer ticket rejected", "reason", err.Error())
-		return nil, nil, protocol.CloseBadTicket, "invalid ticket"
+		return nil, nil, "", protocol.CloseBadTicket, "invalid ticket"
 	}
 	switch err := r.cfg.Redeem(ctx, t); {
 	case errors.Is(err, ticket.ErrReused):
 		log.WarnContext(ctx, "viewer ticket reused", "user_id", t.UserID)
-		return nil, nil, protocol.CloseBadTicket, "ticket already used"
+		return nil, nil, "", protocol.CloseBadTicket, "ticket already used"
 	case err != nil:
 		log.ErrorContext(ctx, "viewer ticket not redeemed", "user_id", t.UserID, "err", err)
-		return nil, nil, websocket.StatusInternalError, "try again"
+		return nil, nil, "", websocket.StatusInternalError, "try again"
 	}
 	conn := ws.NewConn(r.base, c, t.UserID, func() {
 		r.metrics.closed(context.Background(), "slow")
@@ -238,7 +256,7 @@ func (r *Relay) hello(ctx context.Context, c *websocket.Conn, roomID string, log
 		if err != nil { // shutting down
 			conn.CloseWith(websocket.StatusGoingAway, "relay shutting down")
 			conn.Wait()
-			return nil, nil, websocket.StatusGoingAway, "relay shutting down"
+			return nil, nil, "", websocket.StatusGoingAway, "relay shutting down"
 		}
 		switch err := st.join(ctx, conn, hello.LastSeq); {
 		case errors.Is(err, errStreamGone):
@@ -246,22 +264,23 @@ func (r *Relay) hello(ctx context.Context, c *websocket.Conn, roomID string, log
 		case errors.Is(err, roomstore.ErrClosed), errors.Is(err, roomstore.ErrNotFound):
 			conn.CloseWith(protocol.CloseNoRoom, "the room has ended")
 			conn.Wait()
-			return nil, nil, protocol.CloseNoRoom, "the room has ended"
+			return nil, nil, "", protocol.CloseNoRoom, "the room has ended"
 		case err != nil:
 			log.ErrorContext(ctx, "viewer couldn't join the stream", "user_id", t.UserID, "err", err)
 			conn.CloseWith(websocket.StatusInternalError, "try again")
 			conn.Wait()
-			return nil, nil, websocket.StatusInternalError, "try again"
+			return nil, nil, "", websocket.StatusInternalError, "try again"
 		}
 		log.DebugContext(ctx, "viewer joined", "user_id", t.UserID, "last_seq", hello.LastSeq)
-		return conn, st, 0, ""
+		return conn, st, t.Name, 0, ""
 	}
 }
 
-// readLoop answers pings. Everything else a viewer sends is refused: viewers only watch until
-// task 6.2's guesses.
-func (r *Relay) readLoop(ctx context.Context, c *websocket.Conn, conn *ws.Conn, log *slog.Logger) {
+// readLoop answers pings and passes guesses to the room's stream (ADR 0019). Everything else a
+// viewer sends is refused: viewers watch and guess, nothing more.
+func (r *Relay) readLoop(ctx context.Context, c *websocket.Conn, conn *ws.Conn, st *stream, name string, log *slog.Logger) {
 	flood := ratelimit.New(floodBurst, floodPerSecond)
+	guesses := ratelimit.New(guessBurst, guessPerSecond)
 	for {
 		readCtx, cancel := context.WithTimeout(context.Background(), idleTimeout)
 		typ, data, err := c.Read(readCtx)
@@ -283,11 +302,19 @@ func (r *Relay) readLoop(ctx context.Context, c *websocket.Conn, conn *ws.Conn, 
 			conn.Send(protocol.Marshal("error", protocol.ErrorData{Code: "bad_request", Message: err.Error()}))
 			continue
 		}
-		if p, ok := msg.(protocol.Ping); ok {
-			conn.Send(protocol.Marshal("pong", map[string]int64{"t": p.T}))
-			continue
+		switch m := msg.(type) {
+		case protocol.Ping:
+			conn.Send(protocol.Marshal("pong", map[string]int64{"t": m.T}))
+		case protocol.Guess:
+			if !guesses.Allow(time.Now()) {
+				r.metrics.viewerGuess(ctx, guessRateLimited)
+				conn.Send(protocol.Marshal("rate_limited", map[string]any{}))
+				continue
+			}
+			st.guess(conn, name, m.Text)
+		default:
+			conn.Send(protocol.Marshal("error", protocol.ErrorData{Code: "viewer", Message: "viewers can only watch and guess"}))
 		}
-		conn.Send(protocol.Marshal("error", protocol.ErrorData{Code: "viewer", Message: "viewers can only watch"}))
 	}
 }
 
@@ -304,7 +331,7 @@ func (r *Relay) stream(roomID string) (*stream, error) {
 		return s, nil
 	}
 	s := &stream{relay: r, id: roomID, in: make(chan any), done: make(chan struct{}),
-		conns: map[*ws.Conn]struct{}{}, log: r.cfg.Log.With("room_id", roomID)}
+		conns: map[*ws.Conn]struct{}{}, guessed: map[string]string{}, log: r.cfg.Log.With("room_id", roomID)}
 	r.streams[roomID] = s
 	r.running.Add(1)
 	go s.run(r.base)
@@ -362,6 +389,12 @@ type stream struct {
 		view    json.RawMessage
 	}
 	idleSince time.Time
+
+	// Viewer guesses (ADR 0019), per round: a round is its match and number (roundKey).
+	guessed map[string]string // user id -> the round they guessed right (by user: a reconnect keeps it)
+	winner  string            // the round whose viewer_correct this stream has seen
+	top     []byte            // the round's latest top_guesses frame, for viewers who join
+	topEnd  int64             // its window's end
 }
 
 // join adds a viewer. It returns errStreamGone if the stream stopped in the meantime.
@@ -419,6 +452,10 @@ func (s *stream) run(ctx context.Context) {
 				s.drop(in.conn)
 			case inspectIn:
 				in.f(s)
+			case guessIn:
+				s.onGuess(ctx, in)
+			case topIn:
+				s.onTop(ctx, in.top)
 			}
 		case evs := <-batches:
 			s.apply(ctx, evs)
@@ -581,6 +618,7 @@ func (s *stream) apply(ctx context.Context, evs []room.StoredEvent) {
 		if room.IsPhaseEvent(ev.Type) || len(s.events) > maxBuffered {
 			s.refreshSnapshot(ctx)
 		}
+		s.onEvent(ev)
 	}
 }
 
@@ -617,9 +655,12 @@ func (s *stream) add(c *ws.Conn, lastSeq int64) {
 			}
 		}
 		c.Send(protocol.Marshal("resumed", map[string]int64{"seq": s.seq}))
-		return
+	} else {
+		s.welcome(c)
 	}
-	s.welcome(c)
+	if s.top != nil {
+		c.Send(s.top)
+	}
 }
 
 func (s *stream) drop(c *ws.Conn) {

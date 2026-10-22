@@ -11,12 +11,15 @@ import type {
   PrivateMessage,
   Result,
   RoomEvent,
+  TopGuesses,
+  ViewerWinner,
   Welcome,
 } from './protocol.ts'
 
 export type FeedItem =
   | { kind: 'chat'; user_id: string; text: string }
   | { kind: 'correct'; user_id: string; order: number }
+  | { kind: 'viewer'; name: string }
   | { kind: 'system'; text: string }
 
 export type Notice = { id: number; text: string; tone: 'good' | 'bad' | 'info' }
@@ -48,6 +51,14 @@ export type RoomState = {
   results: Result[] | null
   feed: FeedItem[]
   notice: Notice | null
+  /** This socket watches a live room through a relay (ADR 0017). */
+  viewer: boolean
+  /** The round's first correct viewer (ADR 0019). */
+  viewerWinner: ViewerWinner | null
+  /** A viewer guessed this round's word: the server takes no more guesses this round. */
+  viewerGuessed: boolean
+  /** The round's most common wrong viewer guesses (viewers only). */
+  topGuesses: TopGuesses | null
 }
 
 const FEED_LIMIT = 200
@@ -73,7 +84,9 @@ export function roomReducer(state: RoomState | null, action: Action): RoomState 
  * reconnect keeps the feed it had. */
 export function fromWelcome(w: Welcome, prev: RoomState | null): RoomState {
   const v = w.view
-  const feed = prev && prev.roomId === v.room_id ? prev.feed : []
+  const same = prev && prev.roomId === v.room_id
+  const feed = same ? prev.feed : []
+  const sameRound = same && prev.roundNo === (v.round_no ?? 0) && prev.matchId === (v.match_id ?? null)
   return {
     me: w.user_id,
     seq: w.seq,
@@ -96,6 +109,11 @@ export function fromWelcome(w: Welcome, prev: RoomState | null): RoomState {
     results: null,
     feed,
     notice: null,
+    viewer: !!w.viewer,
+    viewerWinner: v.viewer_winner ?? null,
+    // Kept across a reconnect within the same round: the relay remembers it per socket only.
+    viewerGuessed: (sameRound && prev.viewerGuessed) || false,
+    topGuesses: sameRound ? prev.topGuesses : null,
   }
 }
 
@@ -141,6 +159,7 @@ function applyEvent(s: RoomState, e: RoomEvent): RoomState {
     case 'round_started':
       return {
         ...s,
+        topGuesses: null,
         phase: 'drawing',
         roundNo: e.data.round_no,
         drawerIds: e.data.drawer_ids,
@@ -167,6 +186,12 @@ function applyEvent(s: RoomState, e: RoomEvent): RoomState {
         ...s,
         players: updatePlayer(s.players, e.data.user_id, { guessed: true }),
         feed: addFeed(s.feed, { kind: 'correct', user_id: e.data.user_id, order: e.data.order }),
+      }
+    case 'viewer_correct':
+      return {
+        ...s,
+        viewerWinner: { user_id: e.data.user_id, name: e.data.name },
+        feed: addFeed(s.feed, { kind: 'viewer', name: e.data.name }),
       }
     case 'round_ended': {
       const scores = new Map(e.data.scores.map((l) => [l.user_id, l.score]))
@@ -208,6 +233,9 @@ function newRound(s: RoomState): RoomState {
     mask: '',
     wordLength: 0,
     roundPoints: null,
+    viewerWinner: null,
+    viewerGuessed: false,
+    topGuesses: null,
     players: s.players.map((p) => ({ ...p, guessed: false })),
   }
 }
@@ -221,9 +249,12 @@ function applyPrivate(s: RoomState, m: PrivateMessage): RoomState {
     case 'your_word':
       return { ...s, myWord: m.data.word }
     case 'guess_result':
-      return m.data.correct
-        ? notify(s, 'You guessed it!', 'good')
-        : s // a wrong guess shows up as chat (or stays private when it contains the word)
+      if (m.data.correct) return notify({ ...s, viewerGuessed: s.viewer || s.viewerGuessed }, 'You guessed it!', 'good')
+      // A player's wrong guess shows up as chat (or stays private when it contains the word);
+      // a viewer's never does, so the viewer hears it here.
+      return s.viewer ? notify(s, 'Not it. Try again!', 'info') : s
+    case 'top_guesses':
+      return m.data.round_no === s.roundNo ? { ...s, topGuesses: m.data } : s
     case 'rate_limited':
       return notify(s, 'Slow down: too many guesses.', 'bad')
     case 'error':

@@ -101,7 +101,7 @@ type BodyProps = {
   welcomes: number
   /** Whether the socket is up; a stale room can't be drawn on or guessed in. */
   live: boolean
-  /** A viewer: never a drawer, and no guess box until viewers can guess (task 6.2). */
+  /** A viewer: never a drawer; guesses go to the relay (ADR 0019). */
   watching: boolean
 }
 
@@ -116,9 +116,10 @@ function RoomBody({ state, send, welcomes, live, watching }: BodyProps) {
       </section>
       <aside className="side">
         <Scoreboard state={state} />
+        {watching && <TopGuessesPanel state={state} />}
         <Feed state={state} />
         {watching ? (
-          <p className="muted viewer-note">You are watching. Viewers can't guess yet.</p>
+          <ViewerGuessBox state={state} send={send} live={live} />
         ) : (
           <GuessBox state={state} send={send} live={live} />
         )}
@@ -301,6 +302,8 @@ function feedText(state: RoomState, item: FeedItem): string {
       return `${nameOf(state, item.user_id)}: ${item.text}`
     case 'correct':
       return `${nameOf(state, item.user_id)} guessed the word!`
+    case 'viewer':
+      return `${item.name} (watching) guessed it first among the viewers!`
     case 'system':
       return item.text
   }
@@ -344,6 +347,68 @@ function GuessBox({ state, send, live }: GuessBoxProps) {
         Send
       </button>
     </form>
+  )
+}
+
+/** A viewer's guess box (ADR 0019): guesses count only while a round is drawn, until the viewer
+ * gets it right. They never show as chat; the relay answers each one privately. */
+function ViewerGuessBox({ state, send, live }: GuessBoxProps) {
+  const [text, setText] = useState('')
+  const drawing = state.phase === 'drawing'
+  const blocked = !live || !drawing || state.viewerGuessed
+  const notice = useNotice(state)
+
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    const t = text.trim()
+    if (!t || blocked) return
+    if (send({ type: 'guess', data: { text: t } })) setText('')
+  }
+
+  return (
+    <form className="guess" onSubmit={submit}>
+      {notice && (
+        <p className={`notice ${notice.tone}`} role="status">
+          {notice.text}
+        </p>
+      )}
+      <p className="muted viewer-note">You are watching. Guess along: the first viewer to get it is announced.</p>
+      <input
+        aria-label="Viewer guess"
+        placeholder={
+          !live ? 'Not connected' : state.viewerGuessed ? 'You got it!' : drawing ? 'Type your guess' : 'Wait for the next round'
+        }
+        value={text}
+        maxLength={MAX_GUESS_CHARS}
+        disabled={blocked}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <button type="submit" disabled={blocked}>
+        Guess
+      </button>
+    </form>
+  )
+}
+
+/** The viewers' most common wrong guesses for this round (ADR 0018), as the relay last sent them. */
+function TopGuessesPanel({ state }: { state: RoomState }) {
+  const top = state.phase === 'drawing' ? state.topGuesses : null
+  return (
+    <section className="top-guesses" aria-label="Top guesses">
+      <h3>Viewers are guessing</h3>
+      {top && top.guesses.length > 0 ? (
+        <ol>
+          {top.guesses.map((g) => (
+            <li key={g.text}>
+              {g.text} <span className="muted">×{g.count}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="muted">No guesses yet.</p>
+      )}
+      {state.viewerWinner && <p className="viewer-winner">First viewer: {state.viewerWinner.name}</p>}
+    </section>
   )
 }
 

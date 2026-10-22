@@ -334,19 +334,36 @@ func run(cfg config, logger *slog.Logger) error {
 const relayDrainWait = 2 * time.Second
 
 // runRelay runs the relay role (ADR 0017): viewers' WebSockets and the streams of the rooms they
-// watch, registered with the lobby as a relay. It reads rooms from Redis and never writes them,
-// so it needs no Kafka, no S3 and no control port.
+// watch, registered with the lobby as a relay. It reads rooms from Redis and never writes room
+// state, so it needs no S3 and no control port. Viewers' guesses (ADR 0019): correct ones go to
+// the room's owner through Redis, wrong ones to Kafka, and the top guesses come back from Kafka,
+// all with the relay's own users (REDIS_USERNAME and KAFKA_USERNAME relay).
 func runRelay(ctx context.Context, stop context.CancelFunc, cfg config, logger *slog.Logger, keys []ed25519.PublicKey, rdb *redis.Client) error {
+	kafkaAuth, err := kafkaauth.FromEnv().Opts()
+	if err != nil {
+		return err
+	}
+	kafka, err := events.NewKafkaClient(cfg.kafkaBrokers, append(relay.KafkaOpts(), kafkaAuth...)...)
+	if err != nil {
+		return err
+	}
+	defer kafka.Close()
+	store := roomstore.New(rdb)
 	rl, err := relay.New(relay.Config{
-		ServerID: cfg.instance, Store: roomstore.New(rdb), Verifier: ticket.NewVerifier(keys, time.Now),
+		ServerID: cfg.instance, Store: store, Verifier: ticket.NewVerifier(keys, time.Now),
 		Redeem: func(ctx context.Context, t ticket.Ticket) error {
 			return ticket.RedeemViewer(ctx, rdb, t, time.Now())
 		},
 		Origins: cfg.origins, HelloTimeout: cfg.helloTimeout, Log: logger, Meter: otel.Meter("game-server"),
+		Forwarder: store, Kafka: kafka,
 	})
 	if err != nil {
 		return fmt.Errorf("relay: %w", err)
 	}
+	consumeCtx, stopConsuming := context.WithCancel(context.Background())
+	consumed := make(chan struct{})
+	go func() { rl.ConsumeTopGuesses(consumeCtx); close(consumed) }()
+	defer func() { stopConsuming(); <-consumed }()
 	srv := &http.Server{
 		Addr:              ":" + cfg.port,
 		Handler:           server.NewHandler(server.Info{Service: serviceName, Version: cfg.version, Instance: cfg.instance}, rl),

@@ -233,6 +233,8 @@ func (s *Service) reassign(ctx context.Context, m move, plan *placement) (string
 	from := r.ServerID
 	req := &gamev1.AllocateRoomRequest{
 		RoomId: r.ID, HostUserId: r.HostID, Mode: gamev1.GameMode_GAME_MODE_CLASSIC,
+		// The new owner reads a live room's viewer guesses (ADR 0019): it only knows from here.
+		Live: r.Live,
 		Settings: &gamev1.RoomSettings{
 			MaxPlayers: r.Settings.MaxPlayers, ChooseSeconds: r.Settings.ChooseSeconds,
 			DrawSeconds: r.Settings.DrawSeconds, WordOptions: r.Settings.WordOptions,

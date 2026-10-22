@@ -139,6 +139,7 @@ type env struct {
 	srv    *httptest.Server
 	key    ed25519.PrivateKey
 	reader *sdkmetric.ManualReader
+	pub    *recordingPublisher // the wrong guesses the relay sent to Kafka
 }
 
 func newEnv(t *testing.T) *env {
@@ -156,14 +157,15 @@ func newEnvOn(t *testing.T, rdb redis.UniversalClient, key ed25519.PrivateKey) *
 	pub := key.Public().(ed25519.PublicKey)
 	reader := sdkmetric.NewManualReader()
 	var err error
-	e := &env{t: t, rdb: rdb, store: roomstore.New(rdb), key: key, reader: reader}
+	e := &env{t: t, rdb: rdb, store: roomstore.New(rdb), key: key, reader: reader, pub: &recordingPublisher{}}
 	e.relay, err = New(Config{
 		ServerID: "relay-1", Store: e.store, Verifier: ticket.NewVerifier([]ed25519.PublicKey{pub}, time.Now),
 		Redeem: func(ctx context.Context, tk ticket.Ticket) error {
 			return ticket.RedeemViewer(ctx, rdb, tk, time.Now())
 		},
 		Origins: []string{"localhost:8080"}, Log: quiet,
-		Meter: sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("t"),
+		Meter:     sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("t"),
+		Forwarder: e.store, Publisher: e.pub,
 	})
 	if err != nil {
 		t.Fatal(err)

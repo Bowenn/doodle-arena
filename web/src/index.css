@@ -302,6 +302,28 @@ main.room {
   font-weight: bold;
 }
 
+.feed-viewer {
+  color: #1971c2;
+  font-weight: bold;
+}
+
+.top-guesses h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.875rem;
+}
+
+.top-guesses ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.viewer-winner {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  font-weight: bold;
+}
+
 .guess input {
   flex: 1;
   min-width: 0;

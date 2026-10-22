@@ -109,6 +109,11 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `relay.stream.lag` | Histogram (ms) | – (from the owner's commit until the relay read the event with `XREAD`: the part of the latency before the fan-out) | game-server (relay) |
 | `relay.viewers.closed` | Counter | `reason` = slow (its send queue filled), room_ended, shutdown, error | game-server (relay) |
 | `relay.stream.rebuilds` | Counter | `reason` = start (a room's first viewer on this relay), gap (the relay fell behind the stream's trim and reloaded the room) | game-server (relay) |
+| `relay.viewer_guesses` | Counter | `result` = correct, wrong, close (contains the word: answered, never published), not_drawing, rate_limited, already_guessed (the viewer got it this round), player (a player of the room watching it) (ADR 0019) | game-server (relay) |
+| `relay.guesses.published` | Counter | `result` = success, failed, dropped (the Kafka client's buffer was full: the guess is lost, never waited for) (wrong guesses to `live.guesses.v1`) | game-server (relay) |
+| `relay.correct_guesses.forwarded` | Counter | `result` = success, failed, dropped (the forward queue, 256 deep, was full) (correct guesses to the room's owner through `room:{id}:viewer-guesses`; none once the round's viewer_correct is known) | game-server (relay) |
+| `relay.top_guesses.received` | Counter | `result` = shown, not_watched (no viewer of the room on this relay), stale (another round, or an older window), dropped (the room's stream was busy), unreadable | game-server (relay) |
+| `game.viewer_correct` | Counter | `result` = announced (the round's first correct viewer: a viewer_correct event), ignored (the round had one, it ended, it's another match's, or the guesser plays in the room) | game-server |
 | `auth.logins` | Counter | `result` = success, failed | auth |
 | `auth.refreshes` | Counter | `result` = rotated, reuse_detected, expired, invalid | auth |
 | `lobby.allocations` | Counter | `result` = success, no_servers, exhausted (every tried server full or draining), error | lobby |

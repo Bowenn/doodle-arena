@@ -39,6 +39,7 @@ type fakeAllocator struct {
 	calls   []string
 	hosts   []string
 	targets []string
+	lives   map[string]bool // room id -> the live flag of its last allocation
 	// misroute[addr] calls to addr reach the other server: it answers with another id, or
 	// refuses when refuse is set (as servers with the server_id check do).
 	misroute  map[string]int
@@ -86,6 +87,10 @@ func (f *fakeAllocator) AllocateRoom(ctx context.Context, addr string, req *game
 	f.calls = append(f.calls, addr)
 	f.hosts = append(f.hosts, req.GetHostUserId())
 	f.targets = append(f.targets, req.GetServerId())
+	if f.lives == nil {
+		f.lives = map[string]bool{}
+	}
+	f.lives[req.GetRoomId()] = req.GetLive()
 	if f.misroute[addr] > 0 {
 		f.misroute[addr]--
 		if f.refuse {
@@ -705,6 +710,35 @@ func TestReassignMovesTheRoomsOfADeadServer(t *testing.T) {
 	e.beat(t, "gs-2", 0, false, reported(ids)...)
 	if err := e.svc.Reassign(t.Context()); err != nil || len(e.alloc.calls) != 0 {
 		t.Fatalf("second pass: calls %v, err %v", e.alloc.calls, err)
+	}
+}
+
+// A live room's owner reads its viewers' guesses (ADR 0019), and only the lobby knows a room is
+// live: the flag goes with every allocation, the move after a dead server included.
+func TestLiveGoesWithEveryAllocation(t *testing.T) {
+	e := newEnv(t)
+	e.beat(t, "gs-1", 0, false)
+	live, err := e.svc.CreateRoom(t.Context(), "u-host", CreateOptions{Live: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet, err := e.svc.CreateRoom(t.Context(), "u-host", CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.alloc.lives[live.ID] || e.alloc.lives[quiet.ID] {
+		t.Fatalf("created with live = %v", e.alloc.lives)
+	}
+	if err := e.store.rdb.Del(t.Context(), "lobby:{registry}:server:gs-1").Err(); err != nil {
+		t.Fatal(err)
+	}
+	e.beat(t, "gs-2", 0, false)
+	e.alloc.lives = nil
+	if err := e.svc.Reassign(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.alloc.lives) != 2 || !e.alloc.lives[live.ID] || e.alloc.lives[quiet.ID] {
+		t.Fatalf("moved with live = %v, want only %s live", e.alloc.lives, live.ID)
 	}
 }
 

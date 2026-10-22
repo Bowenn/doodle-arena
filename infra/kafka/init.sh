@@ -80,6 +80,7 @@ USERS=(
   auth:KAFKA_AUTH_PASSWORD
   kafka-metrics:KAFKA_METRICS_PASSWORD
   analytics:KAFKA_ANALYTICS_PASSWORD
+  relay:KAFKA_RELAY_PASSWORD
   dev-tools:KAFKA_DEV_TOOLS_PASSWORD
 )
 
@@ -97,6 +98,8 @@ notifier      Read     --topic market.sales.v1 --topic market.wallet.v1 --topic 
 notifier      Write    --topic notifier.dlq.v1
 auth          Write    --topic auth.users.v1
 kafka-metrics Describe --topic * --group *
+relay         Write    --topic live.guesses.v1
+relay         Read     --topic live.top-guesses.v1
 analytics     Read     --topic live.guesses.v1 --topic market.sales.v1 --group analytics
 analytics     Write    --topic live.top-guesses.v1 --topic analytics.flags.v1
 dev-tools     Read     --topic *

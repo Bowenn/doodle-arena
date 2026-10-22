@@ -51,7 +51,14 @@ export type View = {
   mask?: string
   word?: string
   strokes?: CanvasBatch[] | null
+  /** The round's first correct viewer of a live room (ADR 0019). */
+  viewer_winner?: ViewerWinner
 }
+
+export type ViewerWinner = { user_id: string; name: string }
+
+/** A live room's most common wrong viewer guesses over the last 30 seconds (ADR 0018). */
+export type TopGuesses = { round_no: number; window_end: number; guesses: { text: string; count: number }[] }
 
 /** Shared room events: each has a seq and is stored in the room's event log. */
 export type RoomEvent =
@@ -71,6 +78,7 @@ export type RoomEvent =
   | { seq: number; type: 'hint'; data: { mask: string } }
   | { seq: number; type: 'chat'; data: { user_id: string; text: string } }
   | { seq: number; type: 'correct_guess'; data: { user_id: string; order: number } }
+  | { seq: number; type: 'viewer_correct'; data: ViewerWinner & { round_no: number } }
   | {
       seq: number
       type: 'round_ended'
@@ -85,6 +93,8 @@ export type PrivateMessage =
   | { type: 'guess_result'; data: { correct: boolean } }
   | { type: 'rate_limited'; data: Record<string, never> }
   | { type: 'error'; data: { code: string; message: string } }
+  // Viewers only (a relay, ADR 0019).
+  | { type: 'top_guesses'; data: TopGuesses }
 
 /** viewer is set on a relay's welcome: this socket watches a live room and can't play (ADR 0017). */
 export type Welcome = { user_id: string; view: View; seq: number; viewer?: boolean }

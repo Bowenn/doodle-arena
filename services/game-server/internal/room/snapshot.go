@@ -51,15 +51,17 @@ type Snapshot struct {
 	Drawers []string `json:"drawers"`
 	// Drawer is the single drawer of snapshots written before task 2.6a. It is only read:
 	// a room stored by an older server restores with Drawers = [Drawer].
-	Drawer      string         `json:"drawer,omitempty"`
-	Options     []string       `json:"options"`
-	Word        string         `json:"word"`
-	DrawStart   time.Time      `json:"draw_start"`
-	HintsGiven  int            `json:"hints_given"`
-	Revealed    []int          `json:"revealed"`
-	Correct     int            `json:"correct"`
-	RoundPoints map[string]int `json:"round_points"`
-	Canvas      []StoredBatch  `json:"canvas"`
+	Drawer     string    `json:"drawer,omitempty"`
+	Options    []string  `json:"options"`
+	Word       string    `json:"word"`
+	DrawStart  time.Time `json:"draw_start"`
+	HintsGiven int       `json:"hints_given"`
+	Revealed   []int     `json:"revealed"`
+	Correct    int       `json:"correct"`
+	// ViewerWinner is the round's first correct viewer (ADR 0019), if any.
+	ViewerWinner *ViewerWinner  `json:"viewer_winner,omitempty"`
+	RoundPoints  map[string]int `json:"round_points"`
+	Canvas       []StoredBatch  `json:"canvas"`
 
 	MatchStart     time.Time `json:"match_start"`
 	RoundsFinished int       `json:"rounds_finished"`
@@ -125,6 +127,10 @@ func (g *Game) Snapshot() Snapshot {
 	// Copies, not aliases: the game keeps changing after the snapshot is taken.
 	if len(g.roundPoints) > 0 {
 		s.RoundPoints = maps.Clone(g.roundPoints)
+	}
+	if g.viewerWinner.UserID != "" {
+		w := g.viewerWinner
+		s.ViewerWinner = &w
 	}
 	s.Settings.MaxPlayers = g.settings.MaxPlayers
 	s.Settings.ChooseMS = g.settings.Choose.Milliseconds()
@@ -198,6 +204,9 @@ func restore(s Snapshot, events []StoredEvent, rng *rand.Rand) (*Game, error) {
 		roundNo: s.RoundNo, drawers: slices.Clone(s.Drawers), options: slices.Clone(s.Options), word: s.Word, drawStart: s.DrawStart,
 		hintsGiven: s.HintsGiven, revealed: map[int]bool{}, correct: s.Correct, roundPoints: map[string]int{},
 		matchStart: s.MatchStart, roundsFinished: s.RoundsFinished, seq: s.Seq, empty: s.Empty,
+	}
+	if s.ViewerWinner != nil {
+		g.viewerWinner = *s.ViewerWinner
 	}
 	if len(g.drawers) == 0 && s.Drawer != "" {
 		g.drawers = []string{s.Drawer}
@@ -349,6 +358,12 @@ func (g *Game) apply(ev StoredEvent) error {
 		}
 		g.roundPoints[d.UserID] += points
 		g.creditDrawers()
+	case "viewer_correct":
+		var d ViewerWinner
+		if err := json.Unmarshal(ev.Data, &d); err != nil {
+			return err
+		}
+		g.viewerWinner = d
 	case "chat":
 		// No state.
 	default:
