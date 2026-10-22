@@ -477,10 +477,12 @@ func (g *Game) handleGuess(now time.Time, p *player, text string) string {
 // ViewerCorrect takes a viewer's correct guess that a relay forwarded (ADR 0019). The relay
 // already checked the word; the owner decides who was first, in the order guesses reach it:
 // the first one for the round being drawn is announced to everyone with viewer_correct, and
-// anything else is ignored. A player of this room can't win as a viewer (a drawer watching
-// their own room knows the word). It returns ViewerAnnounced or ViewerIgnored.
-func (g *Game) ViewerCorrect(roundNo int, uid, name string) string {
-	if g.phase != PhaseDrawing || roundNo != g.roundNo || g.viewerWinner.UserID != "" || uid == "" {
+// anything else is ignored. The round is named by match and number: numbers start again with
+// every match, and an old match's guess must never win a new round. A player of this room
+// can't win as a viewer (a drawer watching their own room knows the word). It returns
+// ViewerAnnounced or ViewerIgnored.
+func (g *Game) ViewerCorrect(matchID string, roundNo int, uid, name string) string {
+	if g.phase != PhaseDrawing || matchID != g.matchID || roundNo != g.roundNo || g.viewerWinner.UserID != "" || uid == "" {
 		return ViewerIgnored
 	}
 	if _, plays := g.players[uid]; plays {

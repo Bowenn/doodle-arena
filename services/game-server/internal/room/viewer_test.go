@@ -14,7 +14,7 @@ func TestTheRoundsFirstCorrectViewerIsAnnounced(t *testing.T) {
 	tb.startRound()
 	round := tb.g.RoundNo()
 
-	if got := tb.g.ViewerCorrect(round, "v1", "Vee"); got != ViewerAnnounced {
+	if got := tb.g.ViewerCorrect(tb.g.matchID, round, "v1", "Vee"); got != ViewerAnnounced {
 		t.Fatalf("first viewer: %s", got)
 	}
 	tb.collect()
@@ -22,10 +22,10 @@ func TestTheRoundsFirstCorrectViewerIsAnnounced(t *testing.T) {
 	if len(evs) != 1 || evs[0]["user_id"] != "v1" || evs[0]["name"] != "Vee" || evs[0]["round_no"] != float64(round) {
 		t.Fatalf("viewer_correct = %v", evs)
 	}
-	if got := tb.g.ViewerCorrect(round, "v2", "Two"); got != ViewerIgnored {
+	if got := tb.g.ViewerCorrect(tb.g.matchID, round, "v2", "Two"); got != ViewerIgnored {
 		t.Fatalf("second viewer: %s, want ignored", got)
 	}
-	if got := tb.g.ViewerCorrect(round, "v1", "Vee"); got != ViewerIgnored {
+	if got := tb.g.ViewerCorrect(tb.g.matchID, round, "v1", "Vee"); got != ViewerIgnored {
 		t.Fatalf("the winner again: %s, want ignored", got)
 	}
 	tb.collect()
@@ -47,7 +47,7 @@ func TestTheRoundsFirstCorrectViewerIsAnnounced(t *testing.T) {
 	if w := tb.g.ViewFor("").ViewerWinner; w != nil {
 		t.Fatalf("a new round starts with viewer_winner %+v", w)
 	}
-	if got := tb.g.ViewerCorrect(round+1, "v2", "Two"); got != ViewerAnnounced {
+	if got := tb.g.ViewerCorrect(tb.g.matchID, round+1, "v2", "Two"); got != ViewerAnnounced {
 		t.Fatalf("the next round's first viewer: %s", got)
 	}
 }
@@ -55,7 +55,7 @@ func TestTheRoundsFirstCorrectViewerIsAnnounced(t *testing.T) {
 func TestViewerGuessesThatDontCount(t *testing.T) {
 	tb := newTable(t, DefaultSettings)
 	tb.join("host", "b")
-	if got := tb.g.ViewerCorrect(0, "v1", "Vee"); got != ViewerIgnored {
+	if got := tb.g.ViewerCorrect(tb.g.matchID, 0, "v1", "Vee"); got != ViewerIgnored {
 		t.Fatalf("before any round: %s", got)
 	}
 	tb.startRound()
@@ -71,12 +71,17 @@ func TestViewerGuessesThatDontCount(t *testing.T) {
 		{"no user", round, ""},
 	}
 	for _, c := range cases {
-		if got := tb.g.ViewerCorrect(c.roundNo, c.uid, "x"); got != ViewerIgnored {
+		if got := tb.g.ViewerCorrect(tb.g.matchID, c.roundNo, c.uid, "x"); got != ViewerIgnored {
 			t.Errorf("%s: %s, want ignored", c.name, got)
 		}
 	}
+	// The same round number of an earlier match: round numbers start again with every match,
+	// and a new owner reads every guess the stream still holds.
+	if got := tb.g.ViewerCorrect("an-earlier-match", round, "v1", "Vee"); got != ViewerIgnored {
+		t.Errorf("an earlier match's round %d: %s, want ignored", round, got)
+	}
 	tb.advance(DefaultSettings.Draw + time.Millisecond) // the round ends: reveal
-	if got := tb.g.ViewerCorrect(round, "v1", "Vee"); got != ViewerIgnored {
+	if got := tb.g.ViewerCorrect(tb.g.matchID, round, "v1", "Vee"); got != ViewerIgnored {
 		t.Fatalf("after the round ended: %s", got)
 	}
 	tb.collect()

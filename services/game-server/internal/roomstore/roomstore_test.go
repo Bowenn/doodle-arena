@@ -289,7 +289,7 @@ func TestViewerGuessesStream(t *testing.T) {
 	rdb := redistest.New(t)
 	s := New(rdb)
 	ctx := t.Context()
-	for _, g := range []room.ViewerGuess{{UserID: "v1", Name: "Vee", RoundNo: 2}, {UserID: "v2", Name: "Two", RoundNo: 3}} {
+	for _, g := range []room.ViewerGuess{{UserID: "v1", Name: "Vee", MatchID: "m1", RoundNo: 2}, {UserID: "v2", Name: "Two", MatchID: "m1", RoundNo: 3}} {
 		if err := s.AddViewerGuess(ctx, "r1", g); err != nil {
 			t.Fatal(err)
 		}
@@ -301,7 +301,7 @@ func TestViewerGuessesStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0] != (room.ViewerGuess{UserID: "v1", Name: "Vee", RoundNo: 2}) || got[1].RoundNo != 3 {
+	if len(got) != 2 || got[0] != (room.ViewerGuess{UserID: "v1", Name: "Vee", MatchID: "m1", RoundNo: 2}) || got[1].RoundNo != 3 {
 		t.Fatalf("read %+v", got)
 	}
 	// Nothing new: the read waits, then comes back empty with the same cursor.

@@ -74,8 +74,11 @@ type Durable interface {
 
 // ViewerGuess is a viewer's correct guess that a relay forwarded to the room's owner (ADR 0019).
 type ViewerGuess struct {
-	UserID  string
-	Name    string
+	UserID string
+	Name   string
+	// MatchID and RoundNo name the round the guess was for: round numbers start again with
+	// every match, and a new owner reads the stream from its start.
+	MatchID string
 	RoundNo int
 }
 
@@ -456,7 +459,7 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 	case fencedIn:
 		r.moved = true
 	case viewerGuessIn:
-		res := r.game.ViewerCorrect(in.guess.RoundNo, in.guess.UserID, in.guess.Name)
+		res := r.game.ViewerCorrect(in.guess.MatchID, in.guess.RoundNo, in.guess.UserID, in.guess.Name)
 		r.metrics.viewerCorrect(ctx, res)
 		if res == ViewerAnnounced {
 			r.log.InfoContext(ctx, "first correct viewer", "user_id", in.guess.UserID, "round_no", in.guess.RoundNo)

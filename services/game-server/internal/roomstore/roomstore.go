@@ -15,7 +15,7 @@
 //	                    traceparent. Written in the commit that ends the round, deleted once
 //	                    published; a room isn't closed while it has entries
 //	room:{id}:viewer-guesses  stream of viewers' correct guesses (ADR 0019), written by relays
-//	                    (fields user_id, name, round_no, t), read by the owner of a live room,
+//	                    (fields user_id, name, match_id, round_no, t), read by a live room's owner,
 //	                    capped at about 1,000 entries; deleted with the room
 //
 // Every write checks the lease against the writer's server id and token in a Lua script. The
@@ -485,7 +485,7 @@ func (s *Store) AddViewerGuess(ctx context.Context, roomID string, g room.Viewer
 	_, err := s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
 		p.XAdd(ctx, &redis.XAddArgs{
 			Stream: key, MaxLen: viewerGuessesMax, Approx: true,
-			Values: []any{"user_id", g.UserID, "name", g.Name, "round_no", g.RoundNo, "t", time.Now().UnixMilli()},
+			Values: []any{"user_id", g.UserID, "name", g.Name, "match_id", g.MatchID, "round_no", g.RoundNo, "t", time.Now().UnixMilli()},
 		})
 		p.PExpire(ctx, key, viewerGuessesTTL)
 		return nil
@@ -528,12 +528,13 @@ func (v viewerGuesses) Next(ctx context.Context, after string) ([]room.ViewerGue
 		after = m.ID
 		uid, _ := m.Values["user_id"].(string)
 		name, _ := m.Values["name"].(string)
+		matchID, _ := m.Values["match_id"].(string)
 		roundStr, _ := m.Values["round_no"].(string)
 		roundNo, err := strconv.Atoi(roundStr)
 		if uid == "" || err != nil {
 			continue
 		}
-		out = append(out, room.ViewerGuess{UserID: uid, Name: name, RoundNo: roundNo})
+		out = append(out, room.ViewerGuess{UserID: uid, Name: name, MatchID: matchID, RoundNo: roundNo})
 	}
 	return out, after, nil
 }

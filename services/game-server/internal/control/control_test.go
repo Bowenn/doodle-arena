@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -673,6 +674,15 @@ func TestOneViewerWinsARoundAcrossRelaysAndTakeovers(t *testing.T) {
 		return slices.Contains(storedTypes(t, rdb, "r1"), "round_started")
 	})
 
+	snap, err := store.Snapshot(ctx, "r1")
+	if err != nil || snap.MatchID == "" {
+		t.Fatalf("snapshot: %+v, %v", snap, err)
+	}
+	match := snap.MatchID
+	// A correct guess left from an earlier match's round 1 (round numbers start again) never wins.
+	if err := store.AddViewerGuess(ctx, "r1", room.ViewerGuess{UserID: "old", Name: "old", MatchID: "earlier", RoundNo: 1}); err != nil {
+		t.Fatal(err)
+	}
 	// Ten viewers on two relays guess it at the same moment; one of them is a player here.
 	var wg sync.WaitGroup
 	for i := range 10 {
@@ -681,7 +691,7 @@ func TestOneViewerWinsARoundAcrossRelaysAndTakeovers(t *testing.T) {
 			uid = "u2"
 		}
 		wg.Go(func() {
-			if err := store.AddViewerGuess(ctx, "r1", room.ViewerGuess{UserID: uid, Name: uid, RoundNo: 1}); err != nil {
+			if err := store.AddViewerGuess(ctx, "r1", room.ViewerGuess{UserID: uid, Name: uid, MatchID: match, RoundNo: 1}); err != nil {
 				t.Error(err)
 			}
 		})
@@ -695,12 +705,18 @@ func TestOneViewerWinsARoundAcrossRelaysAndTakeovers(t *testing.T) {
 	if _, err := b.AllocateRoom(ctx, moved); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddViewerGuess(ctx, "r1", room.ViewerGuess{UserID: "late", Name: "late", RoundNo: 1}); err != nil {
+	if err := store.AddViewerGuess(ctx, "r1", room.ViewerGuess{UserID: "late", Name: "late", MatchID: match, RoundNo: 1}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Second) // the new owner's reader has long reached the end of the stream
 	if n := viewerCorrects(t, rdb, "r1"); n != 1 {
 		t.Fatalf("%d viewer_correct events, want exactly 1", n)
+	}
+	entries, _ := rdb.XRange(ctx, "room:{r1}:events", "-", "+").Result()
+	for _, e := range entries {
+		if e.Values["type"] == "viewer_correct" && strings.Contains(e.Values["data"].(string), `"old"`) {
+			t.Fatalf("an earlier match's guess won: %v", e.Values["data"])
+		}
 	}
 	if b.Room("r1") == nil {
 		t.Fatal("gs-2 lost the room")
