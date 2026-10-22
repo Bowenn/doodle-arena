@@ -1009,6 +1009,8 @@ services:
       ENABLE_LOGS_LOKI: ${OTEL_LGTM_COMPONENT_LOGS:-false}
       # Read by the Discord contact point (infra/observability/grafana/alerting/). Without a
       # Discord webhook in .env, alerts go to the webhook-receiver test service instead.
+      # The environment the collector gives Flink's metrics (otelcol/memory-limiter.yaml).
+      DEPLOYMENT_ENVIRONMENT: local
       DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:-http://webhook-receiver:9000/hooks/alerts}
       # The collector's memory limit, merged over the image's config (the file says why).
       OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml --config=file:/etc/doodle-arena/otelcol-browser.yaml
