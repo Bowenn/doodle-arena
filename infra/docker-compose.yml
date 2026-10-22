@@ -219,6 +219,8 @@ services:
   # viewers. They read rooms from Redis and never write them: no Kafka, no S3, no control port.
   relay-1:
     <<: *app
+    # Only with PROFILES=live (make up): live rooms are opt-in locally, to save the Docker VM's memory.
+    profiles: [live]
     build:
       context: ..
       dockerfile: services/game-server/Dockerfile
@@ -254,6 +256,8 @@ services:
   # viewers. They read rooms from Redis and never write them: no Kafka, no S3, no control port.
   relay-2:
     <<: *app
+    # Only with PROFILES=live (make up): live rooms are opt-in locally, to save the Docker VM's memory.
+    profiles: [live]
     build:
       context: ..
       dockerfile: services/game-server/Dockerfile
@@ -592,6 +596,10 @@ services:
 
   marketplace:
     <<: *app
+    # The JVM sizes its heap at 75% of its memory (MaxRAMPercentage in the Dockerfile). Without a
+    # limit that is 75% of the Docker VM, which every container shares; with it, 768 MB, as on
+    # ECS where the task's memory is the limit.
+    mem_limit: 1g
     # Built from the repository root, for the generated contracts in proto/gen/java.
     build:
       context: ..
@@ -772,7 +780,8 @@ services:
       KAFKA_ADVERTISED_HOST: kafka
       # 9094 for host tools (tools/eventctl, the drills), as the dev-tools user.
       KAFKA_EXTERNAL: "1"
-      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      # 384 MB is plenty for the local load; the Docker VM's memory is shared by the whole stack.
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx384m
       # The agent sends only logs and the JMX metrics in infra/kafka/jmx.yaml: no traces, and no
       # instrumentation besides the log4j appender (the broker isn't an application to trace).
       OTEL_SERVICE_NAME: kafka
@@ -870,6 +879,8 @@ services:
       OTLP_ENDPOINT: http://otel-lgtm:4318
       KAFKA_USERNAME: kafka-metrics
       KAFKA_PASSWORD: ${KAFKA_METRICS_PASSWORD:?}
+      # A Go program: a soft heap limit makes its GC keep it near this instead of 230 MB.
+      GOMEMLIMIT: 96MiB
     volumes:
       - ./observability/kafka-metrics/config.yaml:/etc/otelcol/config.yaml:ro
     networks: [default, kafka]

@@ -4,9 +4,18 @@
 set -uo pipefail
 
 GATEWAY="${GATEWAY:-http://localhost:8080}"
-# The relays (ADR 0017) run locally; the AWS stack gets them in task 6.9 (scripts/aws/check.sh
-# sets SMOKE_RELAYS to nothing until then).
-read -r -a RELAYS <<< "${SMOKE_RELAYS-relay-1 relay-2}"
+if [[ -d "$HOME/.docker/bin" ]]; then
+  export PATH="$HOME/.docker/bin:$PATH"
+fi
+# The relays (ADR 0017) run locally when make up had PROFILES=live; the AWS stack gets them in
+# task 6.9 (scripts/aws/check.sh sets SMOKE_RELAYS to nothing until then).
+if [[ -z "${SMOKE_RELAYS+set}" ]]; then
+  SMOKE_RELAYS=""
+  for r in relay-1 relay-2; do
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "doodle-arena-$r-1"; then SMOKE_RELAYS="$SMOKE_RELAYS $r"; fi
+  done
+fi
+read -r -a RELAYS <<< "$SMOKE_RELAYS"
 TARGETS=(gateway auth lobby game-server-1 game-server-2 ${RELAYS[@]+"${RELAYS[@]}"} assets ai marketplace notifier web)
 
 failed=0

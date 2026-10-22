@@ -1,7 +1,8 @@
 # Doodle Arena developer commands. Works with GNU Make 3.81 (the macOS default).
 # Pass s=<service> to target one service, for example: make test s=lobby
 
-COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
+# --profile '*': down, ps and logs also reach the opt-in services (PROFILES on make up).
+COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env --profile '*'
 
 .PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
