@@ -331,7 +331,7 @@ func (r *Relay) stream(roomID string) (*stream, error) {
 		return s, nil
 	}
 	s := &stream{relay: r, id: roomID, in: make(chan any), done: make(chan struct{}),
-		conns: map[*ws.Conn]struct{}{}, guessed: map[*ws.Conn]string{}, log: r.cfg.Log.With("room_id", roomID)}
+		conns: map[*ws.Conn]struct{}{}, guessed: map[string]string{}, log: r.cfg.Log.With("room_id", roomID)}
 	r.streams[roomID] = s
 	r.running.Add(1)
 	go s.run(r.base)
@@ -391,10 +391,10 @@ type stream struct {
 	idleSince time.Time
 
 	// Viewer guesses (ADR 0019), per round: a round is its match and number (roundKey).
-	guessed map[*ws.Conn]string // the round each viewer guessed right
-	winner  string              // the round whose viewer_correct this stream has seen
-	top     []byte              // the round's latest top_guesses frame, for viewers who join
-	topEnd  int64               // its window's end
+	guessed map[string]string // user id -> the round they guessed right (by user: a reconnect keeps it)
+	winner  string            // the round whose viewer_correct this stream has seen
+	top     []byte            // the round's latest top_guesses frame, for viewers who join
+	topEnd  int64             // its window's end
 }
 
 // join adds a viewer. It returns errStreamGone if the stream stopped in the meantime.
@@ -668,7 +668,6 @@ func (s *stream) drop(c *ws.Conn) {
 		return
 	}
 	delete(s.conns, c)
-	delete(s.guessed, c)
 	s.viewers.Add(-1)
 	s.relay.viewers.Add(-1)
 	s.relay.metrics.viewers.Add(context.Background(), -1)

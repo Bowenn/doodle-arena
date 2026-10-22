@@ -222,3 +222,32 @@ func TestTopGuessesReachTheRoomsViewers(t *testing.T) {
 		t.Fatalf("a viewer who joined got %s", m.Data)
 	}
 }
+
+// The review's two holes: a player watching their own room (the drawer knows the word) can't
+// guess as a viewer, and reconnecting doesn't let a viewer who got it guess again.
+func TestPlayersAndViewersWhoKnowTheWordCantFeedTheList(t *testing.T) {
+	e := newEnv(t)
+	o := newOwner(t, e.store, "r1")
+	word, drawer := o.drawing()
+
+	d := e.watch(drawer, "r1", ticket.WatchAudience, 0)
+	d.until("welcome")
+	if m := d.guess(word[:len(word)-1]); m.Type != "error" || errCode(m) != "player" {
+		t.Fatalf("the drawer's viewer guess: %s %s", m.Type, m.Data)
+	}
+
+	v := e.watch("v1", "r1", ticket.WatchAudience, 0)
+	v.until("welcome")
+	if !correct(t, v.guess(word)) {
+		t.Fatal("not correct")
+	}
+	_ = v.c.CloseNow()
+	again := e.watch("v1", "r1", ticket.WatchAudience, 0)
+	again.until("welcome")
+	if m := again.guess("tiger"); m.Type != "error" || errCode(m) != "already_guessed" {
+		t.Fatalf("a viewer who got it, after reconnecting: %s %s", m.Type, m.Data)
+	}
+	if got := e.pub.all(); len(got) != 0 {
+		t.Fatalf("published %v, want nothing from people who know the word", got)
+	}
+}

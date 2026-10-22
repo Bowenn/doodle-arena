@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,7 @@ const (
 	guessNotDrawing  = "not_drawing"
 	guessRateLimited = "rate_limited"
 	guessAlready     = "already_guessed"
+	guessPlayer      = "player" // a player of the room watching it: they guess in the room
 )
 
 // Forwarder hands a viewer's correct guess to the room's owner (roomstore.AddViewerGuess).
@@ -96,7 +98,15 @@ func (s *stream) onGuess(ctx context.Context, in guessIn) {
 	}
 	round := s.snap.RoundNo
 	key := roundKey(s.snap)
-	if s.guessed[in.conn] == key {
+	uid := in.conn.UserID()
+	if s.plays(uid) {
+		// A drawer knows the word, and every player guesses in the room: their viewer guesses
+		// could only hint the word to the top-guesses list.
+		m.viewerGuess(ctx, guessPlayer)
+		in.conn.Send(protocol.Marshal("error", protocol.ErrorData{Code: "player", Message: "you play in this room: guess there"}))
+		return
+	}
+	if s.guessed[uid] == key {
 		// They know the word: their next guesses could hint it to the top-guesses list.
 		m.viewerGuess(ctx, guessAlready)
 		in.conn.Send(protocol.Marshal("error", protocol.ErrorData{Code: "already_guessed", Message: "you guessed it; wait for the next round"}))
@@ -106,13 +116,13 @@ func (s *stream) onGuess(ctx context.Context, in guessIn) {
 	switch {
 	case norm == s.snap.Word:
 		m.viewerGuess(ctx, guessCorrect)
-		s.guessed[in.conn] = key
+		s.guessed[uid] = key
 		in.conn.Send(protocol.Marshal("guess_result", map[string]any{"correct": true}))
 		if s.winner == key {
 			return // the owner already announced this round's viewer
 		}
 		select {
-		case s.relay.forwards <- forward{roomID: s.id, guess: room.ViewerGuess{UserID: in.conn.UserID(), Name: in.name, MatchID: s.snap.MatchID, RoundNo: round}}:
+		case s.relay.forwards <- forward{roomID: s.id, guess: room.ViewerGuess{UserID: uid, Name: in.name, MatchID: s.snap.MatchID, RoundNo: round}}:
 		default:
 			m.forwarded(ctx, "dropped")
 		}
@@ -135,9 +145,35 @@ func (s *stream) onEvent(ev room.StoredEvent) {
 	case ev.Type == "viewer_correct":
 		s.winner = roundKey(s.snap)
 	case room.IsPhaseEvent(ev.Type):
-		// A new phase: last round's list no longer applies.
+		// A new phase: last round's list and who guessed it no longer apply.
 		s.top = nil
+		if ev.Type == "round_started" {
+			clear(s.guessed)
+		}
 	}
+}
+
+// plays reports whether uid has a seat in the room: the snapshot's players, then the joins and
+// removals after it.
+func (s *stream) plays(uid string) bool {
+	seated := false
+	for _, p := range s.snap.Players {
+		if p.ID == uid {
+			seated = true
+		}
+	}
+	for _, ev := range s.events {
+		if ev.Type != "player_joined" && ev.Type != "player_removed" {
+			continue
+		}
+		var d struct {
+			UserID string `json:"user_id"`
+		}
+		if json.Unmarshal(ev.Data, &d) == nil && d.UserID == uid {
+			seated = ev.Type == "player_joined"
+		}
+	}
+	return seated
 }
 
 // roundKey names a round: round numbers start again with every match.
