@@ -25,6 +25,8 @@ locals {
   # [port, caller] on the data host.
   data_rules = concat(
     [for c in ["auth", "auth-relay", "notifier", "marketplace", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat"] : [5432, c]],
+    # The read replica (ADR 0020): the services that read it.
+    [for c in ["marketplace", "assets"] : [5433, c]],
     [for c in ["lobby", "game-server-1", "game-server-2", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat"] : [6379, c]],
     [for c in ["assets", "assets-worker"] : [27017, c]],
     # Kafka: its clients only (ADR 0013). The assets web process and worker have no Kafka user.

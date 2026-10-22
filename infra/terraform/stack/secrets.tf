@@ -7,7 +7,7 @@
 
 locals {
   passwords = toset([
-    "postgres-password", "auth-db-password", "assets-db-password", "marketplace-db-password",
+    "postgres-password", "postgres-replication-password", "auth-db-password", "assets-db-password", "marketplace-db-password",
     "notifier-db-password", "mongo-root-password", "mongo-assets-password", "django-secret-key",
     "oauth-state-secret", "grafana-admin-password",
     # Kafka (ADR 0013, kafka.tf): the admin super user and one SCRAM user per service.

@@ -5,15 +5,16 @@ locals {
   data_host = "data.doodle.internal"
   # SSM parameters the data host reads into its .env (environment variable = parameter).
   data_host_env = {
-    POSTGRES_PASSWORD         = "stack/postgres-password"
-    AUTH_DB_PASSWORD          = "stack/auth-db-password"
-    ASSETS_DB_PASSWORD        = "stack/assets-db-password"
-    MARKETPLACE_DB_PASSWORD   = "stack/marketplace-db-password"
-    NOTIFIER_DB_PASSWORD      = "stack/notifier-db-password"
-    MONGO_ROOT_PASSWORD       = "stack/mongo-root-password"
-    MONGO_ASSETS_PASSWORD     = "stack/mongo-assets-password"
-    GRAFANA_ADMIN_PASSWORD    = "stack/grafana-admin-password"
-    DISCORD_ALERT_WEBHOOK_URL = "discord/alert-webhook-url"
+    POSTGRES_PASSWORD             = "stack/postgres-password"
+    POSTGRES_REPLICATION_PASSWORD = "stack/postgres-replication-password"
+    AUTH_DB_PASSWORD              = "stack/auth-db-password"
+    ASSETS_DB_PASSWORD            = "stack/assets-db-password"
+    MARKETPLACE_DB_PASSWORD       = "stack/marketplace-db-password"
+    NOTIFIER_DB_PASSWORD          = "stack/notifier-db-password"
+    MONGO_ROOT_PASSWORD           = "stack/mongo-root-password"
+    MONGO_ASSETS_PASSWORD         = "stack/mongo-assets-password"
+    GRAFANA_ADMIN_PASSWORD        = "stack/grafana-admin-password"
+    DISCORD_ALERT_WEBHOOK_URL     = "discord/alert-webhook-url"
     # Kafka (ADR 0013): kafka-init sets each service's password; kafka-metrics uses its own.
     KAFKA_ADMIN_PASSWORD       = "stack/kafka-admin-password"
     KAFKA_INIT_PASSWORD        = "stack/kafka-init-password"
@@ -44,6 +45,8 @@ locals {
     { for f in fileset("${local.repo}/infra/aws/data-host", "*") : f => "${local.repo}/infra/aws/data-host/${f}" },
     { for f in fileset("${local.repo}/infra/observability", "**") : "observability/${f}" => "${local.repo}/infra/observability/${f}" },
     { for f in fileset("${local.repo}/infra/postgres/init", "*") : "postgres/init/${f}" => "${local.repo}/infra/postgres/init/${f}" },
+    # The replica (ADR 0020): the primary's pg_hba.conf, the streaming user's job, the replica's start.
+    { for f in ["pg_hba.conf", "replication.sh", "replica.sh"] : "postgres/${f}" => "${local.repo}/infra/postgres/${f}" },
     { for f in fileset("${local.repo}/infra/kafka", "*") : "kafka/${f}" => "${local.repo}/infra/kafka/${f}" },
     { "redis/start.sh" = "${local.repo}/infra/redis/start.sh" },
     { "mongo/create-users.js" = "${local.repo}/infra/mongo/create-users.js" },

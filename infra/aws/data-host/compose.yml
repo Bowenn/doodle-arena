@@ -12,6 +12,8 @@ services:
   postgres:
     image: postgres:18.6-trixie
     restart: unless-stopped
+    # As locally (ADR 0020): the replica's streaming user is let in by the mounted pg_hba.conf.
+    command: ["postgres", "-c", "hba_file=/etc/doodle-arena/pg_hba.conf", "-c", "max_slot_wal_keep_size=1GB"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
@@ -22,6 +24,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./postgres/pg_hba.conf:/etc/doodle-arena/pg_hba.conf:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -29,6 +32,42 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  # The read replica (ADR 0020), as locally: its user and slot, then a hot standby on 5433.
+  # On the same host, so it offloads the primary's connections and buffers, not its hardware.
+  postgres-replication:
+    image: postgres:18.6-trixie
+    entrypoint: ["bash", "/etc/doodle-arena/replication.sh"]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:?}
+    volumes:
+      - ./postgres/replication.sh:/etc/doodle-arena/replication.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres-replica:
+    image: postgres:18.6-trixie
+    restart: unless-stopped
+    entrypoint: ["bash", "/etc/doodle-arena/replica.sh"]
+    environment:
+      PGDATA: /var/lib/postgresql/18/docker
+      POSTGRES_REPLICATION_PASSWORD: ${POSTGRES_REPLICATION_PASSWORD:?}
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql
+      - ./postgres/replica.sh:/etc/doodle-arena/replica.sh:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 90
+    depends_on:
+      postgres-replication:
+        condition: service_completed_successfully
 
   redis:
     image: redis:8.10.2-trixie
@@ -230,6 +269,7 @@ services:
 
 volumes:
   postgres-data:
+  postgres-replica-data:
   redis-data:
   mongo-data:
   kafka-data:
