@@ -313,6 +313,10 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_USERNAME: analytics
       KAFKA_PASSWORD: ${KAFKA_ANALYTICS_PASSWORD:?}
+      # Where the job starts, read by the JobManager (ADR 0018): latest (the newest completed
+      # checkpoint in the bucket), none (empty: after a change no checkpoint can be restored
+      # into, docs/runbooks/analytics-down.md), or a checkpoint or savepoint path.
+      ANALYTICS_RESTORE: ${ANALYTICS_RESTORE:-latest}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: analytics-jobmanager
         parallelism.default: 1

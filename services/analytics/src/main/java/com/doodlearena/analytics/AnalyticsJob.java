@@ -11,6 +11,13 @@ import com.doodlearena.analytics.wash.Sale;
 import com.doodlearena.analytics.wash.SaleDeserializer;
 import com.doodlearena.analytics.wash.WashTradeDetector;
 import java.time.Duration;
+import java.util.Optional;
+import org.apache.flink.configuration.CheckpointingOptions;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ExternalizedCheckpointRetention;
+import org.apache.flink.configuration.GlobalConfiguration;
+import org.apache.flink.configuration.StateRecoveryOptions;
+import org.apache.flink.core.execution.RecoveryClaimMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
@@ -20,6 +27,8 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The analytics service (ADR 0018): one Flink job, run in application mode on the flink image.
@@ -31,13 +40,39 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
  * </ul>
  */
 public final class AnalyticsJob {
+	private static final Logger LOG = LoggerFactory.getLogger(AnalyticsJob.class);
+
 	private AnalyticsJob() {}
 
 	public static void main(String[] args) throws Exception {
 		Config cfg = Config.fromEnv(System.getenv());
-		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment(startConfig());
 		build(env, cfg);
 		env.execute("analytics");
+	}
+
+	/**
+	 * How the job starts and keeps its checkpoints (ADR 0018). main runs inside the JobManager
+	 * (application mode), whose configuration (FLINK_PROPERTIES included) names the checkpoint
+	 * directory.
+	 */
+	private static Configuration startConfig() throws Exception {
+		Configuration conf = new Configuration();
+		// Kept when the JobManager stops, so the next one can start from it.
+		conf.set(CheckpointingOptions.EXTERNALIZED_CHECKPOINT_RETENTION, ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+		String dir = GlobalConfiguration.loadConfiguration().get(CheckpointingOptions.CHECKPOINTS_DIRECTORY);
+		Optional<String> from = CheckpointRestore.choose(System.getenv("ANALYTICS_RESTORE"), dir);
+		if (from.isPresent()) {
+			LOG.info("starting from checkpoint {}", from.get());
+			conf.set(StateRecoveryOptions.SAVEPOINT_PATH, from.get());
+			// The job owns the checkpoint it starts from and deletes it once a newer one exists, so
+			// the bucket keeps one checkpoint, whatever job id made it.
+			conf.set(StateRecoveryOptions.RESTORE_MODE, RecoveryClaimMode.CLAIM);
+		} else {
+			LOG.info("starting without state (no completed checkpoint in {}, ANALYTICS_RESTORE={})", dir,
+					System.getenv("ANALYTICS_RESTORE"));
+		}
+		return conf;
 	}
 
 	/** Adds every pipeline to env; tests run the same graph against their own Kafka. */
