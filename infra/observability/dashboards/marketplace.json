@@ -726,6 +726,182 @@
         "w": 12,
         "h": 8
       }
+    },
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Database: read replica and ledger partitions (task 6.6)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 39,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Reads by target",
+      "description": "Routed reads (ADR 0020) of the marketplace and the assets service: replica (no_write: the caller has no recent write; caught_up: the replica has replayed it) or primary (behind: it hasn't yet; replica_error: it couldn't answer; no_replica: none configured).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (target, reason) (rate(market_db_reads_total[5m]))",
+          "legendFormat": "marketplace {{target}}: {{reason}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (target, reason) (rate(assets_db_reads_total[5m]))",
+          "legendFormat": "assets {{target}}: {{reason}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Replica lag",
+      "description": "How far the read replica is behind the primary, measured on the replica every 15 s (0 when it has replayed everything it received). ReplicaLagHigh fires above 30 s for 5 minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(market_db_replica_lag_seconds)",
+          "legendFormat": "lag"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Ledger entries outside the monthly partitions",
+      "description": "Rows in ledger_entries_default: postings for a month without a partition (they are created three months ahead, daily). LedgerPartitionMissing fires above 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "missing",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-09
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(market_ledger_default_partition_rows)",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 6,
+        "h": 4
+      }
     }
   ]
 }
