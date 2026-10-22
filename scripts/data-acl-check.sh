@@ -16,7 +16,7 @@ if [[ ! -f "$env_file" ]]; then
   exit 2
 fi
 vars=(REDIS_LOBBY_PASSWORD REDIS_GAME_SERVER_PASSWORD REDIS_ASSETS_PASSWORD
-  S3_GAME_SERVER_SECRET_KEY S3_ASSETS_SECRET_KEY)
+  S3_GAME_SERVER_SECRET_KEY S3_ASSETS_SECRET_KEY S3_ANALYTICS_SECRET_KEY)
 flags=()
 for var in "${vars[@]}"; do
   value="$(sed -n "s/^${var}=//p" "$env_file")"

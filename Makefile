@@ -4,10 +4,10 @@
 # --profile '*': down, ps and logs also reach the opt-in services (PROFILES on make up).
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env --profile '*'
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | lighthouse | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | lighthouse | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
@@ -19,9 +19,10 @@ down:
 ps:
 	$(COMPOSE) ps
 
-# s=game-server shows both instances (the compose services are game-server-1 and -2).
+# s=game-server shows both instances (the compose services are game-server-1 and -2), s=analytics
+# Flink's JobManager and TaskManager.
 logs:
-	$(COMPOSE) logs -f --tail=100 $(if $(filter game-server,$(s)),game-server-1 game-server-2,$(if $(filter assets,$(s)),assets assets-worker assets-consumer assets-relay assets-beat,$(if $(filter auth,$(s)),auth auth-relay,$(s))))
+	$(COMPOSE) logs -f --tail=100 $(if $(filter game-server,$(s)),game-server-1 game-server-2,$(if $(filter assets,$(s)),assets assets-worker assets-consumer assets-relay assets-beat,$(if $(filter auth,$(s)),auth auth-relay,$(if $(filter analytics,$(s)),analytics-jobmanager analytics-taskmanager,$(s)))))
 
 test:
 	@./scripts/test.sh $(s)
@@ -37,6 +38,10 @@ telemetry-check:
 
 pipeline-check:
 	@./scripts/pipeline-check.sh
+
+# The top-guesses Flink job end to end (ADR 0018); needs PROFILES=analytics make up.
+analytics-check:
+	@./scripts/analytics-check.sh
 
 # The broker refuses what each service must not do (ADR 0013).
 kafka-acl-check:

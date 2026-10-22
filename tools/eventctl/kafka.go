@@ -9,7 +9,7 @@ import (
 )
 
 // devToolsAuth is the host tools' Kafka user (ADR 0013): dev-tools, which may read every topic
-// and write game.rounds.v1 and game.matches.v1, on the broker's EXTERNAL listener (127.0.0.1:9094).
+// and write game.rounds.v1, game.matches.v1 and live.guesses.v1, on the broker's EXTERNAL listener (127.0.0.1:9094).
 // It exists only locally and in CI. KAFKA_USERNAME and KAFKA_PASSWORD override it.
 func devToolsAuth() ([]kgo.Opt, error) {
 	cfg := kafkaauth.FromEnv()

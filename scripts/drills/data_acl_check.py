@@ -105,6 +105,7 @@ def main() -> int:
     print("S3 identities (one per service, scoped to its buckets):")
     gs3 = s3("game-server", env["S3_GAME_SERVER_SECRET_KEY"])
     as3 = s3("assets", env["S3_ASSETS_SECRET_KEY"])
+    ans3 = s3("analytics", env["S3_ANALYTICS_SECRET_KEY"])
     denied = (S3Denied,)
     check("game-server writes round-logs (control)",
           s3_call(lambda: gs3.put_object(Bucket="round-logs", Key=f"acl-check/{probe}", Body=b"x")), None)
@@ -120,6 +121,16 @@ def main() -> int:
           s3_call(lambda: as3.put_object(Bucket="round-logs", Key=f"acl-check/{probe}", Body=b"x")), denied)
     check("assets can't delete a stroke log",
           s3_call(lambda: as3.delete_object(Bucket="round-logs", Key=f"acl-check/{probe}")), denied)
+    check("analytics writes analytics-checkpoints (control)",
+          s3_call(lambda: ans3.put_object(Bucket="analytics-checkpoints", Key=f"acl-check/{probe}", Body=b"x")), None)
+    check("analytics can't read round-logs",
+          s3_call(lambda: ans3.get_object(Bucket="round-logs", Key=f"acl-check/{probe}")), denied)
+    check("analytics can't read drawings",
+          s3_call(lambda: ans3.get_object(Bucket="drawings", Key="acl-check/none")), denied)
+    check("assets can't read analytics' checkpoints",
+          s3_call(lambda: as3.get_object(Bucket="analytics-checkpoints", Key=f"acl-check/{probe}")), denied)
+    check("analytics deletes its probe (control)",
+          s3_call(lambda: ans3.delete_object(Bucket="analytics-checkpoints", Key=f"acl-check/{probe}")), None)
 
     if failures:
         print(f"data-acl-check: {failures} check(s) failed")

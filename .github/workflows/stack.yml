@@ -55,13 +55,20 @@ jobs:
           docker image prune -af > /dev/null
           df -h /
       - name: make up (creates .env and the JWT key, builds every image, the opt-in parts included)
-        run: PROFILES=live make up
+        run: PROFILES=live,analytics make up
       - name: make smoke
         run: make smoke
       - name: make telemetry-check (trace, logs and metrics reach Grafana)
         run: make telemetry-check
       - name: make pipeline-check (a round becomes an approved, stored, published drawing)
         run: make pipeline-check
+      # analytics-check publishes and reads events with tools/eventctl.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.2"
+          cache: false
+      - name: make analytics-check (viewer guesses in, the Flink job's TopGuesses out, ADR 0018)
+        run: make analytics-check
       - name: make kafka-acl-check (the broker refuses what each service must not do, ADR 0013)
         run: make kafka-acl-check
       - name: make data-acl-check (Redis and SeaweedFS refuse other services' keys and buckets)

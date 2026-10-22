@@ -1,9 +1,11 @@
 // Command eventctl is a developer tool for Doodle Arena's Kafka events.
 //
 //	eventctl publish [-match-id ID] [-dry-run]   publish a fake round and match from fixtures
+//	eventctl guesses -room ID [-round N] G...    publish viewer guesses to live.guesses.v1
 //	eventctl decode -topic T [-n N]              print the last N messages of a topic as JSON
 //
-// scripts/fake-events.sh runs `publish` with settings from .env.
+// scripts/fake-events.sh runs `publish` with settings from .env, scripts/analytics-check.sh
+// `guesses` and `decode`.
 package main
 
 import (
