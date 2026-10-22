@@ -1,6 +1,8 @@
 package com.doodlearena.marketplace.listing;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -125,19 +127,31 @@ public class ListingService {
 			.orElseThrow(ListingService::notFound);
 	}
 
-	/** Active listings, newest first, below {@code before} when set. */
+	/**
+	 * Active listings, newest first, below {@code before} when set. Only the filters given are in
+	 * the SQL: one statement with "{@code :x IS NULL OR column = :x}" for each would, once the
+	 * driver prepares it on the server and Postgres switches to a generic plan, read every active
+	 * listing to find one seller's (task 6.6: 48 ms instead of 0.06 ms on the seeded data). Each
+	 * shape here has its own index: listings_one_active, listings_seller_idx, listings_active_idx.
+	 */
 	public List<Listing> active(UUID drawingId, String sellerId, UUID before, int limit) {
-		return this.db.sql("SELECT " + Listing.COLUMNS + " FROM listings WHERE status = 'ACTIVE'"
-				+ " AND (CAST(:drawing AS UUID) IS NULL OR drawing_id = :drawing)"
-				+ " AND (CAST(:seller AS TEXT) IS NULL OR seller_id = :seller)"
-				+ " AND (CAST(:before AS UUID) IS NULL OR listing_id < :before)"
-				+ " ORDER BY listing_id DESC LIMIT :limit")
-			.param("drawing", drawingId)
-			.param("seller", sellerId)
-			.param("before", before)
-			.param("limit", limit)
-			.query(Listing::map)
-			.list();
+		StringBuilder sql = new StringBuilder("SELECT " + Listing.COLUMNS + " FROM listings WHERE status = 'ACTIVE'");
+		Map<String, Object> params = new HashMap<>();
+		if (drawingId != null) {
+			sql.append(" AND drawing_id = :drawing");
+			params.put("drawing", drawingId);
+		}
+		if (sellerId != null) {
+			sql.append(" AND seller_id = :seller");
+			params.put("seller", sellerId);
+		}
+		if (before != null) {
+			sql.append(" AND listing_id < :before");
+			params.put("before", before);
+		}
+		sql.append(" ORDER BY listing_id DESC LIMIT :limit");
+		params.put("limit", limit);
+		return this.db.sql(sql.toString()).params(params).query(Listing::map).list();
 	}
 
 	public static ApiException notFound() {

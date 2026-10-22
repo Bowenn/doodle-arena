@@ -21,16 +21,19 @@ WHERE a.owner_type = 'user' AND a.owner_id = :'usr' ORDER BY e.entry_id DESC LIM
 EXPLAIN (ANALYZE, BUFFERS) SELECT listing_id, drawing_id, seller_id, price, status, buyer_id, sale_id, created_at, closed_at
 FROM listings WHERE status = 'ACTIVE' ORDER BY listing_id DESC LIMIT 21;
 
-PREPARE listings_active(uuid, text, uuid, int) AS
+-- One seller's active listings, as ListingService.active sends it since task 6.6 (only the
+-- filters given are in the SQL), as a custom and as a generic plan. Before task 6.6 the
+-- statement held every filter as "CAST($n AS ...) IS NULL OR column = $n", and its generic plan
+-- read all 50,000 active listings (48 ms).
+PREPARE listings_by_seller(text, int) AS
 SELECT listing_id, drawing_id, seller_id, price, status, buyer_id, sale_id, created_at, closed_at FROM listings
-WHERE status = 'ACTIVE' AND (CAST($1 AS UUID) IS NULL OR drawing_id = $1) AND (CAST($2 AS TEXT) IS NULL OR seller_id = $2)
-  AND (CAST($3 AS UUID) IS NULL OR listing_id < $3) ORDER BY listing_id DESC LIMIT $4;
+WHERE status = 'ACTIVE' AND seller_id = $1 ORDER BY listing_id DESC LIMIT $2;
 SET plan_cache_mode = force_custom_plan;
 \echo '### listings_by_seller'
-EXPLAIN (ANALYZE, BUFFERS) EXECUTE listings_active(NULL, :'seller', NULL, 21);
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE listings_by_seller(:'seller', 21);
 SET plan_cache_mode = force_generic_plan;
 \echo '### listings_by_seller_generic'
-EXPLAIN (ANALYZE, BUFFERS) EXECUTE listings_active(NULL, :'seller', NULL, 21);
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE listings_by_seller(:'seller', 21);
 RESET plan_cache_mode;
 
 \echo '### ownership_history'
