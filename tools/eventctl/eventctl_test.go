@@ -97,6 +97,7 @@ func TestTopicKeys(t *testing.T) {
 		{"notifier.dlq.v1", &eventsv1.DeadLetterEvent{Event: &eventsv1.DeadLetterEvent_DeliveryDead{DeliveryDead: &eventsv1.DeliveryDead{EndpointId: "ep_1"}}}, "ep_1"},
 		{"live.guesses.v1", &eventsv1.ViewerGuessEvent{Event: &eventsv1.ViewerGuessEvent_ViewerGuess{ViewerGuess: &eventsv1.ViewerGuess{RoomId: "r_3"}}}, "r_3"},
 		{"live.top-guesses.v1", &eventsv1.TopGuessesEvent{Event: &eventsv1.TopGuessesEvent_TopGuesses{TopGuesses: &eventsv1.TopGuesses{RoomId: "r_4"}}}, "r_4"},
+		{"analytics.flags.v1", &eventsv1.AnalyticsFlagEvent{Event: &eventsv1.AnalyticsFlagEvent_WashTradeFlagged{WashTradeFlagged: &eventsv1.WashTradeFlagged{DrawingId: "d_5"}}}, "d_5"},
 	}
 	if len(tests) != len(topics) {
 		t.Fatalf("test covers %d topics, registry has %d", len(tests), len(topics))
