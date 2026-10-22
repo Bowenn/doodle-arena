@@ -273,6 +273,23 @@ private static final long serialVersionUID = 0L;
     }
   }
 
+  public static final int LIVE_FIELD_NUMBER = 6;
+  private boolean live_ = false;
+  /**
+   * <pre>
+   * The room can be watched through relays (ADR 0017), so its viewers may guess (ADR 0019): the
+   * owner then reads the room's viewer guesses from Redis. The lobby sends it on every
+   * allocation, a takeover included, because a new owner has no other way to know.
+   * </pre>
+   *
+   * <code>bool live = 6 [json_name = "live"];</code>
+   * @return The live.
+   */
+  @java.lang.Override
+  public boolean getLive() {
+    return live_;
+  }
+
   private byte memoizedIsInitialized = -1;
   @java.lang.Override
   public final boolean isInitialized() {
@@ -302,6 +319,9 @@ private static final long serialVersionUID = 0L;
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(serverId_)) {
       com.google.protobuf.GeneratedMessage.writeString(output, 5, serverId_);
     }
+    if (live_ != false) {
+      output.writeBool(6, live_);
+    }
     getUnknownFields().writeTo(output);
   }
   private int computeSerializedSize_0() {
@@ -322,6 +342,10 @@ private static final long serialVersionUID = 0L;
     }
     if (!com.google.protobuf.GeneratedMessage.isStringEmpty(serverId_)) {
       size += com.google.protobuf.GeneratedMessage.computeStringSize(5, serverId_);
+    }
+    if (live_ != false) {
+      size += com.google.protobuf.CodedOutputStream
+        .computeBoolSize(6, live_);
     }
     return size;
   }
@@ -359,6 +383,8 @@ private static final long serialVersionUID = 0L;
         .equals(other.getHostUserId())) return false;
     if (!getServerId()
         .equals(other.getServerId())) return false;
+    if (getLive()
+        != other.getLive()) return false;
     if (!getUnknownFields().equals(other.getUnknownFields())) return false;
     return true;
   }
@@ -382,6 +408,9 @@ private static final long serialVersionUID = 0L;
     hash = (53 * hash) + getHostUserId().hashCode();
     hash = (37 * hash) + SERVER_ID_FIELD_NUMBER;
     hash = (53 * hash) + getServerId().hashCode();
+    hash = (37 * hash) + LIVE_FIELD_NUMBER;
+    hash = (53 * hash) + com.google.protobuf.Internal.hashBoolean(
+        getLive());
     hash = (29 * hash) + getUnknownFields().hashCode();
     memoizedHashCode = hash;
     return hash;
@@ -532,6 +561,7 @@ private static final long serialVersionUID = 0L;
       }
       hostUserId_ = "";
       serverId_ = "";
+      live_ = false;
       return this;
     }
 
@@ -584,6 +614,9 @@ private static final long serialVersionUID = 0L;
       if (((from_bitField0_ & 0x00000010) != 0)) {
         result.serverId_ = serverId_;
       }
+      if (((from_bitField0_ & 0x00000020) != 0)) {
+        result.live_ = live_;
+      }
       result.bitField0_ |= to_bitField0_;
     }
 
@@ -619,6 +652,9 @@ private static final long serialVersionUID = 0L;
         serverId_ = other.serverId_;
         bitField0_ |= 0x00000010;
         onChanged();
+      }
+      if (other.getLive() != false) {
+        setLive(other.getLive());
       }
       this.mergeUnknownFields(other.getUnknownFields());
       onChanged();
@@ -671,6 +707,11 @@ private static final long serialVersionUID = 0L;
               bitField0_ |= 0x00000010;
               break;
             } // case 42
+            case 48: {
+              live_ = input.readBool();
+              bitField0_ |= 0x00000020;
+              break;
+            } // case 48
             default: {
               if (!super.parseUnknownField(input, extensionRegistry, tag)) {
                 done = true; // was an endgroup tag
@@ -1216,6 +1257,56 @@ private static final long serialVersionUID = 0L;
       checkByteStringIsUtf8(value);
       serverId_ = value;
       bitField0_ |= 0x00000010;
+      onChanged();
+      return this;
+    }
+
+    private boolean live_ ;
+    /**
+     * <pre>
+     * The room can be watched through relays (ADR 0017), so its viewers may guess (ADR 0019): the
+     * owner then reads the room's viewer guesses from Redis. The lobby sends it on every
+     * allocation, a takeover included, because a new owner has no other way to know.
+     * </pre>
+     *
+     * <code>bool live = 6 [json_name = "live"];</code>
+     * @return The live.
+     */
+    @java.lang.Override
+    public boolean getLive() {
+      return live_;
+    }
+    /**
+     * <pre>
+     * The room can be watched through relays (ADR 0017), so its viewers may guess (ADR 0019): the
+     * owner then reads the room's viewer guesses from Redis. The lobby sends it on every
+     * allocation, a takeover included, because a new owner has no other way to know.
+     * </pre>
+     *
+     * <code>bool live = 6 [json_name = "live"];</code>
+     * @param value The live to set.
+     * @return This builder for chaining.
+     */
+    public Builder setLive(boolean value) {
+
+      live_ = value;
+      bitField0_ |= 0x00000020;
+      onChanged();
+      return this;
+    }
+    /**
+     * <pre>
+     * The room can be watched through relays (ADR 0017), so its viewers may guess (ADR 0019): the
+     * owner then reads the room's viewer guesses from Redis. The lobby sends it on every
+     * allocation, a takeover included, because a new owner has no other way to know.
+     * </pre>
+     *
+     * <code>bool live = 6 [json_name = "live"];</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearLive() {
+      bitField0_ = (bitField0_ & ~0x00000020);
+      live_ = false;
       onChanged();
       return this;
     }

@@ -126,4 +126,16 @@ public interface AllocateRoomRequestOrBuilder extends
    */
   com.google.protobuf.ByteString
       getServerIdBytes();
+
+  /**
+   * <pre>
+   * The room can be watched through relays (ADR 0017), so its viewers may guess (ADR 0019): the
+   * owner then reads the room's viewer guesses from Redis. The lobby sends it on every
+   * allocation, a takeover included, because a new owner has no other way to know.
+   * </pre>
+   *
+   * <code>bool live = 6 [json_name = "live"];</code>
+   * @return The live.
+   */
+  boolean getLive();
 }

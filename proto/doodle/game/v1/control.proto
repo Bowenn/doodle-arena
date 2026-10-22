@@ -34,6 +34,10 @@ message AllocateRoomRequest {
   // refuses with FAILED_PRECONDITION and creates nothing: a cached connection can reach the
   // wrong instance after containers are recreated and swap IP addresses. Empty skips the check.
   string server_id = 5;
+  // The room can be watched through relays (ADR 0017), so its viewers may guess (ADR 0019): the
+  // owner then reads the room's viewer guesses from Redis. The lobby sends it on every
+  // allocation, a takeover included, because a new owner has no other way to know.
+  bool live = 6;
 }
 
 // RoomSettings are the host's choices for a room. A value of 0 means the server's default.
