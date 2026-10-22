@@ -40,6 +40,7 @@ services:
       REDIS_LOBBY_PASSWORD: ${REDIS_LOBBY_PASSWORD:?}
       REDIS_GAME_SERVER_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
       REDIS_ASSETS_PASSWORD: ${REDIS_ASSETS_PASSWORD:?}
+      REDIS_RELAY_PASSWORD: ${REDIS_RELAY_PASSWORD:?}
     volumes:
       - redis-data:/data
       - ./redis/start.sh:/etc/doodle-arena/redis-start.sh:ro
@@ -148,6 +149,7 @@ services:
       KAFKA_AUTH_PASSWORD: ${KAFKA_AUTH_PASSWORD:?}
       KAFKA_METRICS_PASSWORD: ${KAFKA_METRICS_PASSWORD:?}
       KAFKA_ANALYTICS_PASSWORD: ${KAFKA_ANALYTICS_PASSWORD:?}
+      KAFKA_RELAY_PASSWORD: ${KAFKA_RELAY_PASSWORD:?}
       # No dev-tools user in AWS: its password is left unset, so init.sh skips it.
     volumes:
       - ./kafka/init.sh:/init.sh:ro

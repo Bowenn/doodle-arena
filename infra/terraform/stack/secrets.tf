@@ -13,9 +13,9 @@ locals {
     # Kafka (ADR 0013, kafka.tf): the admin super user and one SCRAM user per service.
     "kafka-admin-password", "kafka-init-password", "kafka-broker-password", "kafka-game-server-password", "kafka-lobby-password",
     "kafka-assets-password", "kafka-marketplace-password", "kafka-notifier-password",
-    "kafka-auth-password", "kafka-metrics-password", "kafka-analytics-password",
+    "kafka-auth-password", "kafka-metrics-password", "kafka-analytics-password", "kafka-relay-password",
     # Redis (task 5.5): the admin user and one ACL user per service and key prefix.
-    "redis-admin-password", "redis-lobby-password", "redis-game-server-password", "redis-assets-password",
+    "redis-admin-password", "redis-lobby-password", "redis-game-server-password", "redis-assets-password", "redis-relay-password",
   ])
 }
 

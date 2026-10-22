@@ -26,11 +26,13 @@ locals {
     KAFKA_AUTH_PASSWORD        = "stack/kafka-auth-password"
     KAFKA_METRICS_PASSWORD     = "stack/kafka-metrics-password"
     KAFKA_ANALYTICS_PASSWORD   = "stack/kafka-analytics-password"
+    KAFKA_RELAY_PASSWORD       = "stack/kafka-relay-password"
     # Redis (task 5.5): one ACL user per service and key prefix.
     REDIS_ADMIN_PASSWORD       = "stack/redis-admin-password"
     REDIS_LOBBY_PASSWORD       = "stack/redis-lobby-password"
     REDIS_GAME_SERVER_PASSWORD = "stack/redis-game-server-password"
     REDIS_ASSETS_PASSWORD      = "stack/redis-assets-password"
+    REDIS_RELAY_PASSWORD       = "stack/redis-relay-password"
   }
   # Read with the instance role too: the broker's TLS key and the CA, written to files at boot.
   data_host_secrets = concat(values(local.data_host_env), ["stack/kafka-server-pem", "stack/kafka-ca-pem"])
