@@ -359,9 +359,9 @@ func TestViewerGetsAWelcomeThenEveryEventInOrder(t *testing.T) {
 			t.Fatalf("event %d has seq %d, want %d: out of order or missing", i, ev.Seq, from+int64(i)+1)
 		}
 	}
-	if n := e.histogramCount("relay.broadcast.latency"); n < uint64(want) {
-		t.Fatalf("relay.broadcast.latency has %d samples, want at least %d", n, want)
-	}
+	// A sample is recorded once the relay's write returns, which can be just after the viewer has
+	// read the event: wait for the last one instead of reading the count once.
+	waitFor(t, func() bool { return e.histogramCount("relay.broadcast.latency") >= uint64(want) })
 }
 
 // The word never reaches a viewer while the round runs: not in a welcome built mid-round, not in
