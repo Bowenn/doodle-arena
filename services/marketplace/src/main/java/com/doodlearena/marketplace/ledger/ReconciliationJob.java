@@ -5,7 +5,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
@@ -37,6 +39,12 @@ import com.doodlearena.marketplace.telemetry.MarketMetrics;
  * a posting or a sale that commits between them can't make the numbers disagree. Read-only work under
  * snapshot isolation takes no locks, so postings never wait for it.
  *
+ * <p>The ledger is partitioned by month (task 6.6, {@link LedgerMonths}): closed months count with
+ * their stored per-account totals, and only the open months are scanned, so a run reads one or two
+ * months instead of the whole ledger. Each run also checks one closed month's totals against its
+ * partition again, so a change to old entries behind the triggers' back still shows, within as
+ * many runs as there are closed months.
+ *
  * <p>When no run has succeeded for {@code app.reconciliation.stale-after}, the gauges report
  * nothing: a dead job shows as a missing series, never as a reassuring 0.
  */
@@ -59,9 +67,14 @@ public final class ReconciliationJob {
 
 	private final AtomicReference<ReconciliationResult> last = new AtomicReference<>();
 
+	private final LedgerMonths months;
+
+	private final AtomicLong defaultPartitionRows = new AtomicLong(-1);
+
 	public ReconciliationJob(JdbcClient db, PlatformTransactionManager transactions, Clock clock,
-			MarketMetrics metrics, @Value("${app.reconciliation.stale-after}") Duration staleAfter) {
+			MarketMetrics metrics, LedgerMonths months, @Value("${app.reconciliation.stale-after}") Duration staleAfter) {
 		this.db = db;
+		this.months = months;
 		this.snapshot = new TransactionTemplate(transactions);
 		this.snapshot.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
 		this.snapshot.setReadOnly(true);
@@ -85,6 +98,17 @@ public final class ReconciliationJob {
 			.setUnit("{drawing}")
 			.setDescription("Drawings whose ownership and provenance disagree; must be 0")
 			.buildWithCallback((gauge) -> current().ifPresent((result) -> gauge.record(result.ownershipViolations())));
+		metrics.meter()
+			.gaugeBuilder("market.ledger.default_partition_rows")
+			.ofLongs()
+			.setUnit("{entry}")
+			.setDescription("Ledger entries in the default partition, outside every monthly one; must be 0")
+			.buildWithCallback((gauge) -> {
+				long rows = this.defaultPartitionRows.get();
+				if (rows >= 0 && current().isPresent()) {
+					gauge.record(rows);
+				}
+			});
 	}
 
 	@Scheduled(fixedDelayString = "${app.reconciliation.interval}")
@@ -126,28 +150,58 @@ public final class ReconciliationJob {
 
 	/** Runs the checks once and makes the result the gauges' value. */
 	public ReconciliationResult reconcile() {
+		this.months.closeMonths();
+		LedgerMonths.Verification verified = this.months.verifyOldest();
+		this.defaultPartitionRows.set(this.months.defaultPartitionRows());
 		ReconciliationResult result = this.snapshot.execute((status) -> {
 			Instant checkedAt = this.clock.instant();
-			long imbalance = this.db.sql("SELECT COALESCE(SUM(amount), 0) FROM ledger_entries")
+			// Closed months by their stored totals, open months (after the last closed one) by a
+			// scan that Postgres prunes to their partitions.
+			long imbalance = this.db.sql("""
+					SELECT COALESCE((SELECT SUM(total) FROM ledger_month_totals), 0)
+						+ COALESCE((SELECT SUM(amount) FROM ledger_entries WHERE created_at >= (%s)), 0)""".formatted(OPEN_FROM))
 				.query(Long.class)
 				.single();
 			List<Long> mismatched = this.db.sql("""
 					SELECT a.account_id
 					FROM accounts a
 					LEFT JOIN balances b USING (account_id)
-					LEFT JOIN (SELECT account_id, SUM(amount) AS total FROM ledger_entries GROUP BY account_id) e
+					LEFT JOIN (
+						SELECT account_id, SUM(total) AS total FROM (
+							SELECT account_id, total FROM ledger_month_totals
+							UNION ALL
+							SELECT account_id, amount FROM ledger_entries WHERE created_at >= (%s)
+						) x GROUP BY account_id) e
 						USING (account_id)
 					WHERE b.account_id IS NULL
 						OR b.balance <> COALESCE(e.total, 0)
 						OR (a.owner_type = 'user' AND b.balance < 0)
-					ORDER BY a.account_id""")
+					ORDER BY a.account_id""".formatted(OPEN_FROM))
 				.query(Long.class)
 				.list();
 			return new ReconciliationResult(imbalance, mismatched, ownershipViolations(), checkedAt);
 		});
+		if (verified.imbalance() != 0 || !verified.mismatchedAccounts().isEmpty()) {
+			// A closed month's entries no longer match their stored totals: something changed
+			// them behind the triggers' back. Reported, never repaired.
+			log.atError()
+				.addKeyValue("month", String.valueOf(verified.month()))
+				.addKeyValue("imbalance", verified.imbalance())
+				.addKeyValue("mismatched_account_ids", verified.mismatchedAccounts().stream().limit(LOGGED_IDS).toList())
+				.log("closed ledger month changed");
+			TreeSet<Long> accounts = new TreeSet<>(result.mismatchedAccountIds());
+			accounts.addAll(verified.mismatchedAccounts());
+			result = new ReconciliationResult(result.imbalance() + verified.imbalance(), List.copyOf(accounts),
+					result.ownershipViolationIds(), result.checkedAt());
+		}
 		this.last.set(result);
 		return result;
 	}
+
+	/** The first moment of the open months: right after the last closed month, if any. */
+	private static final String OPEN_FROM = """
+			SELECT COALESCE(CAST(max(month) + interval '1 month' AS TIMESTAMPTZ), '-infinity')
+			FROM ledger_months_closed""";
 
 	/**
 	 * Drawings whose current owner and provenance disagree: not exactly one MINT event, a version

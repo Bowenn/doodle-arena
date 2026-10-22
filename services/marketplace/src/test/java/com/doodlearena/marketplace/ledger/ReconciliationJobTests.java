@@ -64,6 +64,9 @@ class ReconciliationJobTests {
 	@Autowired
 	private MintService mints;
 
+	@Autowired
+	private LedgerMonths months;
+
 	@Test
 	void detectsWhatGetsPastTheDatabase() {
 		AccountRef alice = this.fixtures.newUserWith(100);
@@ -141,7 +144,7 @@ class ReconciliationJobTests {
 	@Test
 	void staleResultsAreNotReported() {
 		MutableClock clock = new MutableClock(Instant.parse("2026-10-18T12:00:00Z"));
-		ReconciliationJob job = new ReconciliationJob(this.db, this.transactions, clock, this.metrics,
+		ReconciliationJob job = new ReconciliationJob(this.db, this.transactions, clock, this.metrics, this.months,
 				Duration.ofMinutes(3));
 		assertThat(job.current()).isEmpty();
 
@@ -162,11 +165,115 @@ class ReconciliationJobTests {
 	void failedRunDoesNotThrowOrReport() {
 		DataSource down = new DriverManagerDataSource("jdbc:postgresql://127.0.0.1:1/nowhere");
 		ReconciliationJob job = new ReconciliationJob(JdbcClient.create(down), new DataSourceTransactionManager(down),
-				Clock.systemUTC(), this.metrics, Duration.ofMinutes(3));
+				Clock.systemUTC(), this.metrics, new LedgerMonths(JdbcClient.create(down), new DataSourceTransactionManager(down)),
+				Duration.ofMinutes(3));
 
 		job.run();
 
 		assertThat(job.current()).isEmpty();
+	}
+
+	/**
+	 * Task 6.6: months that ended count with their stored totals, the open ones are scanned, and the
+	 * result is what a scan of the whole ledger gives. A change to a closed month's entries behind
+	 * the triggers' back is still caught, by the rotating check of closed months.
+	 */
+	@Test
+	void closedMonthsCountWithTheirTotalsAndAreCheckedAgain() {
+		// A coin each now (an account exists from its first posting), then backdated rewards.
+		AccountRef ada = this.fixtures.newUserWith(1);
+		AccountRef bo = this.fixtures.newUserWith(1);
+		long adaAccount = accountId(ada);
+		long boAccount = accountId(bo);
+		long issuer = this.db.sql("SELECT account_id FROM accounts WHERE owner_type = 'system' AND owner_id = 'rewards_issuance'")
+			.query(Long.class)
+			.single();
+		Instant now = Instant.now();
+		// Rewards paid 5 and 3 months ago, and a sale this month (through the service).
+		pastPosting(now.minus(Duration.ofDays(150)), issuer, adaAccount, 50);
+		pastPosting(now.minus(Duration.ofDays(90)), issuer, boAccount, 20);
+		this.ledger.post(TransactionType.SALE, "s:" + UUID.randomUUID(), Map.of(), List.of(debit(ada, 10), credit(bo, 10)));
+
+		// The same numbers as a scan of the whole ledger (other tests here break it on purpose, so
+		// not necessarily 0), and nothing wrong with these two accounts.
+		ReconciliationResult result = this.job.reconcile();
+		assertThat(result.imbalance()).isEqualTo(fullImbalance());
+		assertThat(result.mismatchedAccountIds()).isEqualTo(fullMismatched()).doesNotContain(adaAccount, boAccount);
+		long closed = this.db.sql("SELECT count(*) FROM ledger_months_closed").query(Long.class).single();
+		assertThat(closed).isGreaterThanOrEqualTo(3);
+		// Stored totals plus the open months equal a scan of the whole ledger.
+		Long stored = this.db.sql("SELECT SUM(total) FROM ledger_month_totals WHERE account_id = ?").param(adaAccount)
+			.query(Long.class)
+			.single();
+		Long live = this.db.sql("""
+				SELECT SUM(amount) FROM ledger_entries
+				WHERE account_id = ? AND created_at < (SELECT max(month) + interval '1 month' FROM ledger_months_closed)""")
+			.param(adaAccount)
+			.query(Long.class)
+			.single();
+		assertThat(stored).isEqualTo(live).isEqualTo(50);
+
+		// Someone changes the old reward behind the triggers' back (replica mode skips them).
+		new TransactionTemplate(this.transactions).executeWithoutResult((status) -> {
+			this.db.sql("SET LOCAL session_replication_role = replica").update();
+			this.db.sql("UPDATE ledger_entries SET amount = 70 WHERE account_id = ? AND amount = 50").param(adaAccount).update();
+		});
+		// Each run checks the closed month checked longest ago: within as many runs as there are
+		// closed months, the changed one is checked.
+		long before = result.imbalance();
+		boolean caught = false;
+		for (int i = 0; i <= closed && !caught; i++) {
+			ReconciliationResult run = this.job.reconcile();
+			caught = run.imbalance() == before + 20 && run.mismatchedAccountIds().contains(adaAccount);
+		}
+		assertThat(caught).as("the changed closed month was reported").isTrue();
+	}
+
+	@Test
+	void partitionsAreKeptAheadAndTheDefaultStaysEmpty() {
+		this.months.ensurePartitions();
+		List<String> partitions = this.db.sql("""
+				SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+				WHERE i.inhparent = 'ledger_entries'::regclass ORDER BY 1""")
+			.query(String.class)
+			.list();
+		java.time.YearMonth ahead = java.time.YearMonth.now(ZoneOffset.UTC).plusMonths(LedgerMonths.MONTHS_AHEAD);
+		assertThat(partitions).contains("ledger_entries_default",
+				"ledger_entries_" + ahead.toString().replace('-', '_'));
+		assertThat(this.months.defaultPartitionRows()).isZero();
+	}
+
+	/** The imbalance a scan of the whole ledger finds, as the job computed it before task 6.6. */
+	private long fullImbalance() {
+		return this.db.sql("SELECT COALESCE(SUM(amount), 0) FROM ledger_entries").query(Long.class).single();
+	}
+
+	/** The mismatched accounts a scan of the whole ledger finds, as before task 6.6. */
+	private List<Long> fullMismatched() {
+		return this.db.sql("""
+				SELECT a.account_id FROM accounts a LEFT JOIN balances b USING (account_id)
+				LEFT JOIN (SELECT account_id, SUM(amount) AS total FROM ledger_entries GROUP BY account_id) e USING (account_id)
+				WHERE b.account_id IS NULL OR b.balance <> COALESCE(e.total, 0) OR (a.owner_type = 'user' AND b.balance < 0)
+				ORDER BY a.account_id""")
+			.query(Long.class)
+			.list();
+	}
+
+	/** A balanced posting at a past time, with its balances: what the service would have written then. */
+	private void pastPosting(Instant at, long from, long to, long amount) {
+		new TransactionTemplate(this.transactions).executeWithoutResult((status) -> {
+			this.db.sql("SELECT ledger_ensure_partitions(CAST(? AS DATE), 0)").param(java.sql.Timestamp.from(at)).query().listOfRows();
+			UUID tx = this.db.sql("""
+					INSERT INTO ledger_transactions (type, idempotency_key, created_at) VALUES ('reward', ?, ?) RETURNING tx_id""")
+				.params("past:" + UUID.randomUUID(), java.sql.Timestamp.from(at))
+				.query(UUID.class)
+				.single();
+			this.db.sql("INSERT INTO ledger_entries (tx_id, account_id, amount, created_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?)")
+				.params(tx, from, -amount, java.sql.Timestamp.from(at), tx, to, amount, java.sql.Timestamp.from(at))
+				.update();
+			this.db.sql("UPDATE balances SET balance = balance - ? WHERE account_id = ?").params(amount, from).update();
+			this.db.sql("UPDATE balances SET balance = balance + ? WHERE account_id = ?").params(amount, to).update();
+		});
 	}
 
 	private long accountId(AccountRef user) {

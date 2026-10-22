@@ -45,12 +45,30 @@ EXPLAIN (ANALYZE, BUFFERS) SELECT o.drawing_id, o.version, o.minted_at, o.update
 FROM ownership o LEFT JOIN listings l ON l.drawing_id = o.drawing_id AND l.status = 'ACTIVE'
 WHERE o.owner_id = :'usr' ORDER BY o.updated_at DESC, o.drawing_id DESC LIMIT 21;
 
-\echo '### reconcile_imbalance'
+-- The reconciliation job's ledger checks as it ran them before task 6.6 (the whole ledger) and
+-- as it runs them since (closed months' stored totals plus the open months, ReconciliationJob).
+\echo '### reconcile_imbalance_full'
 EXPLAIN (ANALYZE, BUFFERS) SELECT COALESCE(SUM(amount), 0) FROM ledger_entries;
+
+\echo '### reconcile_accounts_full'
+EXPLAIN (ANALYZE, BUFFERS) SELECT a.account_id FROM accounts a LEFT JOIN balances b USING (account_id)
+LEFT JOIN (SELECT account_id, SUM(amount) AS total FROM ledger_entries GROUP BY account_id) e USING (account_id)
+WHERE b.account_id IS NULL OR b.balance <> COALESCE(e.total, 0) OR (a.owner_type = 'user' AND b.balance < 0)
+ORDER BY a.account_id;
+
+\echo '### reconcile_imbalance'
+EXPLAIN (ANALYZE, BUFFERS) SELECT COALESCE((SELECT SUM(total) FROM ledger_month_totals), 0)
+  + COALESCE((SELECT SUM(amount) FROM ledger_entries WHERE created_at >= (
+      SELECT COALESCE(CAST(max(month) + interval '1 month' AS TIMESTAMPTZ), '-infinity') FROM ledger_months_closed)), 0);
 
 \echo '### reconcile_accounts'
 EXPLAIN (ANALYZE, BUFFERS) SELECT a.account_id FROM accounts a LEFT JOIN balances b USING (account_id)
-LEFT JOIN (SELECT account_id, SUM(amount) AS total FROM ledger_entries GROUP BY account_id) e USING (account_id)
+LEFT JOIN (SELECT account_id, SUM(total) AS total FROM (
+    SELECT account_id, total FROM ledger_month_totals
+    UNION ALL
+    SELECT account_id, amount FROM ledger_entries WHERE created_at >= (
+      SELECT COALESCE(CAST(max(month) + interval '1 month' AS TIMESTAMPTZ), '-infinity') FROM ledger_months_closed)
+  ) x GROUP BY account_id) e USING (account_id)
 WHERE b.account_id IS NULL OR b.balance <> COALESCE(e.total, 0) OR (a.owner_type = 'user' AND b.balance < 0)
 ORDER BY a.account_id;
 
