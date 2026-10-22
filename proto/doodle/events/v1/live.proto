@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+import "google/protobuf/timestamp.proto";
+
+// ViewerGuessEvent is the only message type on the topic live.guesses.v1 (key: room_id).
+// Produced by the relays from live rooms' viewers (task 6.2); consumed by analytics, whose Flink
+// job counts the most common guesses (ADR 0018).
+message ViewerGuessEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // A viewer guessed, and the guess was wrong.
+    ViewerGuess viewer_guess = 1;
+  }
+}
+
+// ViewerGuess is one wrong guess by a live room's viewer. Correct guesses are never published:
+// the most common guesses are shown to everyone watching, so a correct one would give the word
+// away (the relay checks each guess before publishing it).
+message ViewerGuess {
+  // Event metadata.
+  EventMeta meta = 1;
+  // The live room.
+  string room_id = 2;
+  // The round the guess was made in, so a round's guesses are never counted in the next one.
+  uint32 round_no = 3;
+  // The guess as the game compares it: lowercased, letters a-z only (design doc 6.4).
+  string text = 4;
+  // When the relay received the guess, by the relay's clock: the event time of the guess.
+  google.protobuf.Timestamp guessed_at = 5;
+}
+
+// TopGuessesEvent is the only message type on the topic live.top-guesses.v1 (key: room_id).
+// Produced by analytics (ADR 0018); consumed by the relays, which show it to their viewers.
+message TopGuessesEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // A live room's most common wrong guesses over the last window.
+    TopGuesses top_guesses = 1;
+  }
+}
+
+// TopGuesses is a live room's most common wrong guesses over a sliding window. Each one replaces
+// the room's previous list, so a repeat (at-least-once delivery) changes nothing.
+message TopGuesses {
+  // Event metadata.
+  EventMeta meta = 1;
+  // The live room.
+  string room_id = 2;
+  // The round the guesses belong to.
+  uint32 round_no = 3;
+  // The end of the window, by the guesses' event time.
+  google.protobuf.Timestamp window_end = 4;
+  // The most common guesses, most common first, at most five.
+  repeated GuessCount guesses = 5;
+}
+
+// GuessCount is one guess and how many times it was guessed in the window.
+message GuessCount {
+  // The guess, normalized as in ViewerGuess.
+  string text = 1;
+  // How many times it was guessed in the window.
+  uint32 count = 2;
+}
