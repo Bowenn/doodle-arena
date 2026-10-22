@@ -39,7 +39,8 @@ Bowen chose **A**, with the replica in both the local stack and the AWS data hos
   - Marketplace: the listings browse and a listing, a drawing's ownership history, "my drawings", and wallet transactions.
   - Assets: the gallery and a drawing's metadata.
   - Never a read inside a write transaction, never the wallet balance, never anything that decides money. Writes and their reads stay on the primary.
-- **Failure:** a replica that can't be reached, or that is behind the token, means the primary. A read never fails because of the replica.
+- **Bounded staleness** (added while building it, after a security review): a replica that is up but stopped replaying, or lost its connection to the primary, would otherwise serve a cancelled listing or a drawing a moderator rejected for as long as it lasts. So every routed read also needs the replica to have replayed what the primary had `max-lag` ago (5 s). Each process samples `pg_current_wal_lsn()` on the primary at most once a second as reads come in, keeps the samples of the last `max-lag`, and requires the oldest. No privileges are needed: the service roles can't read `pg_stat_wal_receiver`, and a replica cut off from the primary looks caught up to itself.
+- **Failure:** a replica that can't be reached, that is behind the token, or that is more than `max-lag` behind means the primary. A read never fails because of the replica.
 
 ## Consequences
 

@@ -120,8 +120,10 @@ groups:
             datasourceUid: prometheus
             model:
               refId: B
-              # Reads that fell back to the primary because the replica couldn't answer.
-              expr: "(sum(increase(market_db_reads_total{reason=\"replica_error\"}[5m])) or vector(0)) + (sum(increase(assets_db_reads_total{reason=\"replica_error\"}[5m])) or vector(0))"
+              # Reads that fell back to the primary because the replica couldn't answer, or was
+              # further behind than max-lag (which also catches a replica cut off from the primary,
+              # whose own lag reads 0).
+              expr: "(sum(increase(market_db_reads_total{reason=~\"replica_error|stale\"}[5m])) or vector(0)) + (sum(increase(assets_db_reads_total{reason=~\"replica_error|stale\"}[5m])) or vector(0))"
               instant: true
           - refId: C
             datasourceUid: __expr__
@@ -136,7 +138,7 @@ groups:
           severity: warning
           service: marketplace
         annotations:
-          summary: "The read replica is {{ $values.A }} s behind or can't be reached ({{ $values.B }} reads fell back in 5 minutes): reads go to the primary, which carries the replica's load."
+          summary: "The read replica is {{ $values.A }} s behind, can't be reached, or is too stale to read ({{ $values.B }} reads fell back in 5 minutes): reads go to the primary, which carries the replica's load."
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/replica-lag.md
           __dashboardUid__: da-marketplace
           __panelId__: "14"

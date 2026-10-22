@@ -744,7 +744,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Reads by target",
-      "description": "Routed reads (ADR 0020) of the marketplace and the assets service: replica (no_write: the caller has no recent write; caught_up: the replica has replayed it) or primary (behind: it hasn't yet; replica_error: it couldn't answer; no_replica: none configured).",
+      "description": "Routed reads (ADR 0020) of the marketplace and the assets service: replica (no_write: the caller has no recent write; caught_up: the replica has replayed it) or primary (behind: it hasn't yet; stale: it is further behind the primary than max-lag, 5 s; replica_error: it couldn't answer; no_replica: none configured).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

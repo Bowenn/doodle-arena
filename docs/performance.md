@@ -141,3 +141,24 @@ What limits it here, in the order it was found:
 
 The 5,000-viewer number is measured in AWS (task 6.9), with k6 on a machine of its own and the relays on Fargate.
 
+
+## 7. Data scale (task 6.6)
+
+`make seed` writes about 5 million rows through the services' own rules (1.7 million ledger entries, 804,000 ledger transactions, 607,000 ownership events, 350,000 listings, 300,000 drawings, 516,000 outbox rows; 131 s). `make explain` runs each query three times with `EXPLAIN (ANALYZE, BUFFERS)` on that data; the numbers are medians, locally, 2026-10-22.
+
+| Query | Before | After | What changed |
+|---|---|---|---|
+| A seller's active listings, generic plan | 48.4 ms (every active listing) | 0.01 ms | The statement holds only the filters given. With "`CAST($n AS ...) IS NULL OR col = $n`" for each filter, the plan the driver caches after five executions can't use an index |
+| A seller's active listings, custom plan | 0.06 ms | 0.06 ms | Unchanged: a custom plan already folded the null filters away, which is why only the generic plan showed it |
+| Ownership history; owned drawings | 0.32; 0.32 ms | 0.19; 0.15 ms | A covering index `(drawing_id, event_id DESC) INCLUDE (kind, to_owner)` replaced `(drawing_id)` |
+| Reconciliation: ownership | 1,429 ms | 976 ms | The same index: index-only scans instead of heap reads |
+| Reconciliation: ledger imbalance | 66 ms (whole ledger) | 34 ms (closed totals plus open months) | Monthly partitions and stored totals of closed months. The old full scan over the partitioned table took 153 ms |
+| Reconciliation: accounts against balances | 474 ms (whole ledger) | 346 ms | The same; the old full scan took 702 ms on partitions |
+| Reconciliation, the whole run | 2.4 to 3.1 s | 1.6 s | The first run after the migration closed 12 months in 16.5 s, once |
+| A wallet's transactions | 0.95 to 4.1 ms | 1.6 ms | Partitioning costs this one: it reads one index per partition, because an account's entries span every month |
+| Outbox retention (hourly delete) | 34.7 ms, a sequential scan | 30.1 ms | Deliberately no index: an hourly 30 ms scan is cheaper than an index every insert maintains |
+| Every assets query (gallery, by author, by match, a drawing, review queue, outbox) | 0.01 to 0.10 ms | the same | Their existing indexes already fit |
+
+Rejected, because `EXPLAIN` didn't use it: a ledger index `(account_id) INCLUDE (amount)` for the accounts check (the planner kept a parallel sequential scan, which reads less than an index over every row).
+
+The migration to partitions (V8) copied the 1.7 million entries in 17.8 s. The read replica (ADR 0020) runs in both composes; locally it replays within a second of the primary (0 bytes behind at rest). Its lag and the primary's load under real traffic are measured in AWS in task 6.9.

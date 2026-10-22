@@ -5,17 +5,17 @@
 
 ## What it means
 
-The Postgres read replica (ADR 0020) is more than 30 seconds behind the primary, or it can't be reached, so reads fell back to the primary, for 5 minutes.
+The Postgres read replica (ADR 0020) is more than 30 seconds behind the primary, or reads keep falling back to the primary because it can't be reached or is more than `max-lag` (5 s) behind, for 5 minutes. A replica cut off from the primary reads 0 s on the lag panel (it has replayed all it received) but shows as `stale` on "Reads by target".
 
 Nothing is wrong for users:
 
 - A user's own writes are always read from wherever has them: the WAL-position cookie sends a read to the primary while the replica is behind.
 - A read never fails because of the replica.
+- Nothing shows up late by more than 5 s: a read needs the replica within `max-lag` of the primary, or it reads the primary.
 
 What suffers:
 
 - **The primary carries the reads** the replica should take, next to its writes and locks.
-- **Other users' changes show up late** on browsing pages: listings, ownership history, the gallery.
 - **The replication slot pins WAL** on the primary (up to 1 GB, `max_slot_wal_keep_size`).
 
 ## Check
