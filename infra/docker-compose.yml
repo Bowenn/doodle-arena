@@ -353,6 +353,9 @@ services:
 
   analytics-taskmanager:
     image: doodle-arena-analytics
+    # analytics-jobmanager builds this image; there's nothing to pull (make up's --build would
+    # try, and fail, on a machine that hasn't built it yet).
+    pull_policy: never
     profiles: [analytics]
     restart: unless-stopped
     command: ["taskmanager"]

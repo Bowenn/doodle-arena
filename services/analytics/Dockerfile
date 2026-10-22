@@ -8,9 +8,12 @@ WORKDIR /src/services/analytics
 COPY proto/gen/java /src/proto/gen/java
 COPY services/analytics/gradlew services/analytics/settings.gradle.kts services/analytics/build.gradle.kts ./
 COPY services/analytics/gradle ./gradle
-RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon --quiet dependencies > /dev/null
+# A Gradle cache of its own: the marketplace's build mounts /root/.gradle too, and two Gradle
+# processes in parallel builds would wait on each other's lock in one shared cache until one
+# times out (a fresh CI runner builds both at once).
+RUN --mount=type=cache,id=gradle-analytics,target=/root/.gradle ./gradlew --no-daemon --quiet dependencies > /dev/null
 COPY services/analytics/src ./src
-RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon --quiet shadowJar \
+RUN --mount=type=cache,id=gradle-analytics,target=/root/.gradle ./gradlew --no-daemon --quiet shadowJar \
     && cp build/libs/analytics.jar /analytics.jar
 
 FROM flink:2.2.1-java21
