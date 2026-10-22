@@ -14,10 +14,14 @@
 //	                    IDs (their ms part is the entry's age), fields event_id, kind, payload,
 //	                    traceparent. Written in the commit that ends the round, deleted once
 //	                    published; a room isn't closed while it has entries
+//	room:{id}:viewer-guesses  stream of viewers' correct guesses (ADR 0019), written by relays
+//	                    (fields user_id, name, round_no, t), read by the owner of a live room,
+//	                    capped at about 1,000 entries; deleted with the room
 //
 // Every write checks the lease against the writer's server id and token in a Lua script. The
-// one exception is deleting a published outbox entry (Ack): any owner may, since every owner
-// publishes the same event_id.
+// exceptions: deleting a published outbox entry (Ack), since every owner publishes the same
+// event_id, and a relay adding a viewer's correct guess (AddViewerGuess), which is an input to
+// the owner, not room state.
 package roomstore
 
 import (
@@ -70,6 +74,9 @@ func LeaseKey(id string) string  { return "room:{" + id + "}:lease" }
 func fenceKey(id string) string  { return "room:{" + id + "}:fence" }
 func closedKey(id string) string { return "room:{" + id + "}:closed" }
 func outboxKey(id string) string { return "room:{" + id + "}:outbox" }
+
+// ViewerGuessesKey is the room's stream of viewers' correct guesses (ADR 0019).
+func ViewerGuessesKey(id string) string { return "room:{" + id + "}:viewer-guesses" }
 
 // TicketKey marks a used join ticket of the room (ADR 0005).
 func TicketKey(roomID, ticketID string) string { return "room:{" + roomID + "}:ticket:" + ticketID }
@@ -290,14 +297,14 @@ func (s *Store) Renew(ctx context.Context, serverID string, leases []Lease) (los
 	return lost, nil
 }
 
-// Close marks an ended room with a tombstone and drops its stream, snapshot, outbox and lease,
+// Close marks an ended room with a tombstone and drops its streams, snapshot, outbox and lease,
 // unless the outbox still has entries: then the room stays (ADR 0009). The fence counter
 // stays, so tokens keep growing if the id were ever used again.
 var closeScript = redis.NewScript(`
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return redis.error_reply('FENCED') end
 if redis.call('XLEN', KEYS[5]) > 0 then return redis.error_reply('OUTBOX') end
 redis.call('SET', KEYS[4], '1', 'PX', ARGV[2])
-redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[5])
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[5], KEYS[6])
 return 1
 `)
 
@@ -305,7 +312,8 @@ return 1
 // finished rounds or matches are still waiting to be published.
 func (s *Store) Close(ctx context.Context, roomID, serverID string, token int64) error {
 	err := closeScript.Run(ctx, s.rdb,
-		[]string{LeaseKey(roomID), eventsKey(roomID), snapshotKey(roomID), closedKey(roomID), outboxKey(roomID)},
+		[]string{LeaseKey(roomID), eventsKey(roomID), snapshotKey(roomID), closedKey(roomID), outboxKey(roomID),
+			ViewerGuessesKey(roomID)},
 		LeaseValue(serverID, token), tombstoneTTL.Milliseconds()).Err()
 	return classify(err)
 }
@@ -456,4 +464,76 @@ func decodeEntries(entries []redis.XMessage) ([]room.StoredEvent, error) {
 		out = append(out, ev)
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------- viewer guesses (ADR 0019)
+
+const (
+	// viewerGuessesMax caps a room's stream (approximately, which is cheap): far more than any
+	// round's winner needs, since only the first correct viewer of a round counts.
+	viewerGuessesMax = 1000
+	// viewerGuessesTTL drops the stream of a room that closed before a relay's last guess.
+	viewerGuessesTTL = 2 * time.Hour
+	// viewerGuessesBlock is how long the owner's reader waits for a guess per call.
+	viewerGuessesBlock = 5 * time.Second
+)
+
+// AddViewerGuess is a relay's: a viewer guessed the word, and the room's owner decides whether
+// they were the round's first (ADR 0019). It isn't fenced: it changes no room state.
+func (s *Store) AddViewerGuess(ctx context.Context, roomID string, g room.ViewerGuess) error {
+	key := ViewerGuessesKey(roomID)
+	_, err := s.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		p.XAdd(ctx, &redis.XAddArgs{
+			Stream: key, MaxLen: viewerGuessesMax, Approx: true,
+			Values: []any{"user_id", g.UserID, "name", g.Name, "round_no", g.RoundNo, "t", time.Now().UnixMilli()},
+		})
+		p.PExpire(ctx, key, viewerGuessesTTL)
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("%w: add viewer guess: %w", ErrUnavailable, err)
+	}
+	return nil
+}
+
+// ViewerGuesses is a live room's stream of viewers' correct guesses, for its owner.
+func (s *Store) ViewerGuesses(roomID string) room.ViewerGuesses {
+	return viewerGuesses{store: s, roomID: roomID}
+}
+
+type viewerGuesses struct {
+	store  *Store
+	roomID string
+}
+
+// Next implements room.ViewerGuesses with XREAD BLOCK. An entry it can't read is skipped: it
+// came from a relay, and one bad entry must not stop the room from reading the next.
+func (v viewerGuesses) Next(ctx context.Context, after string) ([]room.ViewerGuess, string, error) {
+	if after == "" {
+		after = "0"
+	}
+	streams, err := v.store.rdb.XRead(ctx, &redis.XReadArgs{
+		Streams: []string{ViewerGuessesKey(v.roomID), after}, Count: 100, Block: viewerGuessesBlock,
+	}).Result()
+	switch {
+	case errors.Is(err, redis.Nil):
+		return nil, after, nil
+	case err != nil:
+		return nil, after, fmt.Errorf("%w: read viewer guesses: %w", ErrUnavailable, err)
+	case len(streams) == 0:
+		return nil, after, nil
+	}
+	var out []room.ViewerGuess
+	for _, m := range streams[0].Messages {
+		after = m.ID
+		uid, _ := m.Values["user_id"].(string)
+		name, _ := m.Values["name"].(string)
+		roundStr, _ := m.Values["round_no"].(string)
+		roundNo, err := strconv.Atoi(roundStr)
+		if uid == "" || err != nil {
+			continue
+		}
+		out = append(out, room.ViewerGuess{UserID: uid, Name: name, RoundNo: roundNo})
+	}
+	return out, after, nil
 }

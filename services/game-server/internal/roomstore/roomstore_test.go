@@ -132,13 +132,16 @@ func TestClosedRoomIsNeverRestored(t *testing.T) {
 	if err := s.Commit(t.Context(), "r1", "gs-1", o.Token, []room.StoredEvent{ev(1, "chat", `{}`)}, &room.Snapshot{Seq: 1}, nil); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.AddViewerGuess(t.Context(), "r1", room.ViewerGuess{UserID: "v1", Name: "Vee", RoundNo: 1}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Close(t.Context(), "r1", "gs-1", o.Token); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Acquire(t.Context(), "r1", "gs-2"); !errors.Is(err, ErrClosed) {
 		t.Fatalf("acquire after close: err = %v", err)
 	}
-	if rdb.Exists(t.Context(), eventsKey("r1"), snapshotKey("r1"), LeaseKey("r1")).Val() != 0 {
+	if rdb.Exists(t.Context(), eventsKey("r1"), snapshotKey("r1"), LeaseKey("r1"), ViewerGuessesKey("r1")).Val() != 0 {
 		t.Fatal("closed room kept its data")
 	}
 	if rdb.Get(t.Context(), fenceKey("r1")).Val() != "1" {
@@ -160,7 +163,8 @@ func TestRedisDownIsUnavailable(t *testing.T) {
 }
 
 func TestAllKeysOfARoomShareASlot(t *testing.T) {
-	keys := []string{eventsKey("abc"), snapshotKey("abc"), LeaseKey("abc"), fenceKey("abc"), closedKey("abc"), outboxKey("abc"), TicketKey("abc", "jti")}
+	keys := []string{eventsKey("abc"), snapshotKey("abc"), LeaseKey("abc"), fenceKey("abc"), closedKey("abc"), outboxKey("abc"), TicketKey("abc", "jti"),
+		ViewerTicketKey("abc", "jti"), ViewerGuessesKey("abc")}
 	for _, k := range keys {
 		if want := "{abc}"; !contains(k, want) {
 			t.Fatalf("%s has no hash tag %s", k, want)
@@ -276,5 +280,34 @@ func TestPendingReturnsOnlyOlderEntries(t *testing.T) {
 	}
 	if got, _ := s.Pending(ctx, []string{"r1", "r2"}, time.Now().Add(-time.Minute)); len(got) != 0 {
 		t.Fatalf("entries younger than the cutoff came back: %+v", got)
+	}
+}
+
+// ADR 0019: what a relay adds, the owner reads in order, from the start or on from a cursor,
+// with an expiry so a stream outliving its room goes away.
+func TestViewerGuessesStream(t *testing.T) {
+	rdb := redistest.New(t)
+	s := New(rdb)
+	ctx := t.Context()
+	for _, g := range []room.ViewerGuess{{UserID: "v1", Name: "Vee", RoundNo: 2}, {UserID: "v2", Name: "Two", RoundNo: 3}} {
+		if err := s.AddViewerGuess(ctx, "r1", g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ttl := rdb.PTTL(ctx, ViewerGuessesKey("r1")).Val(); ttl <= 0 {
+		t.Fatalf("viewer guesses' TTL = %v", ttl)
+	}
+	got, cursor, err := s.ViewerGuesses("r1").Next(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != (room.ViewerGuess{UserID: "v1", Name: "Vee", RoundNo: 2}) || got[1].RoundNo != 3 {
+		t.Fatalf("read %+v", got)
+	}
+	// Nothing new: the read waits, then comes back empty with the same cursor.
+	start := time.Now()
+	again, next, err := s.ViewerGuesses("r1").Next(ctx, cursor)
+	if err != nil || len(again) != 0 || next != cursor || time.Since(start) < time.Second {
+		t.Fatalf("second read: %+v %q %v after %v", again, next, err, time.Since(start))
 	}
 }

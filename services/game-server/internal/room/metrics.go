@@ -19,6 +19,7 @@ type Metrics struct {
 	takeovers   metric.Int64Counter
 	outboxStale metric.Int64Gauge
 	requeued    metric.Int64Counter
+	viewerWins  metric.Int64Counter
 }
 
 // NewMetrics creates the instruments once per process.
@@ -65,6 +66,11 @@ func NewMetrics(m metric.Meter) (*Metrics, error) {
 		metric.WithUnit("{entry}")); err != nil {
 		return nil, err
 	}
+	if mt.viewerWins, err = m.Int64Counter("game.viewer_correct",
+		metric.WithDescription("Viewers' correct guesses that reached the owner (ADR 0019), by result: announced or ignored"),
+		metric.WithUnit("{guess}")); err != nil {
+		return nil, err
+	}
 	return &mt, nil
 }
 
@@ -106,6 +112,10 @@ func (m *Metrics) inputLag(ctx context.Context, d time.Duration) {
 
 func (m *Metrics) guess(ctx context.Context, result string) {
 	m.guesses.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+}
+
+func (m *Metrics) viewerCorrect(ctx context.Context, result string) {
+	m.viewerWins.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
 }
 
 func (m *Metrics) reconnect(ctx context.Context, result string) {

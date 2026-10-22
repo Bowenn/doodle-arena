@@ -72,6 +72,20 @@ type Durable interface {
 	Close(ctx context.Context) error
 }
 
+// ViewerGuess is a viewer's correct guess that a relay forwarded to the room's owner (ADR 0019).
+type ViewerGuess struct {
+	UserID  string
+	Name    string
+	RoundNo int
+}
+
+// ViewerGuesses is a live room's stream of viewers' correct guesses (roomstore). Next waits a
+// little for the entries after the cursor ("" is the start) and returns them with the cursor
+// to read on from; none when the wait ends empty.
+type ViewerGuesses interface {
+	Next(ctx context.Context, after string) ([]ViewerGuess, string, error)
+}
+
 // Restored is the state a new owner rebuilds a room from.
 type Restored struct {
 	Snapshot Snapshot
@@ -111,6 +125,9 @@ type Config struct {
 	// It never changes: a new owner builds a new Room.
 	Token   int64
 	Restore *Restored
+	// ViewerGuesses is set for a live room (ADR 0019): the room reads its viewers' correct
+	// guesses from it while it runs. nil: nobody watches the room, or tests.
+	ViewerGuesses ViewerGuesses
 }
 
 // Inputs to the actor. Everything that touches a room goes through its inbox, in order.
@@ -128,9 +145,10 @@ type (
 		msg  protocol.ClientMsg
 		at   time.Time // when the socket handed it over, for game.room.input_lag
 	}
-	tickIn   struct{}
-	probeIn  struct{ done chan struct{} }
-	fencedIn struct{} // the lease keeper found the lease taken over
+	tickIn        struct{}
+	probeIn       struct{ done chan struct{} }
+	fencedIn      struct{} // the lease keeper found the lease taken over
+	viewerGuessIn struct{ guess ViewerGuess }
 )
 
 // Room is one room's actor: a single goroutine owns the Game and every connection, so
@@ -155,6 +173,7 @@ type Room struct {
 	summary   atomic.Pointer[Summary]
 
 	durable     Durable
+	viewers     ViewerGuesses
 	token       int64
 	fenced      atomic.Bool // the lease was lost: the room is stopping, or has stopped
 	fresh       bool        // a new room: its first snapshot must be written before anything
@@ -178,7 +197,7 @@ func New(cfg Config) (*Room, error) {
 		id: cfg.ID, mode: cfg.Mode, inbox: make(chan any, 256), done: make(chan struct{}),
 		clock: cfg.Clock, log: cfg.Log.With("room_id", cfg.ID), metrics: cfg.Metrics, events: cfg.Events,
 		tracer: otel.Tracer("game-server"), conns: map[string]Conn{}, traces: map[string]context.Context{}, durable: cfg.Durable,
-		token: cfg.Token, newID: cfg.NewID,
+		token: cfg.Token, newID: cfg.NewID, viewers: cfg.ViewerGuesses,
 	}
 	if r.newID == nil {
 		r.newID = uuid.NewString
@@ -290,6 +309,11 @@ func (r *Room) Run(ctx context.Context) {
 			r.stop(err)
 			return
 		}
+	}
+	if r.viewers != nil {
+		rctx, stopReading := context.WithCancel(ctx)
+		defer stopReading()
+		go r.readViewerGuesses(rctx)
 	}
 	r.rearm()
 	for {
@@ -431,6 +455,39 @@ func (r *Room) dispatch(ctx context.Context, in any) {
 		close(in.done)
 	case fencedIn:
 		r.moved = true
+	case viewerGuessIn:
+		res := r.game.ViewerCorrect(in.guess.RoundNo, in.guess.UserID, in.guess.Name)
+		r.metrics.viewerCorrect(ctx, res)
+		if res == ViewerAnnounced {
+			r.log.InfoContext(ctx, "first correct viewer", "user_id", in.guess.UserID, "round_no", in.guess.RoundNo)
+		}
+	}
+}
+
+// readViewerGuesses passes a live room's viewers' correct guesses to the actor, in the order
+// the stream holds them (ADR 0019). It starts at the stream's beginning: after a takeover, a
+// guess the old owner already took is ignored, because the restored round has its winner.
+// It owns nothing but its cursor, and ends with the room.
+func (r *Room) readViewerGuesses(ctx context.Context) {
+	cursor := ""
+	for ctx.Err() == nil {
+		guesses, next, err := r.viewers.Next(ctx, cursor)
+		if err != nil {
+			if ctx.Err() == nil {
+				r.log.WarnContext(ctx, "reading viewer guesses failed", "err", err)
+				select {
+				case <-ctx.Done():
+				case <-time.After(time.Second):
+				}
+			}
+			continue
+		}
+		cursor = next
+		for _, g := range guesses {
+			if r.enqueue(ctx, viewerGuessIn{guess: g}) != nil {
+				return
+			}
+		}
 	}
 }
 

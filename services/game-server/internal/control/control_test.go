@@ -17,6 +17,7 @@ import (
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
 	"github.com/Bowenn/gap-project_private/services/game-server/internal/ticket"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -611,4 +612,129 @@ func TestDrainServerRPCAsksMainToShutDown(t *testing.T) {
 	if _, err := s.DrainServer(t.Context(), &gamev1.DrainServerRequest{}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// viewerCorrects counts the viewer_correct events in a room's stored log.
+func viewerCorrects(t *testing.T, rdb *redis.Client, id string) int {
+	t.Helper()
+	entries, err := rdb.XRange(t.Context(), "room:{"+id+"}:events", "-", "+").Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if e.Values["type"] == "viewer_correct" {
+			n++
+		}
+	}
+	return n
+}
+
+// ADR 0019: viewers on several relays guess the word at once; the room's owner announces one,
+// and a new owner, which reads the stream again from the start, announces nobody else.
+func TestOneViewerWinsARoundAcrossRelaysAndTakeovers(t *testing.T) {
+	rdb := redistest.New(t)
+	store := roomstore.New(rdb)
+	a, b := storedServer(t, "gs-1", store), storedServer(t, "gs-2", store)
+	ctx := t.Context()
+
+	live := req("r1")
+	live.ServerId, live.Live = "gs-1", true
+	if _, err := a.AllocateRoom(ctx, live); err != nil {
+		t.Fatal(err)
+	}
+	u1, u2 := &conn{uid: "u1"}, &conn{uid: "u2"}
+	for _, c := range []*conn{u1, u2} {
+		if err := a.Room("r1").Join(ctx, c, c.uid, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.Room("r1").Input(ctx, u1, protocol.Start{}); err != nil {
+		t.Fatal(err)
+	}
+	// After the 3 s countdown the drawer chooses (whoever it is: the other one's try is refused).
+	eventually := func(what string, d time.Duration, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(d)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	eventually("choosing", 5*time.Second, func() bool {
+		return a.Room("r1") != nil && slices.Contains(storedTypes(t, rdb, "r1"), "choosing")
+	})
+	for _, c := range []*conn{u1, u2} {
+		_ = a.Room("r1").Input(ctx, c, protocol.ChooseWord{Index: 0})
+	}
+	eventually("round 1 drawing", 2*time.Second, func() bool {
+		return slices.Contains(storedTypes(t, rdb, "r1"), "round_started")
+	})
+
+	// Ten viewers on two relays guess it at the same moment; one of them is a player here.
+	var wg sync.WaitGroup
+	for i := range 10 {
+		uid := "v" + string(rune('0'+i))
+		if i == 9 {
+			uid = "u2"
+		}
+		wg.Go(func() {
+			if err := store.AddViewerGuess(ctx, "r1", room.ViewerGuess{UserID: uid, Name: uid, RoundNo: 1}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	eventually("a viewer announced", 2*time.Second, func() bool { return viewerCorrects(t, rdb, "r1") >= 1 })
+
+	// gs-2 takes the room over and reads all ten guesses again, plus a late one.
+	moved := req("r1")
+	moved.ServerId, moved.Live = "gs-2", true
+	if _, err := b.AllocateRoom(ctx, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddViewerGuess(ctx, "r1", room.ViewerGuess{UserID: "late", Name: "late", RoundNo: 1}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second) // the new owner's reader has long reached the end of the stream
+	if n := viewerCorrects(t, rdb, "r1"); n != 1 {
+		t.Fatalf("%d viewer_correct events, want exactly 1", n)
+	}
+	if b.Room("r1") == nil {
+		t.Fatal("gs-2 lost the room")
+	}
+}
+
+// A room that isn't live has no reader: nothing a relay adds is announced.
+func TestAQuietRoomReadsNoViewerGuesses(t *testing.T) {
+	rdb := redistest.New(t)
+	store := roomstore.New(rdb)
+	a := storedServer(t, "gs-1", store)
+	if _, err := a.AllocateRoom(t.Context(), req("r2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddViewerGuess(t.Context(), "r2", room.ViewerGuess{UserID: "v1", Name: "v1", RoundNo: 0}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if n := viewerCorrects(t, rdb, "r2"); n != 0 {
+		t.Fatalf("%d viewer_correct events in a room nobody watches", n)
+	}
+}
+
+// storedTypes lists the types of a room's stored events, oldest first.
+func storedTypes(t *testing.T, rdb *redis.Client, id string) []string {
+	t.Helper()
+	entries, err := rdb.XRange(t.Context(), "room:{"+id+"}:events", "-", "+").Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range entries {
+		typ, _ := e.Values["type"].(string)
+		out = append(out, typ)
+	}
+	return out
 }

@@ -176,6 +176,10 @@ func (s *Server) AllocateRoom(ctx context.Context, req *gamev1.AllocateRoomReque
 		e.handle = s.store.Handle(req.GetRoomId(), s.id, owned.Token)
 		outbox = owned.Outbox
 		cfg.Durable, cfg.Token = e.handle, owned.Token
+		if req.GetLive() {
+			// Its viewers may guess (ADR 0019): the room reads their correct guesses.
+			cfg.ViewerGuesses = s.store.ViewerGuesses(req.GetRoomId())
+		}
 		if owned.Snapshot != nil {
 			cfg.Restore = &room.Restored{Snapshot: *owned.Snapshot, Events: owned.Events}
 		}
