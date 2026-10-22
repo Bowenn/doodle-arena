@@ -4,7 +4,7 @@
 # --profile '*': down, ps and logs also reach the opt-in services (PROFILES on make up).
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env --profile '*'
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check seed kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check seed explain kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
 	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | lighthouse | proto"
@@ -43,6 +43,10 @@ pipeline-check:
 # the ledger is append-only. In a worktree, set ENV_FILE.
 seed:
 	@./scripts/seed.sh
+
+# EXPLAIN (ANALYZE, BUFFERS) of the marketplace's and assets' queries on the seeded data.
+explain:
+	@./scripts/explain.sh
 
 # The top-guesses Flink job end to end (ADR 0018); needs PROFILES=analytics make up.
 analytics-check:
