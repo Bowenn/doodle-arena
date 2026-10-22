@@ -40,8 +40,13 @@ PROMQL_WORDS = {
     "sum", "max", "min", "avg", "count", "abs", "rate", "increase", "delta", "deriv", "by", "without",
     "on", "ignoring", "and", "or", "unless", "vector", "histogram_quantile", "last_over_time",
     "max_over_time", "absent_over_time", "offset", "group_left", "group_right", "clamp_max", "le",
-    "label_replace",
+    "label_replace", "time", "bool",
 }
+# Flink's metric reporter (ADR 0018) prefixes every metric with its scope, for example
+# flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total. The job's own
+# counters are checked under their analytics.* names; the rest are Flink's own, like the
+# instrumentation above.
+FLINK_JOB_METRIC = re.compile(r"^flink_[a-z_]*?_(analytics_[a-z0-9_]+)$")
 RUNBOOK_SECTIONS = ("## What it means", "## Check", "## Fix", "## Afterwards")
 
 errors: list[str] = []
@@ -76,6 +81,11 @@ def metric_names(expr: str) -> set[str]:
 
 def known(metric: str, spec: set[str]) -> bool:
     if metric.startswith(STANDARD):
+        return True
+    flink = FLINK_JOB_METRIC.match(metric)
+    if flink:
+        metric = flink.group(1)
+    elif metric.startswith("flink_"):
         return True
     base = re.sub(r"_(bucket|count|sum)$", "", metric)
     base = re.sub(r"_total$", "", base)

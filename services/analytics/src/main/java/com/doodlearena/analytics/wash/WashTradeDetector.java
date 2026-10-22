@@ -10,6 +10,8 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Wash-trading detection (ADR 0018, task 6.5b), keyed by drawing_id: a sale whose buyer sold this
@@ -38,6 +40,7 @@ public class WashTradeDetector extends KeyedProcessFunction<String, Sale, Flag> 
 	 * dropped, so one drawing's state stays bounded.
 	 */
 	static final int MAX_SALES = 200;
+	private static final Logger LOG = LoggerFactory.getLogger(WashTradeDetector.class);
 
 	private final long windowMs;
 	private transient ListState<Sale> recent;
@@ -68,6 +71,9 @@ public class WashTradeDetector extends KeyedProcessFunction<String, Sale, Flag> 
 		Flag flag = loopClosedBy(sale, sales);
 		if (flag != null) {
 			(flag.roundTrip ? roundTrips : cycles).inc();
+			// User ids are fine in logs (CLAUDE.md, "Telemetry"); the runbook starts here.
+			LOG.info("wash trade flagged: rule {}, drawing_id {}, accounts {}, sales {}, volume {} coins, flag_id {}",
+					flag.ruleName(), flag.drawingId, flag.accountIds, flag.saleIds, flag.volume, flag.flagId());
 			out.collect(flag);
 		}
 
