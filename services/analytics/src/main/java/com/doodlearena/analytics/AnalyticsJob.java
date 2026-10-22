@@ -68,6 +68,12 @@ public final class AnalyticsJob {
 			// The job owns the checkpoint it starts from and deletes it once a newer one exists, so
 			// the bucket keeps one checkpoint, whatever job id made it.
 			conf.set(StateRecoveryOptions.RESTORE_MODE, RecoveryClaimMode.CLAIM);
+			// Flink SQL names its operators itself, and any change to the job's graph renames them,
+			// so their state (top guesses' open windows, at most 30 s) can't be mapped after a
+			// deploy and would stop the job from starting. It is dropped instead. The state that
+			// matters has fixed uids and is restored: the sources' offsets and wash trading's
+			// 7 days of sales. Never change those uids (guesses-source, sales-source, wash-trades).
+			conf.set(StateRecoveryOptions.SAVEPOINT_IGNORE_UNCLAIMED_STATE, true);
 		} else {
 			LOG.info("starting without state (no completed checkpoint in {}, ANALYTICS_RESTORE={})", dir,
 					System.getenv("ANALYTICS_RESTORE"));
