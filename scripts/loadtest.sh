@@ -16,6 +16,9 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+if [[ -d "$HOME/.docker/bin" ]]; then
+  export PATH="$HOME/.docker/bin:$PATH"
+fi
 profile="${1:-full}"
 export GATEWAY="${GATEWAY:-http://localhost:8080}"
 # Locally the stack's collector; for AWS, make aws-grafana forwards the data host's to 14318.
@@ -57,6 +60,11 @@ elif curl -s -o /dev/null --max-time 2 "http://$OTLP_ENDPOINT/v1/metrics"; then
     K6_OTEL_FLUSH_INTERVAL=5s
 else
   echo "No collector at $OTLP_ENDPOINT: k6's metrics stay in its summary only." >&2
+fi
+if [[ "$script" == loadtest/live.js && "$GATEWAY" == http://localhost:8080 ]] &&
+  ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx doodle-arena-relay-1-1; then
+  echo "No relays are running: start them with PROFILES=live make up" >&2
+  exit 1
 fi
 if [[ "$script" == loadtest/live.js ]]; then
   echo "==> k6 $profile: one live room, ${VIEWERS:-its default number of} viewers, against $GATEWAY"

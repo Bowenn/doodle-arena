@@ -4,12 +4,13 @@
 # (infra/terraform/stack/iam.tf). Keys come from the environment, so no credentials are committed.
 #   game-server  writes round-logs (stroke logs)
 #   assets       reads round-logs (the claim check, design doc D13), reads and writes drawings
+#   analytics    reads and writes analytics-checkpoints (Flink's checkpoints, ADR 0018)
 #   dev-tools    the host tools (S3_ACCESS_KEY in .env): reads everything, writes round-logs
 #                for scripts/fake-events.sh and pipeline-check
 # The buckets are created by seaweedfs-buckets with `weed shell`, which needs no identity.
 set -eu
 
-: "${S3_GAME_SERVER_SECRET_KEY:?}" "${S3_ASSETS_SECRET_KEY:?}" "${S3_ACCESS_KEY:?}" "${S3_SECRET_KEY:?}"
+: "${S3_GAME_SERVER_SECRET_KEY:?}" "${S3_ASSETS_SECRET_KEY:?}" "${S3_ANALYTICS_SECRET_KEY:?}" "${S3_ACCESS_KEY:?}" "${S3_SECRET_KEY:?}"
 cat > /tmp/s3.json <<EOF
 {
   "identities": [
@@ -22,6 +23,11 @@ cat > /tmp/s3.json <<EOF
       "name": "assets",
       "credentials": [{ "accessKey": "assets", "secretKey": "${S3_ASSETS_SECRET_KEY}" }],
       "actions": ["Read:round-logs", "Read:drawings", "Write:drawings"]
+    },
+    {
+      "name": "analytics",
+      "credentials": [{ "accessKey": "analytics", "secretKey": "${S3_ANALYTICS_SECRET_KEY}" }],
+      "actions": ["Read:analytics-checkpoints", "Write:analytics-checkpoints", "List:analytics-checkpoints"]
     },
     {
       "name": "dev-tools",

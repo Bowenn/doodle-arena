@@ -289,6 +289,104 @@ services:
         condition: service_healthy
     healthcheck: *go-healthcheck
 
+  # Analytics (ADR 0018): one Flink application in application mode, a JobManager and a
+  # TaskManager from the same image. Only with PROFILES=analytics (make up): about 1.8 GB.
+  analytics-jobmanager:
+    build:
+      context: ..
+      dockerfile: services/analytics/Dockerfile
+    image: doodle-arena-analytics
+    profiles: [analytics]
+    restart: unless-stopped
+    command: ["standalone-job", "--job-classname", "com.doodlearena.analytics.AnalyticsJob"]
+    environment: &analytics-env
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      OTEL_SERVICE_NAME: analytics
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=analytics-jobmanager,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      # Flink's own metrics come from its reporter; the agent's would repeat the JVM's.
+      OTEL_METRICS_EXPORTER: none
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_USERNAME: analytics
+      KAFKA_PASSWORD: ${KAFKA_ANALYTICS_PASSWORD:?}
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: analytics-jobmanager
+        parallelism.default: 1
+        # Checkpoints every 30 s to analytics' own bucket (ADR 0018), through the S3 plugin.
+        execution.checkpointing.interval: 30s
+        execution.checkpointing.dir: s3://analytics-checkpoints/checkpoints
+        state.backend.type: hashmap
+        s3.endpoint: http://seaweedfs:8333
+        s3.path.style.access: true
+        s3.access-key: analytics
+        s3.secret-key: ${S3_ANALYTICS_SECRET_KEY:?}
+        restart-strategy.type: exponential-delay
+        # Flink's own metrics (checkpoints, records, restarts, the jobs' counters) over OTLP.
+        metrics.reporter.otel.factory.class: org.apache.flink.metrics.otel.OpenTelemetryMetricReporterFactory
+        metrics.reporter.otel.exporter.endpoint: http://otel-lgtm:4317
+        metrics.reporter.otel.exporter.protocol: gRPC
+        metrics.reporter.otel.service.name: analytics
+        metrics.reporter.otel.service.version: ${SERVICE_VERSION:-0.1.0}
+        metrics.reporter.otel.interval: 15s
+        # Small, for the shared Docker VM; the SQL planner runs here in application mode.
+        jobmanager.memory.process.size: 768m
+    ports:
+      # Flink's web UI: the job graph, checkpoints, back pressure.
+      - "127.0.0.1:8081:8081"
+    networks: [default, kafka, seaweedfs]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8081/overview"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      seaweedfs-buckets:
+        condition: service_completed_successfully
+      otel-lgtm:
+        condition: service_healthy
+
+  analytics-taskmanager:
+    image: doodle-arena-analytics
+    profiles: [analytics]
+    restart: unless-stopped
+    command: ["taskmanager"]
+    environment:
+      <<: *analytics-env
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=analytics-taskmanager,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: analytics-jobmanager
+        parallelism.default: 1
+        # Checkpoints every 30 s to analytics' own bucket (ADR 0018), through the S3 plugin.
+        execution.checkpointing.interval: 30s
+        execution.checkpointing.dir: s3://analytics-checkpoints/checkpoints
+        state.backend.type: hashmap
+        s3.endpoint: http://seaweedfs:8333
+        s3.path.style.access: true
+        s3.access-key: analytics
+        s3.secret-key: ${S3_ANALYTICS_SECRET_KEY:?}
+        restart-strategy.type: exponential-delay
+        # Flink's own metrics (checkpoints, records, restarts, the jobs' counters) over OTLP.
+        metrics.reporter.otel.factory.class: org.apache.flink.metrics.otel.OpenTelemetryMetricReporterFactory
+        metrics.reporter.otel.exporter.endpoint: http://otel-lgtm:4317
+        metrics.reporter.otel.exporter.protocol: gRPC
+        metrics.reporter.otel.service.name: analytics
+        metrics.reporter.otel.service.version: ${SERVICE_VERSION:-0.1.0}
+        metrics.reporter.otel.interval: 15s
+        taskmanager.memory.process.size: 1024m
+        taskmanager.numberOfTaskSlots: 2
+    networks: [default, kafka, seaweedfs]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f TaskManagerRunner >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      analytics-jobmanager:
+        condition: service_healthy
+
   notifier:
     <<: *app
     # Built from the repository root, for the generated contracts in proto/gen/go.
@@ -824,6 +922,7 @@ services:
       KAFKA_NOTIFIER_PASSWORD: ${KAFKA_NOTIFIER_PASSWORD:?}
       KAFKA_AUTH_PASSWORD: ${KAFKA_AUTH_PASSWORD:?}
       KAFKA_METRICS_PASSWORD: ${KAFKA_METRICS_PASSWORD:?}
+      KAFKA_ANALYTICS_PASSWORD: ${KAFKA_ANALYTICS_PASSWORD:?}
       KAFKA_DEV_TOOLS_PASSWORD: ${KAFKA_DEV_TOOLS_PASSWORD:?}
     volumes:
       - ./kafka/init.sh:/init.sh:ro
@@ -842,6 +941,7 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:?}
       S3_GAME_SERVER_SECRET_KEY: ${S3_GAME_SERVER_SECRET_KEY:?}
       S3_ASSETS_SECRET_KEY: ${S3_ASSETS_SECRET_KEY:?}
+      S3_ANALYTICS_SECRET_KEY: ${S3_ANALYTICS_SECRET_KEY:?}
     volumes:
       - seaweedfs-data:/data
       - ./seaweedfs/entrypoint.sh:/entrypoint.sh:ro
