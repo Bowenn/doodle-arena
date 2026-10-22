@@ -307,6 +307,9 @@ services:
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=analytics-jobmanager,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
       # Flink's own metrics come from its reporter; the agent's would repeat the JVM's.
       OTEL_METRICS_EXPORTER: none
+      # Each checkpoint's S3 calls would be root spans every 30 s; Flink's checkpoint metrics
+      # cover them.
+      OTEL_INSTRUMENTATION_AWS_SDK_ENABLED: "false"
       KAFKA_BROKERS: kafka:9092
       KAFKA_USERNAME: analytics
       KAFKA_PASSWORD: ${KAFKA_ANALYTICS_PASSWORD:?}
