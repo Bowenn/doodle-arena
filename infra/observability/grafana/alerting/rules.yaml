@@ -669,8 +669,10 @@ groups:
               refId: A
               # Loops of sales the Flink job found in the last 15 minutes (ADR 0018), per rule:
               # round_trip (R1) or cycle (R3). One alert per rule; each flag is in the logs and on
-              # analytics.flags.v1 with its accounts.
-              expr: "sum by (rule) (increase(flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total[15m]))"
+              # analytics.flags.v1 with its accounts. A restarted job's counters are new series,
+              # and one that flags before its first report starts above 0, which increase() can't
+              # see: a series that is new in the window counts with its whole value.
+              expr: "sum by (rule) ((increase(flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total[15m]) and flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total offset 15m) or (flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total unless flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total offset 15m))"
               instant: true
           - refId: C
             datasourceUid: __expr__

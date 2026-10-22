@@ -75,11 +75,16 @@ jobs:
         run: make data-acl-check
       - name: make alerts-check (dashboards, alert rules and the contact point load and evaluate)
         run: make alerts-check
-      # The load test's script must keep working: two rooms for a minute, thresholds included.
+      # uv runs the Python drills (wash-check) and the load test's token minting.
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "0.13.1"
           enable-cache: false
+      # Real sales through the marketplace close a round trip and a cycle across a restart of
+      # Flink, and both flags come out of the job (ADR 0018). Needs uv, above.
+      - name: make wash-check (wash trading end to end, with real sales and a Flink restart)
+        run: make wash-check
+      # The load test's script must keep working: two rooms for a minute, thresholds included.
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
         with:
           k6-version: "2.3.0"

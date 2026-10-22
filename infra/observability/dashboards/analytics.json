@@ -691,7 +691,7 @@
       "id": 12,
       "type": "timeseries",
       "title": "Loops flagged",
-      "description": "WashTradeFlagged by rule over 15 minutes: round_trip (R1, A to B to A) and cycle (R3, three or more accounts). Any fires WashTradingFlagged.",
+      "description": "WashTradeFlagged by rule over 15 minutes: round_trip (R1, A to B to A) and cycle (R3, three or more accounts). Any fires WashTradingFlagged. A series that is new in the window (a restarted job) counts with its whole value: increase() misses a counter that starts above 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -725,7 +725,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (rule) (increase(flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total[15m]))",
+          "expr": "sum by (rule) ((increase(flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total[15m]) and flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total offset 15m) or (flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total unless flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total offset 15m))",
           "legendFormat": "{{rule}}"
         }
       ],
