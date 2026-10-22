@@ -25,7 +25,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: eventctl publish|decode [flags]")
+		return fmt.Errorf("usage: eventctl publish|guesses|decode [flags]")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -72,8 +72,19 @@ func run(args []string) error {
 			return fmt.Errorf("-n must be at least 1")
 		}
 		return decode(ctx, decodeConfig{brokers: brokers, kafka: auth, topic: *topicName, n: *n, timeout: 15 * time.Second, out: os.Stdout})
+	case "guesses":
+		fs := flag.NewFlagSet("guesses", flag.ContinueOnError)
+		room := fs.String("room", "", "the live room's id")
+		round := fs.Uint("round", 1, "the round number")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *room == "" || fs.NArg() == 0 {
+			return fmt.Errorf("usage: eventctl guesses -room <id> [-round n] <guess>...")
+		}
+		return publishGuesses(ctx, brokers, auth, *room, uint32(*round), fs.Args(), os.Stdout)
 	default:
-		return fmt.Errorf("unknown command %q (want publish or decode)", args[0])
+		return fmt.Errorf("unknown command %q (want publish, guesses or decode)", args[0])
 	}
 }
 
