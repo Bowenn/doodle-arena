@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.doodlearena.marketplace.api.ApiException;
+import com.doodlearena.marketplace.db.ReadRouting;
 import com.doodlearena.marketplace.outbox.OutboxWriter;
 import com.doodlearena.proto.doodle.events.v1.EventMeta;
 import com.doodlearena.proto.doodle.events.v1.ListingCancelled;
@@ -36,9 +37,12 @@ public class ListingService {
 
 	private final OutboxWriter outbox;
 
-	public ListingService(JdbcClient db, OutboxWriter outbox) {
+	private final ReadRouting reads;
+
+	public ListingService(JdbcClient db, OutboxWriter outbox, ReadRouting reads) {
 		this.db = db;
 		this.outbox = outbox;
+		this.reads = reads;
 	}
 
 	/** Runs inside the idempotency work's transaction ({@code POST /listings} needs a key). */
@@ -119,11 +123,12 @@ public class ListingService {
 		return cancelled;
 	}
 
+	/** A listing, from the replica unless it hasn't replayed the caller's last write (ADR 0020). */
 	public Listing get(UUID listingId) {
-		return this.db.sql("SELECT " + Listing.COLUMNS + " FROM listings WHERE listing_id = ?")
+		return this.reads.read((db) -> db.sql("SELECT " + Listing.COLUMNS + " FROM listings WHERE listing_id = ?")
 			.param(listingId)
 			.query(Listing::map)
-			.optional()
+			.optional())
 			.orElseThrow(ListingService::notFound);
 	}
 
@@ -151,7 +156,8 @@ public class ListingService {
 		}
 		sql.append(" ORDER BY listing_id DESC LIMIT :limit");
 		params.put("limit", limit);
-		return this.db.sql(sql.toString()).params(params).query(Listing::map).list();
+		// From the replica, unless it hasn't replayed the caller's last write yet (ADR 0020).
+		return this.reads.read((db) -> db.sql(sql.toString()).params(params).query(Listing::map).list());
 	}
 
 	public static ApiException notFound() {

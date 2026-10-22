@@ -8,14 +8,19 @@ import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import com.doodlearena.marketplace.db.ReadRouting;
+
 /** Reads a user's wallet. Reads never create an account: a user without one has 0 coins. */
 @Repository
 public class WalletRepository {
 
 	private final JdbcClient db;
 
-	public WalletRepository(JdbcClient db) {
+	private final ReadRouting reads;
+
+	public WalletRepository(JdbcClient db, ReadRouting reads) {
 		this.db = db;
+		this.reads = reads;
 	}
 
 	public Balance balance(String userId) {
@@ -29,9 +34,13 @@ public class WalletRepository {
 			.orElse(new Balance(0, null));
 	}
 
-	/** The user's entries, newest first, starting below {@code beforeEntryId} when it is set. */
+	/**
+	 * The user's entries, newest first, starting below {@code beforeEntryId} when it is set: from
+	 * the replica, unless it hasn't replayed the caller's last write yet (ADR 0020). The balance
+	 * always reads the primary.
+	 */
 	public List<Entry> entries(String userId, Long beforeEntryId, int limit) {
-		return this.db.sql("""
+		return this.reads.read((db) -> db.sql("""
 				SELECT e.entry_id, e.tx_id, t.type, e.amount, t.created_at
 				FROM accounts a
 				JOIN ledger_entries e ON e.account_id = a.account_id
@@ -46,7 +55,7 @@ public class WalletRepository {
 			.query((rs, row) -> new Entry(rs.getLong("entry_id"), rs.getObject("tx_id", UUID.class),
 					rs.getString("type"), rs.getLong("amount"),
 					rs.getObject("created_at", OffsetDateTime.class).toInstant()))
-			.list();
+			.list());
 	}
 
 	public record Balance(long balance, Instant updatedAt) {
