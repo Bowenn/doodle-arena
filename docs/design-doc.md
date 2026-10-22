@@ -252,7 +252,7 @@ The room client (task 2.3):
 Live rooms (task 6.1b, ADR 0017):
 
 - The lobby has a "Live" checkbox for a new room and, above the open rooms, a "Live now" list: each live room's players and viewers (summed over every relay), with Watch. A live room in the open-rooms list shows its viewers and has Watch next to Join.
-- `/rooms/<room_id>/watch` is the room page as a viewer. It uses the same connection, which asks the lobby for a viewer's ticket (`POST /api/lobby/rooms/{id}/watch`) on every attempt and reconnects and resumes as a player's does. The page uses the same reducer and the same canvas, read-only. There is no Start button, no word choice and no guess box ("Viewers can't guess yet", until task 6.2). "Copy watch link" shares the page.
+- `/rooms/<room_id>/watch` is the room page as a viewer. It uses the same connection, which asks the lobby for a viewer's ticket (`POST /api/lobby/rooms/{id}/watch`) on every attempt and reconnects and resumes as a player's does. The page uses the same reducer and the same canvas, read-only. There is no Start button and no word choice. Its guess box sends viewer guesses (task 6.2, ADR 0019), and a panel shows the room's top guesses. "Copy watch link" shares the page.
 - A room that isn't live (`409 ROOM_NOT_LIVE`) ends the connection with a message, and `503 NO_RELAY` is retried. The page reports its Web Vitals as `page=room`.
 
 The gallery (task 3.5):
@@ -278,7 +278,7 @@ The economy pages (task 4.8):
 | PostgreSQL | `assets` | Drawing metadata and moderation status, the outbox of drawing events, admin sessions | assets |
 | PostgreSQL | `marketplace` | Accounts, ledger, balances, ownership, listings, idempotency keys, outbox, Stripe events | marketplace |
 | PostgreSQL | `notifier` | Endpoints, deliveries, credential revocation watermarks | notifier |
-| Redis | `room:*` | Room event streams, snapshots, leases, fencing counters; redeemed join tickets (`room:{id}:ticket:*`) | game-server |
+| Redis | `room:*` | Room event streams, snapshots, leases, fencing counters; redeemed join tickets (`room:{id}:ticket:*`); viewers' redeemed tickets (`room:{id}:viewer-ticket:*`) and correct guesses (`room:{id}:viewer-guesses`), written by relays (ADR 0019) | game-server |
 | Redis | `lobby:*` | Rooms, game-server registry, leaderboards | lobby |
 | Redis | `assets:*` (logical database 1) | Celery broker (no result backend); kombu's `global_keyprefix` puts its keys and channels under `assets:` | assets |
 | MongoDB | `assets.replays` (user `assets`, `readWrite` on `assets` only) | Stroke logs for replays | assets |
@@ -293,7 +293,7 @@ Locally there is one Postgres server with four databases and one database user p
 The owners are enforced, not just agreed on (task 5.5):
 
 - **Postgres:** one login role per database, with `CONNECT` revoked from `PUBLIC`.
-- **Redis:** one ACL user per service, allowed only its prefixes (`infra/redis/start.sh`).
+- **Redis:** one ACL user per service, allowed only its prefixes (`infra/redis/start.sh`). Relays have their own user (ADR 0019): they read `room:*` and write only viewer tickets and viewer-guess streams.
   - The default user is off, and no user has `@admin` or `@dangerous` commands.
   - Celery's two `PSUBSCRIBE` patterns are listed literally, because Redis compares a subscribed pattern with the ACL as text.
 - **Object storage:** one SeaweedFS identity per service, scoped to its buckets (`infra/seaweedfs/entrypoint.sh`). In AWS, the IAM task roles do the same (`infra/terraform/stack/iam.tf`).
@@ -334,8 +334,8 @@ Every message on a topic is that topic's wrapper message: one `oneof event` with
 | `market.wallet.v1` | `WalletEvent` | `CoinsCredited` | marketplace (outbox) | notifier | `user_id` | 4 |
 | `auth.users.v1` | `UserEvent` | `CredentialsRevoked` | auth (outbox, `auth-relay`) | notifier (group `notifier-auth`) | `user_id` | 4 |
 | `notifier.dlq.v1` | `DeadLetterEvent` | `DeliveryDead` | notifier | alerting, humans | `endpoint_id` | 4 |
-| `live.guesses.v1` | `ViewerGuessEvent` | `ViewerGuess` | game-server relays | analytics | `room_id` | 6 |
-| `live.top-guesses.v1` | `TopGuessesEvent` | `TopGuesses` | analytics | game-server relays (task 6.2) | `room_id` | 6 |
+| `live.guesses.v1` | `ViewerGuessEvent` | `ViewerGuess` | relays (Kafka user `relay`, ADR 0019) | analytics | `room_id` | 6 |
+| `live.top-guesses.v1` | `TopGuessesEvent` | `TopGuesses` | analytics | relays (no consumer group) | `room_id` | 6 |
 | `analytics.flags.v1` | `AnalyticsFlagEvent` | `WashTradeFlagged` | analytics | humans, the analytics dashboard and alerts | `drawing_id` | 6 |
 
 Key payload fields:
@@ -424,7 +424,7 @@ Client to server:
 - `guess {text}` (1–100 characters; outside a round it is chat)
 - `ping {t}` (answered with `pong` without involving the room)
 
-Server to client, shared room events (each wrapped as `event {seq, type, data}` and stored in the room's event log): `player_joined {user_id, name}`, `player_left {user_id}`, `player_removed {user_id}` (seat freed after the rejoin grace), `host_changed {user_id}`, `match_started {match_id, order, deadline}`, `choosing {round_no, drawer_ids, deadline}` (`drawer_ids[0]` chooses; sent again within a round when the choice passes to the second drawer), `round_started {round_no, drawer_ids, word_length, deadline}`, `stroke_batch {user_id, stroke_id, points, color, width, done}`, `stroke_undone {stroke_id, user_id}`, `hint {mask}`, `chat {user_id, text}` (wrong guesses are shown as chat), `correct_guess {user_id, order}`, `round_ended {round_no, word, scores, round_points}`, `match_ended {match_id, results}` (results carry `placement` with competition ranking: 1, 2, 2, 4).
+Server to client, shared room events (each wrapped as `event {seq, type, data}` and stored in the room's event log): `player_joined {user_id, name}`, `player_left {user_id}`, `player_removed {user_id}` (seat freed after the rejoin grace), `host_changed {user_id}`, `match_started {match_id, order, deadline}`, `choosing {round_no, drawer_ids, deadline}` (`drawer_ids[0]` chooses; sent again within a round when the choice passes to the second drawer), `round_started {round_no, drawer_ids, word_length, deadline}`, `stroke_batch {user_id, stroke_id, points, color, width, done}`, `stroke_undone {stroke_id, user_id}`, `hint {mask}`, `chat {user_id, text}` (wrong guesses are shown as chat), `correct_guess {user_id, order}`, `viewer_correct {user_id, name, round_no}` (the first viewer of a live room to guess this round's word, ADR 0019; an announcement, no points), `round_ended {round_no, word, scores, round_points}`, `match_ended {match_id, results}` (results carry `placement` with competition ranking: 1, 2, 2, 4).
 
 Server to client, private messages (no `seq`, never stored in the shared log): `welcome {user_id, view, seq}`, `word_options {words}` (the first drawer), `your_word {word}` (drawers), `guess_result {correct}`, `rate_limited`, `room_moved {reason}`, `resumed {seq}`, `error {code, message}`, `pong {t}`.
 
@@ -436,8 +436,12 @@ Guess rules: a guess is compared after lowercasing and keeping only the letters 
 
 - `hello` with a viewer's ticket and, when resuming, `last_seq`.
 - Then `welcome {user_id, view, seq, viewer: true}`, or on a resume the missed events followed by `resumed {seq}`.
-- Then every shared room event, the same messages players get. A viewer gets no private message.
-- A viewer may send only `ping`. Anything else answers `error {code: viewer}` (guesses come with task 6.2).
+- Then every shared room event, the same messages players get.
+- A viewer may send `ping` and `guess {text}` (ADR 0019). Anything else answers `error {code: viewer}`.
+  - A guess passes the viewer's own token bucket (5 at once, then 1 a second; `rate_limited` otherwise) and is answered privately with `guess_result {correct}`, only while a round is drawing (otherwise `error {code: not_drawing}`). Viewers' guesses are never chat: thousands of viewers would drown the room.
+  - A correct guess goes to the room's owner, which announces the round's first correct viewer to everyone with `viewer_correct`.
+  - A wrong guess that doesn't contain the word goes to the top-guesses job (`live.guesses.v1`).
+- Private messages a viewer gets: `guess_result`, `rate_limited`, `error`, `pong`, and `top_guesses {round_no, window_end, guesses: [{text, count}]}`. That one is the room's most common wrong viewer guesses over the last 30 seconds, from analytics (ADR 0018), sent when it changes and to a viewer who joins during the round. Players never get it.
 - When the room ends, its viewers are closed with 1000. A viewer who connects to an ended room is closed with 4004, the one case that code is sent.
 
 `room_moved {reason}` (private) comes right before close 4010 when another server took the room over (ADR 0007).
@@ -667,7 +671,8 @@ Relays (ADR 0017, task 6.1) are the same binary in a relay role. They fan live r
 - **The room ends.** Its tombstone (checked every 10 s) closes its viewers normally.
 - **Shutdown.** SIGTERM marks the relay draining in a heartbeat at once, waits 2 s so the lobby stops sending viewers to it, then closes them with 1001. They ask the lobby again.
 - **A takeover changes nothing for viewers**, because the relay reads the same keys whoever owns the room.
-- **Viewers only watch for now** (`ping`; anything else answers `error {code: viewer}`). Guesses are task 6.2.
+- **Viewer guesses** (ADR 0019, task 6.2). The room's stream goroutine, which holds the snapshot and so the word, checks each guess. A correct one is added to `room:{id}:viewer-guesses`; the owner's reader for that live room passes it to the actor, which announces the round's first one as `viewer_correct` through its fenced commit. Wrong guesses that don't contain the word go to `live.guesses.v1`. Top guesses come back from `live.top-guesses.v1`, which every relay reads without a consumer group, and go to that room's viewers.
+- **Relays have their own credentials** (ADR 0019): the Kafka user `relay` (write `live.guesses.v1`, read `live.top-guesses.v1`) and the Redis user `relay` (read `room:*`, write only viewer tickets and viewer-guess streams).
 
 ## 10. Consistency model
 
