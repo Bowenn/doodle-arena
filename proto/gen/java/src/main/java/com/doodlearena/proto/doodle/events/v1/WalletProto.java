@@ -54,16 +54,17 @@ public final class WalletProto extends com.google.protobuf.GeneratedFile {
       "eta\022\027\n\007user_id\030\002 \001(\tR\006userId\022\026\n\006amount\030\003" +
       " \001(\003R\006amount\0226\n\006reason\030\004 \001(\0162\036.doodle.ev" +
       "ents.v1.CreditReasonR\006reason\022\034\n\treferenc" +
-      "e\030\005 \001(\tR\treference*j\n\014CreditReason\022\035\n\031CR" +
-      "EDIT_REASON_UNSPECIFIED\020\000\022!\n\035CREDIT_REAS" +
-      "ON_STRIPE_PURCHASE\020\001\022\030\n\024CREDIT_REASON_RE" +
-      "WARD\020\002B\345\001\n&com.doodlearena.proto.doodle." +
-      "events.v1B\013WalletProtoP\001ZLgithub.com/Bow" +
-      "enn/gap-project_private/proto/gen/go/doo" +
-      "dle/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Ev" +
-      "ents.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Even" +
-      "ts\\V1\\GPBMetadata\352\002\022Doodle::Events::V1b\006" +
-      "proto3"
+      "e\030\005 \001(\tR\treference*\237\001\n\014CreditReason\022\035\n\031C" +
+      "REDIT_REASON_UNSPECIFIED\020\000\022!\n\035CREDIT_REA" +
+      "SON_STRIPE_PURCHASE\020\001\022\030\n\024CREDIT_REASON_R" +
+      "EWARD\020\002\022\025\n\021CREDIT_REASON_TIP\020\003\022\034\n\030CREDIT" +
+      "_REASON_TIP_REFUND\020\004B\345\001\n&com.doodlearena" +
+      ".proto.doodle.events.v1B\013WalletProtoP\001ZL" +
+      "github.com/Bowenn/gap-project_private/pr" +
+      "oto/gen/go/doodle/events/v1;eventsv1\242\002\003D" +
+      "EX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1" +
+      "\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle" +
+      "::Events::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

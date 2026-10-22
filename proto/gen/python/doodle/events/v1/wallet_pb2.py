@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from doodle.events.v1 import meta_pb2 as doodle_dot_events_dot_v1_dot_meta__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1d\x64oodle/events/v1/wallet.proto\x12\x10\x64oodle.events.v1\x1a\x1b\x64oodle/events/v1/meta.proto\"`\n\x0bWalletEvent\x12H\n\x0e\x63oins_credited\x18\x01 \x01(\x0b\x32\x1f.doodle.events.v1.CoinsCreditedH\x00R\rcoinsCreditedB\x07\n\x05\x65vent\"\xc7\x01\n\rCoinsCredited\x12/\n\x04meta\x18\x01 \x01(\x0b\x32\x1b.doodle.events.v1.EventMetaR\x04meta\x12\x17\n\x07user_id\x18\x02 \x01(\tR\x06userId\x12\x16\n\x06\x61mount\x18\x03 \x01(\x03R\x06\x61mount\x12\x36\n\x06reason\x18\x04 \x01(\x0e\x32\x1e.doodle.events.v1.CreditReasonR\x06reason\x12\x1c\n\treference\x18\x05 \x01(\tR\treference*j\n\x0c\x43reditReason\x12\x1d\n\x19\x43REDIT_REASON_UNSPECIFIED\x10\x00\x12!\n\x1d\x43REDIT_REASON_STRIPE_PURCHASE\x10\x01\x12\x18\n\x14\x43REDIT_REASON_REWARD\x10\x02\x42\xe5\x01\n&com.doodlearena.proto.doodle.events.v1B\x0bWalletProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03\x44\x45X\xaa\x02\x10\x44oodle.Events.V1\xca\x02\x10\x44oodle\\Events\\V1\xe2\x02\x1c\x44oodle\\Events\\V1\\GPBMetadata\xea\x02\x12\x44oodle::Events::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1d\x64oodle/events/v1/wallet.proto\x12\x10\x64oodle.events.v1\x1a\x1b\x64oodle/events/v1/meta.proto\"`\n\x0bWalletEvent\x12H\n\x0e\x63oins_credited\x18\x01 \x01(\x0b\x32\x1f.doodle.events.v1.CoinsCreditedH\x00R\rcoinsCreditedB\x07\n\x05\x65vent\"\xc7\x01\n\rCoinsCredited\x12/\n\x04meta\x18\x01 \x01(\x0b\x32\x1b.doodle.events.v1.EventMetaR\x04meta\x12\x17\n\x07user_id\x18\x02 \x01(\tR\x06userId\x12\x16\n\x06\x61mount\x18\x03 \x01(\x03R\x06\x61mount\x12\x36\n\x06reason\x18\x04 \x01(\x0e\x32\x1e.doodle.events.v1.CreditReasonR\x06reason\x12\x1c\n\treference\x18\x05 \x01(\tR\treference*\x9f\x01\n\x0c\x43reditReason\x12\x1d\n\x19\x43REDIT_REASON_UNSPECIFIED\x10\x00\x12!\n\x1d\x43REDIT_REASON_STRIPE_PURCHASE\x10\x01\x12\x18\n\x14\x43REDIT_REASON_REWARD\x10\x02\x12\x15\n\x11\x43REDIT_REASON_TIP\x10\x03\x12\x1c\n\x18\x43REDIT_REASON_TIP_REFUND\x10\x04\x42\xe5\x01\n&com.doodlearena.proto.doodle.events.v1B\x0bWalletProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03\x44\x45X\xaa\x02\x10\x44oodle.Events.V1\xca\x02\x10\x44oodle\\Events\\V1\xe2\x02\x1c\x44oodle\\Events\\V1\\GPBMetadata\xea\x02\x12\x44oodle::Events::V1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,8 +33,8 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'doodle.events.v1.wallet_pb2
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'\n&com.doodlearena.proto.doodle.events.v1B\013WalletProtoP\001ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle::Events::V1'
-  _globals['_CREDITREASON']._serialized_start=380
-  _globals['_CREDITREASON']._serialized_end=486
+  _globals['_CREDITREASON']._serialized_start=381
+  _globals['_CREDITREASON']._serialized_end=540
   _globals['_WALLETEVENT']._serialized_start=80
   _globals['_WALLETEVENT']._serialized_end=176
   _globals['_COINSCREDITED']._serialized_start=179

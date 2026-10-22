@@ -98,6 +98,8 @@ func Decode(topic string, value []byte) (Event, error) {
 		reason := map[eventsv1.CreditReason]string{
 			eventsv1.CreditReason_CREDIT_REASON_REWARD:          "reward",
 			eventsv1.CreditReason_CREDIT_REASON_STRIPE_PURCHASE: "stripe_purchase",
+			eventsv1.CreditReason_CREDIT_REASON_TIP:             "tip",
+			eventsv1.CreditReason_CREDIT_REASON_TIP_REFUND:      "tip_refund",
 		}[c.GetReason()]
 		if reason == "" {
 			reason = "unknown"

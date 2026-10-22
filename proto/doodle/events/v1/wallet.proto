@@ -23,6 +23,10 @@ enum CreditReason {
   CREDIT_REASON_STRIPE_PURCHASE = 1;
   // A match reward, paid from MatchFinished.
   CREDIT_REASON_REWARD = 2;
+  // Tips to the drawers of a round, paid when the round finished (ADR 0021).
+  CREDIT_REASON_TIP = 3;
+  // A tip given back to its tipper: its round never finished, or the tipper drew it (ADR 0021).
+  CREDIT_REASON_TIP_REFUND = 4;
 }
 
 // CoinsCredited says coins were added to a player's wallet by a committed ledger transaction.
@@ -35,6 +39,7 @@ message CoinsCredited {
   int64 amount = 3;
   // Why the coins were added.
   CreditReason reason = 4;
-  // What caused it: the Stripe Checkout session id for purchases, the match id for rewards.
+  // What caused it: the Stripe Checkout session id for purchases, the match id for rewards,
+  // "<match_id>:<round_no>" for tips, the tip id for refunds.
   string reference = 5;
 }
