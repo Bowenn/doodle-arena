@@ -61,7 +61,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Build tools / build process | Go modules, Gradle, uv, Vite, Buf, multi-stage Docker builds, CI caching | 1 |
 | Deployment & release process | Terraform, rolling deploys, game-server draining, deploy markers | 5, 6 |
 | Backup and restore, disaster recovery | `pg_dump`/`mongodump` at every teardown, verified with checksums and row counts; a restore at every start, with a stated recovery point and a measured restore time (ADR 0016, task 6.10) | 6 |
-| Stream processing | Flink jobs | 6 |
+| Stream processing | Flink 2.2 in application mode: event time with watermarks, a hopping window TVF and a window Top-N in Flink SQL, checkpoints to object storage (ADR 0018, task 6.5a); keyed state and timers for wash trading (task 6.5b) | 6 |
 | Transactions | Purchase transaction; transactional outbox | 4 |
 | End-to-end project ownership | The whole project | All |
 | Authentication & authorization (API keys, OAuth 2.0, JWT) | auth service; roles; API keys for developers | 1, 4 |

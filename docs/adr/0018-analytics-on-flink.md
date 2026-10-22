@@ -86,8 +86,9 @@ The details, as built in task 6.5:
   - analytics has its own SCRAM user and grants (`infra/kafka/init.sh`): read `live.guesses.v1` and `market.sales.v1` with group `analytics`, write `live.top-guesses.v1` and, from task 6.5b, `analytics.flags.v1`.
   - Flink keeps its Kafka offsets in its checkpoints and only commits them to the group for lag metrics.
   - `dev-tools` may also write `live.guesses.v1` locally, for `make analytics-check` and until the relays publish guesses (task 6.2).
-- **Memory.** About 1.5 GB more in the local stack (JobManager 512 MB, TaskManager 1 GB, set by Flink's own `*.memory.process.size`). It runs only with `PROFILES=analytics make up`; CI's stack job turns it on.
+- **Memory.** About 1.8 GB more in the local stack (JobManager 768 MB, because the SQL planner runs there in application mode; TaskManager 1 GB; set by Flink's own `*.memory.process.size`). It runs only with `PROFILES=analytics make up`; CI's stack job turns it on.
 - **At-least-once.** A restart replays from the last checkpoint, so a window can be emitted twice. A `TopGuesses` replaces the last one, and a wash-trading flag will carry a deterministic id.
+- **Restarts without HA.** Flink restores a checkpoint when the job restarts inside a running JobManager (a failed task or TaskManager). A new JobManager has no high-availability store, so it starts the job fresh from the offsets committed to the group at the last checkpoint. Top guesses lose only their open windows. Wash trading's 7-day state needs more (task 6.5b): retained checkpoints and a start from the latest one.
 - **Telemetry.**
   - Flink's own OpenTelemetry metric reporter sends job metrics (checkpoints, records, restarts) and the jobs' counters over OTLP.
   - Logs are JSON through log4j's JSON template layout.
