@@ -56,8 +56,13 @@ How a viewer's guess flows:
 - **The word never leaves the game servers and relays.** `live.guesses.v1` carries only wrong guesses that don't contain the word, so neither analytics nor the top-guesses list can show it.
 - **The owner gains one input** (a new actor inbox type) and **the room gains one key** (`room:{id}:viewer-guesses`, deleted with the room). A new stored event type means `Game.apply` must restore it, or takeovers and relay welcomes would fail.
 - **Relays become Kafka clients.** They join the Kafka network, with their own user and password (`KAFKA_RELAY_PASSWORD`, `REDIS_RELAY_PASSWORD`).
+- **The owner learns which rooms are live from the lobby.** `AllocateRoomRequest` gains `live` (additive, approved with the plan), sent on every allocation, a takeover included, because a new owner has no other way to know.
+- **Built in task 6.2, with three fixes from the automated security review:**
+  - A guess names its match as well as its round: round numbers start again with every match, and a new owner reads the stream from its start.
+  - Relays refuse viewer guesses from the room's own players: a drawer watching their room could otherwise hint the word to the top-guesses list.
+  - A viewer who guessed it can't guess again that round, remembered by user rather than socket, so a reconnect doesn't reset it.
 - **What to watch:**
-  - `relay.viewer_guesses{result}` (correct, wrong, close, not_drawing, rate_limited);
-  - `relay.guesses.published{result}`;
-  - `relay.top_guesses.received`;
-  - `game.viewer_correct`.
+  - `relay.viewer_guesses{result}` (correct, wrong, close, not_drawing, rate_limited, already_guessed, player);
+  - `relay.guesses.published{result}` and `relay.correct_guesses.forwarded{result}`;
+  - `relay.top_guesses.received{result}`;
+  - `game.viewer_correct{result}` (announced, ignored).
