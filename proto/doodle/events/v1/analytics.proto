@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package doodle.events.v1;
+
+import "doodle/events/v1/meta.proto";
+import "google/protobuf/timestamp.proto";
+
+// AnalyticsFlagEvent is the only message type on the topic analytics.flags.v1 (key: drawing_id).
+// Produced by analytics, whose Flink job watches market.sales.v1 for wash trading (ADR 0018,
+// task 6.5b). No service consumes it yet: humans read it, and the WashTradingFlagged alert and
+// the analytics dashboard count it.
+message AnalyticsFlagEvent {
+  // The event this message carries. Consumers skip an unset or unknown case (ADR 0004).
+  oneof event {
+    // A drawing went round a loop of accounts.
+    WashTradeFlagged wash_trade_flagged = 1;
+  }
+}
+
+// WashTradeFlagged says a drawing came back to an account that sold it within 7 days, through
+// a chain of completed sales: the pattern of accounts trading among themselves to inflate a
+// price or move coins. It is a signal for a human, not a verdict; nothing is reversed.
+message WashTradeFlagged {
+  // Event metadata.
+  EventMeta meta = 1;
+  // Identifies the loop: derived from the rule and the sale ids, so the same loop always gets
+  // the same id, and a repeat (at-least-once delivery, a replay after a restart) can be dropped.
+  string flag_id = 2;
+  // Which rule matched.
+  WashTradeRule rule = 3;
+  // The drawing that went round the loop.
+  string drawing_id = 4;
+  // The accounts in the order the drawing passed through them, the first one repeated at the
+  // end: [A, B, A] for a round trip, [A, B, C, A] for a cycle of three.
+  repeated string account_ids = 5;
+  // The loop's sales in the order they happened (SaleCompleted.sale_id).
+  repeated string sale_ids = 6;
+  // When the loop's first sale completed.
+  google.protobuf.Timestamp first_sale_at = 7;
+  // When its last sale completed, closing the loop.
+  google.protobuf.Timestamp last_sale_at = 8;
+  // The coins paid across the loop's sales: the volume the loop added to the drawing's history.
+  int64 volume = 9;
+}
+
+// WashTradeRule names the pattern a flag matched (ADR 0018).
+enum WashTradeRule {
+  // Not set: a newer producer's rule. Consumers treat it as unknown.
+  WASH_TRADE_RULE_UNSPECIFIED = 0;
+  // R1: the drawing went from A to B and back to A.
+  WASH_TRADE_RULE_ROUND_TRIP = 1;
+  // R3: the drawing went round three or more accounts, A to B to C (and on) back to A, so no
+  // two of them traded directly with each other twice.
+  WASH_TRADE_RULE_CYCLE = 2;
+}

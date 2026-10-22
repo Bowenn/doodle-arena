@@ -224,9 +224,17 @@ How it runs (ADR 0018, task 6.5):
   - A hopping window TVF (30 s long, every 2 s) counts each guess per room and round. A window Top-N (`ROW_NUMBER`) keeps the 5 most common, and a second aggregation over the same windows folds them into one row.
   - Each window becomes one `TopGuesses`, which replaces the room's previous list. Its `event_id` is derived from the room, round and window end, so a replayed window carries the same id.
   - A guess behind the watermark belongs to a window already reported. It is dropped and counted (`analytics.guesses.late`).
-- **Wash trading in the DataStream API** (task 6.5b): rules R1 (round trip) and R3 (cycle) within 7 days, in keyed state with event-time timers.
+- **Wash trading in the DataStream API** (task 6.5b):
+  - A `KeyedProcessFunction` keyed by `drawing_id` keeps each drawing's sales of the last 7 days (event time: `completed_at`). Event-time timers drop them afterwards. Whether a sale is inside the window is decided from the sales' own times, so a quiet topic's watermark never changes a result.
+  - A sale whose buyer sold this drawing within 7 days closes a loop. Since ownership passes from each buyer to the next seller, the sales in between are the loop: two sales are R1 (round trip), three or more R3 (cycle).
+  - Each loop becomes a `WashTradeFlagged` on `analytics.flags.v1` with the accounts in order, the sales, the volume and a `flag_id` derived from the rule and the sales. A repeated sale (at-least-once outbox) is ignored by its `sale_id`.
+  - Counter `analytics.wash_trades.flagged{rule}`, alert WashTradingFlagged, dashboard `da-analytics`.
 - **State and delivery.** Checkpoints go every 30 seconds to the `analytics-checkpoints` bucket, with the HashMap state backend. The Kafka sinks are at-least-once: exactly-once would hold every top-guesses list back until the next checkpoint. Kafka offsets live in the checkpoints. They are committed to the group `analytics` only so that its lag can be watched.
 - **Restarts.** Flink restarts the job with exponential delay. A restart replays from the last checkpoint, so a window can be emitted twice.
+- **A new JobManager keeps the state** (task 6.5b). Without high availability, Flink would start every submitted job empty. Instead, the job's `main` finds the newest completed checkpoint in the bucket through Flink's own file system, and the job starts from it in CLAIM mode. The bucket then holds one checkpoint, whatever job id made it.
+  - Flink SQL names its operators itself, and any change to the graph renames them, so their state (open windows) is dropped on restore rather than blocking the start.
+  - The sources and wash trading have fixed uids, so their state is restored.
+  - `ANALYTICS_RESTORE=none` (or a path) overrides the search. AnalyticsDown and its runbook cover a checkpoint that can't be restored.
 
 ### 4.10 Web app (React + Canvas)
 
@@ -328,6 +336,7 @@ Every message on a topic is that topic's wrapper message: one `oneof event` with
 | `notifier.dlq.v1` | `DeadLetterEvent` | `DeliveryDead` | notifier | alerting, humans | `endpoint_id` | 4 |
 | `live.guesses.v1` | `ViewerGuessEvent` | `ViewerGuess` | game-server relays | analytics | `room_id` | 6 |
 | `live.top-guesses.v1` | `TopGuessesEvent` | `TopGuesses` | analytics | game-server relays (task 6.2) | `room_id` | 6 |
+| `analytics.flags.v1` | `AnalyticsFlagEvent` | `WashTradeFlagged` | analytics | humans, the analytics dashboard and alerts | `drawing_id` | 6 |
 
 Key payload fields:
 
@@ -338,6 +347,7 @@ Key payload fields:
 - `CoinsCredited`: `user_id`, `amount`, `reason` (`stripe_purchase` or `reward`), `reference`.
 - `ViewerGuess`: `room_id`, `round_no`, `text` (normalized as in section 6.4), `guessed_at` (the event time). Only wrong guesses are published: the top guesses are shown to every viewer.
 - `TopGuesses`: `room_id`, `round_no`, `window_end`, `guesses[]` with `text` and `count`, most common first.
+- `WashTradeFlagged`: `flag_id` (derived from the rule and the sales), `rule` (`ROUND_TRIP` or `CYCLE`), `drawing_id`, `account_ids` (the loop in order, the first account repeated at the end), `sale_ids`, `first_sale_at`, `last_sale_at`, `volume` (coins paid across the loop).
 
 `RoundFinished` uses the claim-check pattern. A round's stroke log can be large, so the event carries only the object key, and the log itself lives in the `round-logs` bucket. This also avoids an ordering problem: if strokes travelled on their own topic, the assets service couldn't know when it had all of them. The object is a gzip-compressed `doodle.game.v1.StrokeLog` protobuf, so its format is versioned and checked by Buf like every other contract.
 
@@ -778,6 +788,7 @@ Releases:
 | D51 | How 6.10 implements ADR 0016: the dumps run on the data host through SSM Run Command, and its role may only put objects (never read them, never write a manifest); restores download through presigned URLs that the human signs; `manifest.json`, written last by the human, marks a backup complete and holds every dump's SHA-256 and every table's rows, which the restore must match; the schema check compares migration ids, not commits; the newest 10 backups are kept, by count; telemetry goes to CloudWatch (`DoodleArena/Backups`, `/doodle-arena/backups`) | otel-lgtm can use the host's role and takes public browser traffic, so it must not read every account and wallet; a commit-ancestry check would refuse a backup after a rebase; an age-based expiry would delete the only backup after a long break; the stack's own collector is destroyed seconds after a backup |
 | D52 | Live rooms through relays (ADR 0017, task 6.1): the lobby places viewers on the least-loaded relay (its reported viewers plus the tickets issued since); viewers sign in and use tickets with their own audience (`doodle-watch`); a host opts in with `live`; relays read rooms with `XREAD` and never write them; the target is 5,000 viewers on one room with p99 under 250 ms | Load-aware placement and viewer counts in the control plane, like rooms on game servers; one audience per role means a viewer's ticket can't take a seat even on an older server; a relay that only reads leaves the owner's write path unchanged, whoever owns the room |
 | D53 | Analytics on Flink (ADR 0018, task 6.5): Flink 2.2.1 in application mode, one JobManager and one TaskManager, both pipelines in one job; top guesses in Flink SQL (a hopping window TVF and a window Top-N) on event time; wash trading (R1 round trip, R3 cycle) in the DataStream API; checkpoints every 30 s to an object-store bucket of its own; at-least-once Kafka sinks whose outputs replace or dedupe; Flink's OpenTelemetry reporter for metrics; opt-in compose profiles (`live`, `analytics`) with memory caps | Real Flink as it runs on Kubernetes or ECS, with each API where it fits; no Kafka connector supports Flink 2.3 yet; an exactly-once sink would delay a live list by a checkpoint; a deterministic id makes a repeat harmless; the full stack no longer fits an 8 GB Docker VM, so the heavy parts start only when needed |
+| D54 | Wash trading (task 6.5b, ADR 0018): one check for R1 and R3 (a sale whose buyer sold this drawing within 7 days closes a loop) in keyed state per drawing; flags on `analytics.flags.v1` with a deterministic `flag_id`; a new JobManager starts from the newest retained checkpoint (CLAIM mode), and SQL operators' unmapped state is dropped on restore; tested with real sales through the marketplace, across a restart of Flink, in CI | Ownership makes a drawing's sales one chain, so the loop is the sales since the buyer last sold it: no graph search; 7 days of history must survive restarts without running ZooKeeper; a deploy must not be blocked by state that is only 30 s of windows; a forged sale would reach the notifier's webhooks, so dev-tools gets no write on `market.sales.v1` |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 

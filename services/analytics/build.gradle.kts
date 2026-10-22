@@ -52,6 +52,9 @@ dependencies {
 	testImplementation("org.apache.flink:flink-streaming-java:$flinkVersion")
 	testImplementation("org.apache.flink:flink-table-api-java-bridge:$flinkVersion")
 	testImplementation("org.apache.flink:flink-test-utils:$flinkVersion")
+	// The keyed operator test harness (KeyedOneInputStreamOperatorTestHarness) and what it needs.
+	testImplementation("org.apache.flink:flink-streaming-java:$flinkVersion:tests")
+	testImplementation("org.apache.flink:flink-runtime:$flinkVersion:tests")
 	testImplementation("org.apache.flink:flink-clients:$flinkVersion")
 	testRuntimeOnly("org.apache.flink:flink-table-planner-loader:$flinkVersion")
 	testRuntimeOnly("org.apache.flink:flink-table-runtime:$flinkVersion")

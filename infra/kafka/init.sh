@@ -64,6 +64,7 @@ TOPICS=(
   auth.users.v1
   live.guesses.v1
   live.top-guesses.v1
+  analytics.flags.v1
 )
 
 # principal -> the variable holding its password. broker and kafka-init are super users
@@ -96,8 +97,8 @@ notifier      Read     --topic market.sales.v1 --topic market.wallet.v1 --topic 
 notifier      Write    --topic notifier.dlq.v1
 auth          Write    --topic auth.users.v1
 kafka-metrics Describe --topic * --group *
-analytics     Read     --topic live.guesses.v1 --group analytics
-analytics     Write    --topic live.top-guesses.v1
+analytics     Read     --topic live.guesses.v1 --topic market.sales.v1 --group analytics
+analytics     Write    --topic live.top-guesses.v1 --topic analytics.flags.v1
 dev-tools     Read     --topic *
 dev-tools     Read     --group dev-tools- --resource-pattern-type prefixed
 dev-tools     Write    --topic game.rounds.v1 --topic game.matches.v1 --topic live.guesses.v1

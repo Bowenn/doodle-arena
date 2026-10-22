@@ -653,3 +653,87 @@ groups:
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/kafka-admin-used.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "14"
+  - orgId: 1
+    name: analytics
+    folder: Doodle Arena
+    interval: 1m
+    rules:
+      - uid: wash-trading-flagged
+        title: WashTradingFlagged
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Loops of sales the Flink job found in the last 15 minutes (ADR 0018), per rule:
+              # round_trip (R1) or cycle (R3). One alert per rule; each flag is in the logs and on
+              # analytics.flags.v1 with its accounts. A restarted job's counters are new series,
+              # and one that flags before its first report starts above 0, which increase() can't
+              # see: a series that is new in the window counts with its whole value.
+              expr: "sum by (rule) ((increase(flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total[15m]) and flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total offset 15m) or (flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total unless flink_taskmanager_job_task_operator_rule_analytics_wash_trades_flagged_total offset 15m))"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions: [{evaluator: {type: gt, params: [0]}}]
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: warning
+          service: analytics
+        annotations:
+          summary: "{{ $values.A }} {{ $labels.rule }} wash-trading loop(s) in the last 15 minutes: accounts passed a drawing round among themselves within 7 days."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/wash-trading.md
+          __dashboardUid__: da-analytics
+          __panelId__: "12"
+      - uid: analytics-down
+        title: AnalyticsDown
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 300, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Seconds since a checkpoint completed, counted only once the job has run for
+              # 5 minutes (a restored job takes 30 s to its first one); 0 when it isn't running.
+              expr: >-
+                ((time() - max(flink_jobmanager_job_lastCheckpointCompletedTimestamp) / 1000)
+                * (max(flink_jobmanager_job_uptime) > bool 300000)) or vector(0)
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 21600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              # 1 when the job ran in the last 6 hours but hasn't reported running for 2 minutes
+              # (a JobManager that can't start it, a crash loop, a stopped container). Relays and
+              # Flink are opt-in locally (PROFILES), so a stack that never started analytics
+              # doesn't fire.
+              expr: >-
+                ((count(max_over_time(flink_jobmanager_job_uptime[6h])) or vector(0)) > bool 0)
+                * ((max(last_over_time(flink_jobmanager_job_uptime[2m])) or vector(0)) <= bool 0)
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 300 || $B > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 3m
+        labels:
+          severity: warning
+          service: analytics
+        annotations:
+          summary: "The analytics Flink job isn't running or isn't checkpointing (last checkpoint {{ $values.A }} s ago; not running: {{ $values.B }}): top guesses stop and wash trading isn't watched."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/analytics-down.md
+          __dashboardUid__: da-analytics
+          __panelId__: "1"

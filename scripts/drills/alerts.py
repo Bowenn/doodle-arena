@@ -1,7 +1,7 @@
 """Alert drill (task 5.1, M5): the ledger-imbalance and error-rate alerts fire, reach the contact
 point, and clear again.
 
-    python3 scripts/drills/alerts.py [ledger|errors|kafka]
+    python3 scripts/drills/alerts.py [ledger|errors|kafka|wash]
 
 Against `make up` (standard library only; needs `~/.docker/bin` on PATH or there). It changes the
 shared stack for a few minutes and puts everything back, even when interrupted:
@@ -21,6 +21,10 @@ shared stack for a few minutes and puts everything back, even when interrupted:
    tries a wrong password on the broker every 15 s until KafkaAuthFailures fires (failures every
    minute for 5 minutes: about 6 minutes). Nothing changes, so there is nothing to put back; the
    alerts resolve on their own 5 minutes later. Not in the default run: `alerts.py kafka`.
+4. WashTradingFlagged (ADR 0018): runs scripts/drills/wash_trading.py (real sales: a round trip
+   and a cycle; needs `PROFILES=analytics make up` and uv) and waits for both rule instances to
+   fire. Real sales can't be taken back, so the alert resolves on its own after 15 minutes, and
+   a second run within them refuses to start. Not in the default run: `alerts.py wash`.
 
 Notifications go to Discord when DISCORD_ALERT_WEBHOOK_URL is set in .env; check the channel.
 Otherwise they land on the webhook-receiver test service, and the drill checks them there.
@@ -34,6 +38,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 GRAFANA = os.environ.get("GRAFANA", "http://localhost:3000")
 RECEIVER = os.environ.get("RECEIVER", "http://localhost:9000")
@@ -49,6 +54,7 @@ EOF
 timeout 20 /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --command-config /tmp/drill-bad-login.properties --list >/dev/null 2>&1
 true"""
 DRILL_OWNER = "drill-alerts"
+ROOT = Path(__file__).resolve().parents[2]
 
 os.environ["PATH"] = os.path.expanduser("~/.docker/bin") + os.pathsep + os.environ["PATH"]
 
@@ -244,10 +250,29 @@ def kafka_drill() -> dict:
     return result
 
 
+def wash_drill() -> dict:
+    if "firing" in (state("WashTradingFlagged", rule="round_trip"), state("WashTradingFlagged", rule="cycle")):
+        sys.exit("WashTradingFlagged is already firing (a run in the last 15 minutes); try again once it resolves")
+    sent_before = received("WashTradingFlagged", "FIRING")
+    log("WashTradingFlagged: a round trip and a cycle of real sales (scripts/drills/wash_trading.py)")
+    start = time.monotonic()
+    subprocess.run(["uv", "run", "--project", "services/auth", "--with", "confluent-kafka", "--with", "boto3",
+                    "--with", "protobuf>=7.36.2,<8", "python", "scripts/drills/wash_trading.py"], cwd=ROOT, check=True)
+    result: dict = {}
+    fired = wait_for("WashTradingFlagged firing for round_trip and cycle", lambda: all(
+        state("WashTradingFlagged", rule=r) == "firing" for r in ("round_trip", "cycle")), 300)
+    result["fire_s"] = None if fired is None else time.monotonic() - start
+    if result["fire_s"] is not None:
+        sent = wait_for("its notification on webhook-receiver",
+                        lambda: received("WashTradingFlagged", "FIRING") > sent_before, 90)
+        result["notify_s"] = None if sent is None else result["fire_s"] + sent
+    return result
+
+
 def main() -> int:
     which = sys.argv[1:] or ["ledger", "errors"]
-    if not set(which) <= {"ledger", "errors", "kafka"}:
-        sys.exit("usage: alerts.py [ledger|errors|kafka]")
+    if not set(which) <= {"ledger", "errors", "kafka", "wash"}:
+        sys.exit("usage: alerts.py [ledger|errors|kafka|wash]")
     try:
         urllib.request.urlopen(f"{RECEIVER}/healthz", timeout=3)
         target = "webhook-receiver (or Discord, if DISCORD_ALERT_WEBHOOK_URL is set: check the channel)"
@@ -262,6 +287,8 @@ def main() -> int:
         k = kafka_drill()
         results["KafkaAdminUsed"] = {"fire_s": k.get("admin_fire_s"), "notify_s": k.get("admin_notify_s")}
         results["KafkaAuthFailures"] = {"fire_s": k.get("auth_fire_s"), "notify_s": k.get("auth_notify_s")}
+    if "wash" in which:
+        results["WashTradingFlagged"] = wash_drill()
 
     print("\nalert             fired after   sent after   resolved after")
     ok = True

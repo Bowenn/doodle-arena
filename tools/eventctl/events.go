@@ -32,9 +32,10 @@ var topics = map[string]topic{
 	"market.sales.v1":    {"market.sales.v1", func() proto.Message { return &eventsv1.SaleEvent{} }, fieldKey("drawing_id")},
 	"market.wallet.v1":   {"market.wallet.v1", func() proto.Message { return &eventsv1.WalletEvent{} }, fieldKey("user_id")},
 	"notifier.dlq.v1":    {"notifier.dlq.v1", func() proto.Message { return &eventsv1.DeadLetterEvent{} }, fieldKey("endpoint_id")},
-	// Stage 6: live rooms (ADR 0017, ADR 0018).
+	// Stage 6: live rooms and analytics (ADR 0017, ADR 0018).
 	"live.guesses.v1":     {"live.guesses.v1", func() proto.Message { return &eventsv1.ViewerGuessEvent{} }, fieldKey("room_id")},
 	"live.top-guesses.v1": {"live.top-guesses.v1", func() proto.Message { return &eventsv1.TopGuessesEvent{} }, fieldKey("room_id")},
+	"analytics.flags.v1":  {"analytics.flags.v1", func() proto.Message { return &eventsv1.AnalyticsFlagEvent{} }, fieldKey("drawing_id")},
 }
 
 // eventOf returns the event inside a wrapper: the message in its single "event" oneof.

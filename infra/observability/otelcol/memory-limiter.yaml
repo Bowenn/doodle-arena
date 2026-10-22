@@ -8,6 +8,8 @@
 # The services' metrics pipeline also turns delta sums into cumulative ones, because Prometheus
 # drops deltas. Only Flink sends them (its OpenTelemetry reporter reports each counter's change
 # since the last report, ADR 0018); the other services' cumulative metrics pass through unchanged.
+# Flink's reporter also sets no deployment.environment, which every other service sends: the
+# collector adds its own (DEPLOYMENT_ENVIRONMENT, local or aws, in otel-lgtm's environment).
 processors:
   memory_limiter:
     check_interval: 1s
@@ -15,6 +17,12 @@ processors:
     spike_limit_mib: 256
   # Flink's counters: one stream per counter, operator and subtask, a few hundred. A restarted
   # job gets new ids and new streams; the old ones go stale and are dropped after max_stale.
+  transform/flink-environment:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["deployment.environment"], "${env:DEPLOYMENT_ENVIRONMENT}") where attributes["service.name"] == "analytics" and attributes["deployment.environment"] == nil
   delta_to_cumulative/services:
     max_stale: 10m
     max_streams: 5000
@@ -25,6 +33,6 @@ service:
     traces:
       processors: [memory_limiter, batch]
     metrics:
-      processors: [memory_limiter, delta_to_cumulative/services, batch]
+      processors: [memory_limiter, transform/flink-environment, delta_to_cumulative/services, batch]
     logs:
       processors: [memory_limiter, batch]

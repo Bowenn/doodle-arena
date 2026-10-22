@@ -194,6 +194,8 @@ services:
       # Where people open this Grafana: make aws-grafana's local port, not the host's 3000.
       # Grafana builds the Panel links in Discord alerts and its redirects from it.
       GF_SERVER_ROOT_URL: http://localhost:3300
+      # The environment the collector gives Flink's metrics (otelcol/memory-limiter.yaml).
+      DEPLOYMENT_ENVIRONMENT: aws
       DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:?}
       # Not the image's anonymous Admin: anonymous visitors (through the SSM tunnel) only view;
       # changes need the admin password from SSM (/doodle-arena/stack/grafana-admin-password).

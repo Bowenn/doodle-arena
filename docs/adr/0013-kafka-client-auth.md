@@ -56,6 +56,7 @@ With KRaft, the authorizer is `org.apache.kafka.metadata.authorizer.StandardAuth
 | `auth.users.v1` | `auth` | `notifier` | `notifier-auth` | 4 (ADR 0015) |
 | `live.guesses.v1` | `game-server` (relays) | `analytics` | `analytics` | 6 |
 | `live.top-guesses.v1` | `analytics` | `game-server` | one group per relay, or none (assigned partitions) | 6 |
+| `analytics.flags.v1` | `analytics` | humans (`dev-tools`) | none | 6 (ADR 0018) |
 
 Notes on the table:
 

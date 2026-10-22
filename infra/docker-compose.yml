@@ -313,6 +313,10 @@ services:
       KAFKA_BROKERS: kafka:9092
       KAFKA_USERNAME: analytics
       KAFKA_PASSWORD: ${KAFKA_ANALYTICS_PASSWORD:?}
+      # Where the job starts, read by the JobManager (ADR 0018): latest (the newest completed
+      # checkpoint in the bucket), none (empty: after a change no checkpoint can be restored
+      # into, docs/runbooks/analytics-down.md), or a checkpoint or savepoint path.
+      ANALYTICS_RESTORE: ${ANALYTICS_RESTORE:-latest}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: analytics-jobmanager
         parallelism.default: 1
@@ -1005,6 +1009,8 @@ services:
       ENABLE_LOGS_LOKI: ${OTEL_LGTM_COMPONENT_LOGS:-false}
       # Read by the Discord contact point (infra/observability/grafana/alerting/). Without a
       # Discord webhook in .env, alerts go to the webhook-receiver test service instead.
+      # The environment the collector gives Flink's metrics (otelcol/memory-limiter.yaml).
+      DEPLOYMENT_ENVIRONMENT: local
       DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:-http://webhook-receiver:9000/hooks/alerts}
       # The collector's memory limit, merged over the image's config (the file says why).
       OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml --config=file:/etc/doodle-arena/otelcol-browser.yaml

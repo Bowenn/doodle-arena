@@ -79,6 +79,12 @@ The details, as built in task 6.5:
   - Windows are 30 seconds long and slide every 2 seconds (a hopping window TVF), grouped by room and round, keeping the top 5 per window with `ROW_NUMBER`.
   - Each window's list becomes one `TopGuesses`, which replaces the room's previous one.
 - **Checkpoints.** Every 30 seconds to `s3://analytics-checkpoints`, through the Presto S3 filesystem: SeaweedFS with analytics' own S3 identity locally, S3 in AWS. The HashMap state backend is used.
+- **Wash trading** (task 6.5b, decided by Bowen on 2026-10-21):
+  - The job keeps, per drawing (keyed by `drawing_id`, the key of `market.sales.v1`), the sales of the last 7 days by event time (`completed_at`). Event-time timers drop each sale 7 days after it happened.
+  - One check covers both rules. A sale whose buyer sold this drawing within the last 7 days closes a loop. Two hops (A to B to A) is R1, three or more is R3.
+  - Each loop becomes one `WashTradeFlagged` on `analytics.flags.v1`, with a `flag_id` derived from the rule and the sale ids.
+- **Restarts keep the state.** Checkpoints are retained when the job stops, and the job has a fixed id. A new JobManager starts from the newest completed checkpoint in the bucket, so a container restart (or a new ECS task) keeps the 7-day history. Without that, a JobManager without high availability would start every job empty. ZooKeeper or Kubernetes HA would be another component to run. Replaying 7 days of sales would fire the alert again after each restart.
+- **Tested with real sales.** The end-to-end check creates its sales through the marketplace's own API: a drawing minted from a fake round, coins from a fake match's rewards, then listings and purchases. `dev-tools` gets no write grant on `market.sales.v1`, where a forged sale would reach the notifier's webhooks.
 
 ## Consequences
 
@@ -88,7 +94,7 @@ The details, as built in task 6.5:
   - `dev-tools` may also write `live.guesses.v1` locally, for `make analytics-check` and until the relays publish guesses (task 6.2).
 - **Memory.** About 1.8 GB more in the local stack (JobManager 768 MB, because the SQL planner runs there in application mode; TaskManager 1 GB; set by Flink's own `*.memory.process.size`). It runs only with `PROFILES=analytics make up`; CI's stack job turns it on.
 - **At-least-once.** A restart replays from the last checkpoint, so a window can be emitted twice. A `TopGuesses` replaces the last one, and a wash-trading flag will carry a deterministic id.
-- **Restarts without HA.** Flink restores a checkpoint when the job restarts inside a running JobManager (a failed task or TaskManager). A new JobManager has no high-availability store, so it starts the job fresh from the offsets committed to the group at the last checkpoint. Top guesses lose only their open windows. Wash trading's 7-day state needs more (task 6.5b): retained checkpoints and a start from the latest one.
+- **Restarts without HA.** Flink restores a checkpoint when the job restarts inside a running JobManager (a failed task or TaskManager). A new JobManager has no high-availability store, so on its own it would start the job fresh from the offsets committed to the group. Task 6.5b's entrypoint starts it from the newest retained checkpoint instead (see above). A checkpoint that can't be restored, for example after a change to the job's graph, needs a human: the runbook says how to start empty.
 - **Telemetry.**
   - Flink's own OpenTelemetry metric reporter sends job metrics (checkpoints, records, restarts) and the jobs' counters over OTLP.
   - Logs are JSON through log4j's JSON template layout.

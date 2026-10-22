@@ -4,10 +4,10 @@
 # --profile '*': down, ps and logs also reach the opt-in services (PROFILES on make up).
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env --profile '*'
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | lighthouse | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | lighthouse | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
@@ -42,6 +42,12 @@ pipeline-check:
 # The top-guesses Flink job end to end (ADR 0018); needs PROFILES=analytics make up.
 analytics-check:
 	@./scripts/analytics-check.sh
+
+# Wash trading end to end with real sales, across a restart of Flink (ADR 0018, task 6.5b). In a
+# worktree, set ENV_FILE and DRILL_JWT_KEY to the main checkout's.
+wash-check:
+	@PATH="$$HOME/.docker/bin:$$PATH" uv run --project services/auth --with confluent-kafka --with boto3 \
+		--with 'protobuf>=7.36.2,<8' python scripts/drills/wash_trading.py --restart
 
 # The broker refuses what each service must not do (ADR 0013).
 kafka-acl-check:
