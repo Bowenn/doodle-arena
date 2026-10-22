@@ -79,16 +79,14 @@ public final class ReadReplica implements DisposableBean {
 	}
 
 	/**
-	 * Whether the replica has replayed the primary's WAL up to {@code position} (a pg_lsn such as
-	 * {@code 0/16B3740}): then it holds everything committed before that position. A server that
-	 * isn't a standby has no replay position and has everything it wrote (tests use one).
+	 * The primary's WAL position the replica has replayed up to (a pg_lsn such as
+	 * {@code 0/16B3740}): it holds everything committed before it. A server that isn't a standby
+	 * has no replay position and holds everything it wrote (tests use one).
 	 */
-	public boolean replayedPast(String position) {
-		Boolean done = this.db.sql("SELECT COALESCE(pg_last_wal_replay_lsn(), pg_current_wal_lsn()) >= CAST(? AS pg_lsn)")
-			.param(position)
-			.query(Boolean.class)
+	public String replayed() {
+		return this.db.sql("SELECT CAST(COALESCE(pg_last_wal_replay_lsn(), pg_current_wal_lsn()) AS TEXT)")
+			.query(String.class)
 			.single();
-		return Boolean.TRUE.equals(done);
 	}
 
 	/**

@@ -1,6 +1,7 @@
 package com.doodlearena.marketplace.db;
 
 import java.net.URI;
+import java.time.Duration;
 
 import javax.sql.DataSource;
 
@@ -54,7 +55,11 @@ class ReadRoutingTests {
 	}
 
 	private String answeredBy(ReadReplica replica) {
-		return new ReadRouting(this.primary, replica, this.metrics).read((db) -> db.sql(WHO).query(String.class).single());
+		return answeredBy(new ReadRouting(this.primary, replica, this.metrics, Duration.ofSeconds(5)));
+	}
+
+	private static String answeredBy(ReadRouting routing) {
+		return routing.read((db) -> db.sql(WHO).query(String.class).single());
 	}
 
 	private static void requestWithPosition(String position) {
@@ -95,6 +100,26 @@ class ReadRoutingTests {
 		requestWithPosition(now);
 		assertThat(answeredBy(replica)).isEqualTo("marketplace-replica");
 		replica.destroy();
+	}
+
+	@Test
+	void aReplicaFurtherBehindThanMaxLagIsntRead() {
+		ReadReplica replica = replicaAt(null, 0);
+		requestWithPosition(null);
+		// A primary this far ahead: the replica hasn't replayed what the primary had max-lag ago.
+		StalenessFloor ahead = new StalenessFloor(Duration.ofSeconds(5), () -> "FFFFFFFF/FFFFFFFF", System::nanoTime);
+		assertThat(answeredBy(new ReadRouting(this.primary, replica, this.metrics, ahead)))
+			.isNotEqualTo("marketplace-replica");
+		replica.destroy();
+	}
+
+	@Test
+	void positionsCompareAsNumbers() {
+		assertThat(ReadRouting.lsn("0/16B3740")).isEqualTo(0x16B3740L);
+		assertThat(ReadRouting.lsn("1/0")).isEqualTo(1L << 32);
+		assertThat(Long.compareUnsigned(ReadRouting.lsn("9/0"), ReadRouting.lsn("10/0"))).isNegative();
+		assertThat(Long.compareUnsigned(ReadRouting.lsn("0/FFFFFFFF"), ReadRouting.lsn("FFFFFFFF/FFFFFFFF")))
+			.isNegative();
 	}
 
 	@Test

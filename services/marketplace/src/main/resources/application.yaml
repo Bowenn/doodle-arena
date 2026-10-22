@@ -90,6 +90,8 @@ app:
       port: ${DB_REPLICA_PORT:5432}
       # The da_rw_lsn cookie is Secure behind https (AWS).
       cookie-secure: ${DB_REPLICA_COOKIE_SECURE:false}
+      # A read needs the replica within this of the primary, else it reads the primary.
+      max-lag: 5s
   reconciliation:
     interval: 60s
     # The gauges stop reporting when the last successful run is older than this.
