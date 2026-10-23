@@ -99,5 +99,8 @@ def logging_config(service: str, version: str, level: str, otlp: bool = False) -
             "uvicorn": {"handlers": [], "propagate": True},
             "uvicorn.error": {"handlers": [], "propagate": True},
             "uvicorn.access": {"handlers": [], "propagate": True},
+            # The Elasticsearch client logs every request at INFO; the search span and the
+            # indexer's own log line already say what happened.
+            "elastic_transport": {"level": "WARNING"},
         },
     }
