@@ -240,3 +240,30 @@ Measured on the GCP dev box (e2-standard-8), 2026-10-23, after `make seed`: 300,
 | Everything, newest first | 300,011 | 40.7 ms | 53.6 ms | 44.8 ms | 58.6 ms |
 
 The read-back from Postgres costs about 5 ms. The slowest searches are the ones that score or sort the most documents (the seed uses only eight words, so one word matches 37,500 drawings); a real word list spreads them out. The indexer's 49 a second is plenty for live traffic, where an event follows a sale or a listing; a backfill that has to be faster would batch records (one transaction and one bulk request per poll) instead of one each.
+
+## 11. The gallery cache (task 6.7b)
+
+`make loadtest-gallery` on the GCP dev box (e2-standard-8), 2026-10-23, on the seeded data (300,000 approved drawings). The load mixes the gallery's first page (50%), its second or third page (20%), a Market lookup of 20 drawings (20%) and a drawing page (10%). The ids are a random sample of 2,000 seeded drawings, and a new drawing is approved every 2 seconds, so the gallery's generation moves 58 times in a run. k6 calls assets directly; assets runs two sync gunicorn workers (ADR 0024).
+
+At 150 requests a second, which both setups can serve, for 2 minutes (18,000 requests each, no failures):
+
+| | Cache off: p50 | p95 | p99 | Cache on: p50 | p95 | p99 |
+|---|---|---|---|---|---|---|
+| Gallery, first page | 9.7 ms | 253 ms | 534 ms | 4.7 ms | 16.7 ms | 228 ms |
+| Gallery, next page | 10.0 ms | 168 ms | 526 ms | 9.4 ms | 20.3 ms | 100 ms |
+| Market lookup (20 ids) | 11.0 ms | 199 ms | 547 ms | 5.1 ms | 18.8 ms | 204 ms |
+| Drawing page | 8.9 ms | 241 ms | 535 ms | 3.9 ms | 17.1 ms | 227 ms |
+
+- **Postgres reads:** assets' routed reads (`assets.db.reads`) fell from 17,508 to 2,834 in the run, from about 0.97 to 0.16 a request. Postgres's own count of rows read for the database, which includes the pipeline's and the indexer's background work, fell from 1.43 million to 0.88 million.
+- **Hit ratios:** drawing entries 99.7% (69,490 hits, 205 misses). Gallery pages 77.6%: most misses are a next page whose cursor came from a generation an approval had just replaced, and they read Postgres. 16 requests waited for another request's fill, and none timed out.
+- **Memory:** 5,903 drawing entries of about 600 bytes (about 3.5 MB) and 52 pages; Redis used 7 MB in all.
+
+The ceiling:
+
+| Offered | Cache off | Cache on |
+|---|---|---|
+| 200 a second | 186 served, p50 1.95 s (queued for the two workers), 1,317 iterations dropped | 199.5 served, p50 4–10 ms, p95 180–295 ms, 54 dropped; a second run at the edge served 183 |
+| 300 a second | — | 287 served, p50 570 ms |
+| 400 a second | — | 214 served, overloaded |
+
+The cache moved the ceiling from about 186 to about 290 requests a second. More importantly, it took Postgres out of the path: what's left is CPU in assets' two workers, about 7 ms per cached request (179% CPU at 300 a second). That is the OpenTelemetry instrumentation, verifying the JWT and building JSON; locally, without telemetry, a cached request takes 1.8 ms, mostly waiting on Redis. More workers (`WEB_CONCURRENCY`) or instances now scale the gallery, because the shared stores are no longer the limit.
