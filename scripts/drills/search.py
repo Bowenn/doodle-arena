@@ -193,8 +193,11 @@ def main() -> int:
     check(status == 200, f"{words[1]} sold")
 
     print("==> search follows the listing and the sale")
-    listed = wait("search to show one listing", 60, lambda: (
-        r if [d["word"] for d in (r := search(token[buyer], q=stem, listed="true"))["drawings"]] == [words[0]] else None))
+    def only_first_listed() -> dict[str, Any] | None:
+        r = search(token[buyer], q=stem, listed="true")
+        return r if [d["word"] for d in r["drawings"]] == [words[0]] else None
+
+    listed = wait("search to show one listing", 60, only_first_listed)
     check(listed["drawings"][0]["listing"]["price"] == 15, "the listed one carries its price; the sold one isn't listed")
     check([d["word"] for d in search(token[buyer], q=stem, min_price=10, max_price=16)["drawings"]] == [words[0]],
           "a price range finds it")
