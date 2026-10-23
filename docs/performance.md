@@ -208,4 +208,12 @@ Many buyers racing for few editions at the same second (ADR 0022). The criterion
 | The same burst through the Redis gate | 58 ms for all 300 | 20 | 20 |
 | Through a Postgres-only counter (every buyer locks the drop's row, then counts) | 125 ms for all 300 | 20 | 20 |
 
-The flash sale at scale (`make loadtest-drops`: 1,000 seeded buyers for 100 editions on the dev box) is task 6.8b.
+The flash sale at scale (`make loadtest-drops`, task 6.8b) on the GCP dev box (e2-standard-8): 1,000 seeded buyers join the waiting room before the open, then all try to buy within 200 ms of it; 100 editions.
+
+| Run | Requests | Sold | p50 | p95 | p99 |
+|---|---|---|---|---|---|
+| Before the fix (not-admitted buyers retried until their turn, though sold out) | 9,726 | exactly 100 | 87 ms | 1.08 s | 1.69 s |
+| Sold out answered first, the JVM just rebuilt | 3,087 | exactly 100 | 989 ms | 2.14 s | 2.34 s |
+| The same, warm JVM | 3,596 | exactly 100 | 128 ms | 1.23 s | 1.45 s |
+
+Every run: 100 editions to 100 distinct buyers, 100 purchases charged, 1,000 coins to the authors, the ledger at 0, checked in Postgres. The tail is the burst itself: 1,000 requests inside 200 ms at one 1 GB marketplace, absorbed in about a second. More marketplace instances or a bigger one would shorten it; the inventory isn't the limit (the gate's scripts take well under a millisecond).

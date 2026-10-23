@@ -487,7 +487,10 @@ public class DropService {
 		}
 		catch (DropsUnavailableException ex) {
 			this.metrics.dropRequest("unavailable");
-			log.atWarn().addKeyValue("error", ex.getMessage()).log("drops unavailable");
+			log.atWarn()
+				.addKeyValue("error", ex.getMessage())
+				.addKeyValue("cause", String.valueOf(ex.getCause()))
+				.log("drops unavailable");
 			throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "DROPS_UNAVAILABLE",
 					"drops are unavailable right now: try again shortly");
 		}

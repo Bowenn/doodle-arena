@@ -176,7 +176,9 @@ class DropApiTests extends DropTestSupport {
 		AccountRef rich = this.fixtures.newUserWith(100);
 		join(rich, drop);
 		buy(rich, drop, key()).andExpect(status().isCreated()).andExpect(jsonPath("$.edition_no").value(1));
-		buy(this.fixtures.newUserWith(100), drop, key()).andExpect(status().isForbidden());
+		// Sold out is told before anything else, even to someone who never joined.
+		buy(this.fixtures.newUserWith(100), drop, key()).andExpect(status().isConflict())
+			.andExpect(jsonPath("$.error.code").value("SOLD_OUT"));
 		AccountRef late = this.fixtures.newUserWith(100);
 		join(late, drop);
 		buy(late, drop, key()).andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("SOLD_OUT"));

@@ -203,6 +203,10 @@ function describe(t: Transaction): string {
       return 'Tips for your drawing'
     case 'tip_refund':
       return 'Tip returned'
+    case 'drop_purchase':
+      return 'Bought a drop edition'
+    case 'drop_settlement':
+      return 'Drop sales of your drawing'
     default:
       return t.type
   }

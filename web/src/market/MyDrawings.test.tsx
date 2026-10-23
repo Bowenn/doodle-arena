@@ -80,4 +80,17 @@ describe('MyDrawings', () => {
     render(<MyDrawings onOpen={() => {}} />)
     expect(await screen.findByText(/You don't own any drawings yet/)).toBeTruthy()
   })
+
+  it('lists the editions bought in drops', async () => {
+    serve({
+      'GET /api/market/editions?owner=me&limit=50': () =>
+        json(200, {
+          editions: [{ drop_id: 'd1', drawing_id: D2, edition_no: 4, editions: 10, price: 25, purchased_at: '' }],
+        }),
+      [`GET /api/assets/drawings?ids=${D2}`]: () => json(200, { drawings: [drawing(D2, 'dog')], next_cursor: null }),
+    })
+    render(<MyDrawings onOpen={() => {}} />)
+
+    expect(await screen.findByText('Edition #4 of 10 · 25 coins')).toBeTruthy()
+  })
 })

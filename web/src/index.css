@@ -471,3 +471,29 @@ table.ledger td.debit {
 .market-card .drawing-card {
   align-self: stretch;
 }
+
+/* Limited drops (ADR 0022): a card's price, countdown and action; the admins' form. */
+.drop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.create-drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.create-drop h2 {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.create-drop label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}

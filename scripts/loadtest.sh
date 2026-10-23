@@ -9,6 +9,9 @@
 #   scripts/loadtest.sh tips            200 seeded users tipping one round, 300 tips a second for
 #                                       a minute, then its settlement (task 6.3, loadtest/tips.js;
 #                                       make loadtest-tips; needs make seed; local only)
+#   scripts/loadtest.sh drops           a flash sale: 1,000 seeded buyers for 100 editions of one
+#                                       drop, then Postgres checked for overselling (task 6.8b,
+#                                       loadtest/drops.js; make loadtest-drops; needs make seed)
 #   GATEWAY=https://icanfly.click scripts/loadtest.sh
 # It mints four access tokens per room (and, for live, one per viewer VU) with auth's own
 # TokenIssuer (mint_tokens.py): the local
@@ -72,6 +75,79 @@ if [[ "$profile" == tips ]]; then
     python scripts/drills/tips.py settle "$MATCH_ID" "$drawer"
   exit "$status"
 fi
+if [[ "$profile" == drops ]]; then
+  if [[ "$GATEWAY" != http://localhost:8080 ]]; then
+    echo "The drops load test runs locally: k6 calls the marketplace on the stack's network." >&2
+    exit 2
+  fi
+  buyers="${BUYERS:-1000}" editions="${EDITIONS:-100}" price="${PRICE:-10}"
+  psql_market() {
+    docker compose -f infra/docker-compose.yml --env-file "${ENV_FILE:-.env}" exec -T postgres \
+      psql -X -U marketplace -d marketplace -v ON_ERROR_STOP=1 -tAc "$1"
+  }
+  # A minted drawing with authors, and seeded buyers who can pay and didn't draw it (make seed).
+  drawing="$(psql_market "SELECT o.drawing_id FROM ownership o WHERE EXISTS (SELECT 1 FROM drawing_authors a
+    WHERE a.drawing_id = o.drawing_id) ORDER BY o.minted_at DESC LIMIT 1")"
+  ids="$(psql_market "SELECT a.owner_id FROM accounts a JOIN balances b USING (account_id)
+    WHERE a.owner_type = 'user' AND a.owner_id LIKE 'seed-u-%' AND b.balance >= $price
+      AND a.owner_id NOT IN (SELECT user_id FROM drawing_authors WHERE drawing_id = '$drawing')
+    ORDER BY b.balance DESC LIMIT $buyers")"
+  if [[ -z "$drawing" || -z "$ids" ]]; then
+    echo "No seeded data: run make seed first." >&2
+    exit 1
+  fi
+  # An admin creates the drop through the gateway, opening 35 s from now (30 s is the minimum).
+  read -r DROP_ID OPENS_AT < <(uv run -q --project services/auth python - "$drawing" "$editions" "$price" <<'PY'
+import json, os, sys, urllib.request, uuid
+from datetime import UTC, datetime, timedelta
+sys.path.insert(0, "services/auth")
+from app.tokens import SigningKey, TokenIssuer
+gw = os.environ["GATEWAY"]
+key = SigningKey.load(os.environ.get("DRILL_JWT_PEM", ""), os.environ.get("DRILL_JWT_KEY") or "secrets/jwt-private.pem")
+admin = TokenIssuer(key, gw + "/api/auth", timedelta(minutes=10)).issue("u_load_admin", ["player", "admin"], datetime.now(UTC), name="load")[0]
+opens = datetime.now(UTC) + timedelta(seconds=35)
+body = {"drawing_id": sys.argv[1], "editions": int(sys.argv[2]), "price": int(sys.argv[3]),
+        "opens_at": opens.isoformat().replace("+00:00", "Z"), "duration_minutes": 10}
+req = urllib.request.Request(gw + "/api/market/drops", method="POST", data=json.dumps(body).encode())
+for k, v in {"Authorization": "Bearer " + admin, "Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())}.items():
+    req.add_header(k, v)
+with urllib.request.urlopen(req, timeout=10) as resp:
+    print(json.load(resp)["drop_id"], int(opens.timestamp() * 1000))
+PY
+)
+  export DROP_ID OPENS_AT EDITIONS="$editions"
+  env_args=(-e DROP_ID -e OPENS_AT -e EDITIONS)
+  # 100 tokens per variable, as for tips (one environment string may not exceed 128 KB).
+  chunk=0
+  while read -r batch; do
+    # shellcheck disable=SC2086 # one id per word
+    export "TOKENS_$chunk=$(uv run -q --project services/auth python scripts/drills/mint_tokens.py --ids $batch)"
+    env_args+=(-e "TOKENS_$chunk")
+    chunk=$((chunk + 1))
+  done < <(echo "$ids" | xargs -n 100)
+  echo "==> k6 drops: $(echo "$ids" | wc -l | tr -d ' ') buyers for $editions editions at $price coins, drop $DROP_ID"
+  status=0
+  docker run --rm --network doodle-arena_default -v "$PWD/loadtest:/loadtest:ro" --ulimit nofile=65535:65535 \
+    "${env_args[@]}" grafana/k6:2.3.0 run /loadtest/drops.js || status=$?
+  echo "==> Postgres, the truth: editions, buyers charged, the authors paid, the ledger"
+  for _ in $(seq 1 30); do
+    [[ "$(psql_market "SELECT settled_at IS NOT NULL FROM drops WHERE drop_id = '$DROP_ID'")" == t ]] && break
+    sleep 2
+  done
+  sold="$(psql_market "SELECT COUNT(*) || ' ' || COUNT(DISTINCT buyer_id) FROM drop_editions WHERE drop_id = '$DROP_ID'")"
+  charged="$(psql_market "SELECT COUNT(*) FROM ledger_transactions WHERE type = 'drop_purchase'
+    AND metadata->>'drop_id' = '$DROP_ID'")"
+  authors="$(psql_market "SELECT COALESCE(SUM(e.amount), 0) FROM ledger_entries e JOIN ledger_transactions t USING (tx_id)
+    WHERE t.type = 'drop_settlement' AND t.metadata->>'drop_id' = '$DROP_ID' AND e.amount > 0")"
+  imbalance="$(psql_market "SELECT COALESCE(SUM(amount), 0) FROM ledger_entries")"
+  echo "    editions sold and buyers: $sold (of $editions); purchases charged: $charged; paid to the authors: $authors coins; ledger sum: $imbalance"
+  if [[ "$sold" != "$editions $editions" || "$charged" != "$editions" || "$authors" != "$((editions * price))" || "$imbalance" != 0 ]]; then
+    echo "FAIL: oversold, undersold or unbalanced" >&2
+    exit 1
+  fi
+  echo "no overselling: exactly $editions editions to $editions buyers, $((editions * price)) coins to the authors, the ledger at 0"
+  exit "$status"
+fi
 case "$profile" in
   smoke) rooms=2 ;;
   full) rooms=80 ;;
@@ -79,7 +155,7 @@ case "$profile" in
     rooms=1 script=loadtest/live.js
     viewer_tokens="${VIEWER_VUS:-50}"
     ;;
-  *) echo "usage: $0 [full|smoke|live|live-smoke|tips]" >&2; exit 2 ;;
+  *) echo "usage: $0 [full|smoke|live|live-smoke|tips|drops]" >&2; exit 2 ;;
 esac
 
 if [[ "$GATEWAY" == https://* && -z "${DRILL_JWT_PEM:-}" ]]; then
