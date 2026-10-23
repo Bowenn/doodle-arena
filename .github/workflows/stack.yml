@@ -105,6 +105,10 @@ jobs:
       - name: make drops-check (limited drops, no overselling)
         if: env.FULL_STACK == 'true'
         run: make drops-check
+      # Drawings minted, listed and sold, found through the indexer, and a rebuild (ADR 0023).
+      - name: make search-check (search follows drawings, listings and sales)
+        if: env.FULL_STACK == 'true'
+        run: make search-check
       # The load test's script must keep working: two rooms for a minute, thresholds included.
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
         if: env.FULL_STACK == 'true'
