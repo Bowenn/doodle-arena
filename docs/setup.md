@@ -155,13 +155,112 @@ Two things that silently lose the webhook:
 
 Only test keys belong in `.env`; never commit it.
 
-## 4. Working as two people
+## 4. Remote dev box (GCP)
+
+The whole stack with both profiles needs about 9 GB in Docker's VM, and Testcontainers, Gradle and k6 need more on top, which a 16 GB Mac can't spare. A Google Compute Engine VM runs the full stack instead: the Mac runs single-service tests (`make test s=<svc>`), the VM runs `make up` and the end-to-end checks, CI is the gate, and AWS is kept for measurements. The VM is a development tool, not part of the system: no deployed component runs on GCP, and ADR 0003 is unchanged.
+
+Set up once (2026-10-22), on a GCP free trial ($300 credit for 90 days):
+
+- **Project:** `doodle-devbox-7k3q` ("Doodle Arena devbox"), on the trial's billing account, with the Compute Engine, IAP and Billing Budgets APIs. Everything below lives in it, so deleting the project removes all of it.
+- **Network:** a custom VPC `devbox-net` (subnet `devbox-subnet`, 10.10.0.0/24, us-west1) whose only ingress rule, `devbox-allow-iap-ssh`, allows tcp:22 from IAP's range 35.235.240.0/20. Nothing listens on the internet: SSH goes through Identity-Aware Proxy, and every other port is reached through SSH forwarding. The project's `default` network, which allows SSH from anywhere, is unused.
+- **VM:** `devbox` in us-west1-b, e2-standard-8 (8 vCPU, 32 GB, x86), 100 GB balanced persistent disk, Debian 13 (not Ubuntu 24.04: MongoDB 8.0 refuses kernels 6.19 to 7.0.13, and Debian 13 stays on 6.12), Shielded VM. OS Login ties SSH to your Google account. It has no service account, so nothing on it can call a GCP API. Its ephemeral external IP is for outgoing traffic only (image pulls, GitHub); Cloud NAT would avoid it at more cost.
+- **Nightly stop:** the instance schedule `devbox-nightly-stop` stops the VM at 02:00 America/Los_Angeles. It never starts it. The Compute Engine service agent (`service-<project number>@compute-system.iam.gserviceaccount.com`) has `roles/compute.instanceAdmin.v1` on the project; without it the schedule silently fails to stop anything.
+- **Budget:** "Trial credit" on the billing account, $300 with email alerts at $50, $150 and $250, credits excluded (by default a budget counts spend after credits, which reads $0 for the whole trial).
+- **Toolchains:** `scripts/devbox/setup.sh`, run on the VM, installs Docker Engine with the compose plugin, Go (and gcc, which `-race` needs), Temurin 25 and 21, Node, uv, k6, buf and the Stripe CLI at the versions of section 2. It is safe to run again; it bumps a tool when its pinned version in the script changes.
+- **Measured (2026-10-22):** the first `PROFILES=live,analytics make up` (every image built, nothing cached) took 9.5 minutes, and the running stack used about 6 GB of the 32. `make smoke`, `alerts-check`, `pipeline-check`, `tips-check` and `loadtest-live-smoke` passed, and `make test` took about 15 minutes with the stack running.
+- **GitHub:** a read-only deploy key, "GCP devbox (read-only)", whose private key exists only on the VM (`~/.ssh/github_deploy`). The VM can pull but not push, so branches always start on the Mac. No AWS credentials are on the VM.
+
+### Connect
+
+Add this to `~/.ssh/config` on the Mac, so `ssh devbox` works, port forwarding included, and Claude Desktop can use it:
+
+```text
+Host devbox
+  HostName devbox
+  User <os-login-user>
+  IdentityFile ~/.ssh/google_compute_engine
+  IdentitiesOnly yes
+  HostKeyAlias compute.1079351625546926221
+  UserKnownHostsFile ~/.ssh/google_compute_known_hosts
+  ProxyCommand /opt/homebrew/bin/gcloud compute start-iap-tunnel %h 22 --listen-on-stdin --project=doodle-devbox-7k3q --zone=us-west1-b --verbosity=error
+  ServerAliveInterval 30
+```
+
+`User` is your OS Login user name (`gcloud compute os-login describe-profile --format='value(posixAccounts[0].username)'`); `HostKeyAlias` is the instance's id, under which the first `gcloud compute ssh devbox --tunnel-through-iap` stored the host key, and `~/.ssh/google_compute_engine` is the key that call created and registered with OS Login. A recreated VM has a new id: run `gcloud compute ssh` once, then update the alias. The `ProxyCommand` names gcloud by its full path because Claude Desktop doesn't see your shell's `PATH`.
+
+Start, stop and connect (gcloud's default project and zone are set with `gcloud config set project doodle-devbox-7k3q` and `gcloud config set compute/zone us-west1-b`):
+
+```bash
+gcloud compute instances start devbox
+```
+
+```bash
+ssh devbox
+```
+
+```bash
+ssh -N -L 8080:localhost:8080 -L 3000:localhost:3000 devbox
+```
+
+```bash
+gcloud compute instances stop devbox
+```
+
+The forward makes the VM's gateway `http://localhost:8080` and Grafana `http://localhost:3000` on the Mac, so the Mac's own stack must be down (`make down`) while it runs; use other local ports (`-L 18080:localhost:8080`) to keep both, but Google sign-in's redirect URI is exactly `http://localhost:8080`. Add `-L 9000:localhost:9000` for `webhook-receiver` or `-L 8081:localhost:8081` for Flink. A stopped VM keeps its disk, Docker volumes included; only a few services restart on their own after a start, so run `PROFILES=live,analytics make up` again (it rebuilds nothing that hasn't changed).
+
+### Daily workflow
+
+1. On the Mac: commit and push the branch (`git push -u origin <branch>`).
+2. On the VM: `cd ~/doodle-arena && git fetch && git switch <branch> && git pull`, then rebuild only what changed: `docker compose -f infra/docker-compose.yml --env-file .env up -d --build <service>` (or `make up` after a change to compose or several services).
+3. Run the checks there (`make smoke`, `make pipeline-check`, `make test s=<svc>` for a Testcontainers suite that's too big for the Mac). The VM is the main checkout, so the worktree variables (`ENV_FILE`, `DRILL_JWT_KEY`) aren't needed.
+4. Open a PR from the Mac; CI is the gate.
+
+### Claude Code on the VM
+
+Claude Desktop can run a Code session on the VM over SSH: in the environment selector under the prompt box, New environment, SSH, Add SSH connection, with SSH host `devbox` (the alias above; leave the key empty, the config names it) and the folder `/home/<os-login-user>/doodle-arena`. Desktop installs Claude Code under `~/.claude/remote/` on first connect. The VM is reached only while it runs, the browser pane doesn't work over SSH, and ports aren't forwarded for you (run the `ssh -N -L …` above). Sessions there can't push (read-only deploy key): commit on the VM, then bring the commits to the Mac (`git fetch devbox` with the VM as a remote, `ssh://devbox/home/<os-login-user>/doodle-arena`) and push from there.
+
+### Secrets on the VM
+
+`make up` writes the VM's own `.env` with random local passwords and its own signing keys; nothing is copied from the Mac. Stripe test keys go in by hand, typed on the VM (section 3, "Stripe"), with the listener running there too: `stripe listen --api-key "$(grep '^STRIPE_SECRET_KEY=' .env | cut -d= -f2-)" --events checkout.session.completed,checkout.session.async_payment_succeeded --forward-to localhost:8080/api/market/stripe/webhook`. Google sign-in needs `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` the same way (the forwarded `localhost:8080` matches the OAuth client's redirect URI); without them, use `scripts/drills/mint_tokens.py`. There is no Discord webhook: alerts go to `webhook-receiver`.
+
+### Costs and trial limits
+
+- e2-standard-8 costs about $0.27 an hour while running (E2 gets no sustained-use discount), the 100 GB disk about $10 a month whether running or not, and the external IP $0.005 an hour while running. Eight hours a day is about $75 a month; the $300 credit then lasts until the trial ends, at ten or more hours a day it runs out shortly before. `gcloud billing budgets list --billing-account=<id>` and the console's Billing page show what's used.
+- The trial allows 12 vCPUs across all regions at a time (`CPUS_ALL_REGIONS`), so a second VM this size doesn't fit. Billing never starts unless the account is upgraded; when the trial ends, resources stop and are deleted about 30 days later.
+- A Spot VM would cost about a third, but GCP can stop it at any time; it isn't used.
+
+### Recreate or tear down
+
+Recreating it from nothing (after `gcloud auth login`; the project id must be new, and project ids are global):
+
+```bash
+gcloud projects create doodle-devbox-<suffix> --name="Doodle Arena devbox"
+gcloud billing projects link doodle-devbox-<suffix> --billing-account=<billing account id>
+gcloud services enable compute.googleapis.com iap.googleapis.com billingbudgets.googleapis.com
+gcloud compute networks create devbox-net --subnet-mode=custom
+gcloud compute networks subnets create devbox-subnet --network=devbox-net --region=us-west1 --range=10.10.0.0/24
+gcloud compute firewall-rules create devbox-allow-iap-ssh --network=devbox-net --direction=INGRESS --action=allow --rules=tcp:22 --source-ranges=35.235.240.0/20
+gcloud compute instances create devbox --zone=us-west1-b --machine-type=e2-standard-8 --subnet=devbox-subnet \
+  --image-family=debian-13 --image-project=debian-cloud --boot-disk-size=100GB --boot-disk-type=pd-balanced \
+  --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring --metadata=enable-oslogin=TRUE --no-service-account --no-scopes
+gcloud compute resource-policies create instance-schedule devbox-nightly-stop --region=us-west1 --vm-stop-schedule="0 2 * * *" --timezone=America/Los_Angeles
+gcloud projects add-iam-policy-binding doodle-devbox-<suffix> --member=serviceAccount:service-<project number>@compute-system.iam.gserviceaccount.com --role=roles/compute.instanceAdmin.v1 --condition=None
+gcloud compute instances add-resource-policies devbox --zone=us-west1-b --resource-policies=devbox-nightly-stop
+gcloud billing budgets create --billing-account=<billing account id> --billing-project=doodle-devbox-<suffix> --display-name="Trial credit" --budget-amount=300USD \
+  --threshold-rule=percent=0.1667 --threshold-rule=percent=0.5 --threshold-rule=percent=0.8334 --credit-types-treatment=exclude-all-credits
+```
+
+Then copy `scripts/devbox/setup.sh` over (`gcloud compute scp scripts/devbox/setup.sh devbox:~ --tunnel-through-iap`) and run it; create a deploy key on the VM (`ssh-keygen -t ed25519 -f ~/.ssh/github_deploy`, `IdentityFile` for `github.com` in its `~/.ssh/config`), add it read-only (`gh repo deploy-key add <file.pub> --repo Bowenn/gap-project_private --title "GCP devbox (read-only)"`), clone the repo into `~/doodle-arena` and run `make up`. That `make up` leaves an empty, root-owned `web/node_modules` (the web container's volume mount point; Docker Desktop doesn't do this), so give it to yourself once before `make test`: `sudo chown $USER web/node_modules`.
+
+Tearing it down: `gcloud projects delete doodle-devbox-7k3q` removes the VM, its disk and everything else in the project (recoverable for 30 days, and billing stops at once). Then delete the deploy key (`gh repo deploy-key list --repo Bowenn/gap-project_private`, then `gh repo deploy-key delete <id> --repo Bowenn/gap-project_private`), the budget (`gcloud billing budgets delete`, it lives on the billing account), and the `devbox` entry in `~/.ssh/config`.
+
+## 5. Working as two people
 
 - Each person works on their own track (see `docs/roadmap.md`) in their own branches.
 - Pull `master` (the default branch) before starting a task. Merge through pull requests, and have the other person review changes to `proto/` and anything on a critical path.
 - When you run several Claude Code sessions on one machine, give each its own git worktree so their changes don't collide.
 
-## 5. Personal Claude Code preferences
+## 6. Personal Claude Code preferences
 
 Preferences that only apply to you belong in your own `~/.claude/CLAUDE.md`, not in the shared project file. For example:
 
