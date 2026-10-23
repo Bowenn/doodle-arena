@@ -39,6 +39,22 @@ public enum CreditReason
    * <code>CREDIT_REASON_REWARD = 2;</code>
    */
   CREDIT_REASON_REWARD(2),
+  /**
+   * <pre>
+   * Tips to the drawers of a round, paid when the round finished (ADR 0021).
+   * </pre>
+   *
+   * <code>CREDIT_REASON_TIP = 3;</code>
+   */
+  CREDIT_REASON_TIP(3),
+  /**
+   * <pre>
+   * A tip given back to its tipper: its round never finished, or the tipper drew it (ADR 0021).
+   * </pre>
+   *
+   * <code>CREDIT_REASON_TIP_REFUND = 4;</code>
+   */
+  CREDIT_REASON_TIP_REFUND(4),
   UNRECOGNIZED(-1),
   ;
 
@@ -75,6 +91,22 @@ public enum CreditReason
    * <code>CREDIT_REASON_REWARD = 2;</code>
    */
   public static final int CREDIT_REASON_REWARD_VALUE = 2;
+  /**
+   * <pre>
+   * Tips to the drawers of a round, paid when the round finished (ADR 0021).
+   * </pre>
+   *
+   * <code>CREDIT_REASON_TIP = 3;</code>
+   */
+  public static final int CREDIT_REASON_TIP_VALUE = 3;
+  /**
+   * <pre>
+   * A tip given back to its tipper: its round never finished, or the tipper drew it (ADR 0021).
+   * </pre>
+   *
+   * <code>CREDIT_REASON_TIP_REFUND = 4;</code>
+   */
+  public static final int CREDIT_REASON_TIP_REFUND_VALUE = 4;
 
 
   public final int getNumber() {
@@ -104,6 +136,8 @@ public enum CreditReason
       case 0: return CREDIT_REASON_UNSPECIFIED;
       case 1: return CREDIT_REASON_STRIPE_PURCHASE;
       case 2: return CREDIT_REASON_REWARD;
+      case 3: return CREDIT_REASON_TIP;
+      case 4: return CREDIT_REASON_TIP_REFUND;
       default: return null;
     }
   }

@@ -188,6 +188,7 @@ Owns the Postgres database `marketplace`.
 - Consumes `DrawingApproved` (creates the first ownership record) and `MatchFinished` (pays rewards).
 - Publishes through a transactional outbox: `SaleCompleted`, `ListingCreated`, `ListingCancelled` and `CoinsCredited`.
 - Runs a reconciliation job every minute that checks the ledger and ownership invariants and exports them as metrics.
+- Takes viewers' tips into a sharded escrow and pays them to a round's drawers when its `RoundFinished` arrives (consumer of `game.rounds.v1`, ADR 0021, task 6.3; section 7.13).
 - Reads its browsing endpoints (listings, ownership history, owned drawings, wallet entries) from a read replica, with read-your-writes by WAL position (ADR 0020, task 6.6); writes and every read inside a transaction use the primary.
 - Verifies access tokens itself (ADR 0001) with Spring Security's resource server; SQL is written by hand through `JdbcClient` and migrated by Flyway at startup.
 - Consumes `assets.drawings.v1` with Spring for Apache Kafka in the consumer group `marketplace` (task 4.2). An offset is committed only after its record's transaction committed. A record it can't read (undecodable, an unset or unknown event) or an event that breaks its contract (`drawing_id` not a UUID; no authors, or a blank or repeated one; `initial_owner_id` not the first author) is logged, counted and committed; anything else, such as Postgres being down, is retried on the same record (1 s doubling to 30 s, no limit), so the partition waits instead of skipping a mint. A new group starts at the earliest offset, so every drawing already approved is minted.
@@ -327,7 +328,7 @@ Every message on a topic is that topic's wrapper message: one `oneof event` with
 
 | Topic | Wrapper | Events | Producer | Consumers | Key | Stage |
 |---|---|---|---|---|---|---|
-| `game.rounds.v1` | `RoundEvent` | `RoundFinished` | game-server | assets | `room_id` | 2 |
+| `game.rounds.v1` | `RoundEvent` | `RoundFinished` | game-server | assets, marketplace (tips, ADR 0021) | `room_id` | 2 |
 | `game.matches.v1` | `MatchEvent` | `MatchFinished` | game-server | marketplace, lobby | `room_id` | 2 |
 | `assets.drawings.v1` | `DrawingEvent` | `DrawingApproved`, `DrawingRejected` | assets | marketplace | `drawing_id` | 3 |
 | `market.listings.v1` | `ListingEvent` | `ListingCreated`, `ListingCancelled` | marketplace (outbox) | assets (search, Stage 6) | `drawing_id` | 4 |
@@ -345,7 +346,7 @@ Key payload fields:
 - `MatchFinished`: `match_id`, `room_id`, `mode`, `started_at`, `ended_at`, `results[]` with `user_id`, `score` and `placement`.
 - `DrawingApproved`: `drawing_id`, `match_id`, `round_no`, `author_ids`, `initial_owner_id`, `sha256`, `image_key`, `thumb_key`.
 - `SaleCompleted`: `sale_id`, `listing_id`, `drawing_id`, `seller_id`, `buyer_id`, `price`, `royalties[]` with `user_id` and `amount`, `completed_at`.
-- `CoinsCredited`: `user_id`, `amount`, `reason` (`stripe_purchase` or `reward`), `reference`.
+- `CoinsCredited`: `user_id`, `amount`, `reason` (`stripe_purchase`, `reward`, `tip` or `tip_refund`, ADR 0021), `reference` (the session id, the match id, `<match_id>:<round_no>` for tips, the tip id for a refund).
 - `ViewerGuess`: `room_id`, `round_no`, `text` (normalized as in section 6.4), `guessed_at` (the event time). Only wrong guesses are published: the top guesses are shown to every viewer.
 - `TopGuesses`: `room_id`, `round_no`, `window_end`, `guesses[]` with `text` and `count`, most common first.
 - `WashTradeFlagged`: `flag_id` (derived from the rule and the sales), `rule` (`ROUND_TRIP` or `CYCLE`), `drawing_id`, `account_ids` (the loop in order, the first account repeated at the end), `sale_ids`, `first_sale_at`, `last_sale_at`, `volume` (coins paid across the loop).
@@ -398,6 +399,7 @@ Marketplace:
 - `GET /api/market/drawings?owner=me&limit=<1..50>&cursor=` returns `{drawings: [{drawing_id, version, minted_at, updated_at, listing: {listing_id, price, created_at} | null}], next_cursor}`: the caller's drawings, most recently acquired first (keyset on `updated_at, drawing_id`; limit 20 by default), each with its active listing. Only `owner=me`: anything else, a bad `limit` or a bad `cursor` is `400 INVALID_REQUEST`. Who owns a drawing is public one drawing at a time (its history), not as a list per player.
 - `GET /api/market/coin-packs` returns `{packs: [{pack_id, coins, price_cents, currency}]}`: `small` (100 coins, $0.99), `medium` (550, $4.99), `large` (1,200, $9.99), from config.
 - `POST /api/market/coin-packs/{id}/checkout` (requires `Idempotency-Key`, no body) returns `200 {session_id, checkout_url}`: the browser goes to `checkout_url` and comes back to `/wallet?checkout=success&session_id=…` or `/wallet?checkout=cancelled`. `404 COIN_PACK_NOT_FOUND`, `502 STRIPE_UNAVAILABLE` when Stripe fails, `503 STRIPE_NOT_CONFIGURED` without a Stripe key.
+- `POST /api/market/tips` takes `{room_id, match_id, round_no, amount}` (requires `Idempotency-Key`) and returns `201 {tip_id, room_id, match_id, round_no, amount, status, created_at}` with `status` `PENDING` (ADR 0021): the coins left the caller's wallet and wait in escrow for the round's end. `amount` is a JSON integer from 1 to 1,000 coins; anything else, a missing id or `round_no` below 1 is `400 INVALID_REQUEST`. `422 INSUFFICIENT_FUNDS`; `409 ROUND_OVER` once the round was settled more than 30 seconds ago. Who gets the tip is decided by the round's `RoundFinished`, not by the request.
 - `POST /api/market/stripe/webhook` (no JWT; verified by the `Stripe-Signature` header) returns `200 {received, result}` with `result` one of `processed`, `duplicate`, `ignored`, `unknown_session`; `400 INVALID_SIGNATURE` for a missing, wrong or more than 5-minute-old signature; `503 STRIPE_NOT_CONFIGURED` without a webhook secret.
 
 Notifier (authenticated with an API key or the session's access token):
@@ -564,13 +566,24 @@ ADR 0016, task 6.10. The stack is created and destroyed around each session (ADR
 
 The recovery point is the last completed teardown. A RoundFinished already in Kafka but not yet consumed at teardown is lost; one still in an outbox is published after the restore.
 
+### 7.13 Tipping a live round
+
+ADR 0021, task 6.3. A popular drawer would otherwise be a hot wallet: every tip would lock their balance row.
+
+1. A viewer taps a tip. `POST /api/market/tips` claims its `Idempotency-Key` and posts one ledger transaction (`tip:<tip_id>`): the tipper's balance down, one of 16 escrow accounts (`tips_escrow:<hash(tip_id) % 16>`) up. It writes the `tips` row (`PENDING`) in the same commit. It locks the tipper's balance and that shard only: never the drawer's, never the round's.
+2. The round ends. The game server's `RoundFinished` reaches the marketplace (group `marketplace` on `game.rounds.v1`). It records the round in `tip_rounds` (room, `drawer_ids`) and settles its pending tips, up to 5,000 per ledger transaction (`tip-settle:<match_id>:<round_no>:<n>`). Each shard is debited by its share, and the drawers are credited the total, split like royalties (the first gets the remainder). A tip from one of the round's drawers, or one naming another room, goes back to its tipper in the same transaction. The tips become `SETTLED` or `REFUNDED`, and `CoinsCredited` (reasons `TIP`, `TIP_REFUND`) goes to the outbox. Only settlers lock the round's row; a redelivered `RoundFinished` finds nothing pending.
+3. Every 10 seconds the sweeper pays tips that committed just after their round was settled (to the same drawers), and refunds, one transaction each (`tip-refund:<tip_id>`), tips whose round never finished within 10 minutes: a match that ends while a word is being chosen publishes no `RoundFinished`, and a client can name a round that doesn't exist.
+4. 30 seconds after a round was settled, its tips are refused (`409 ROUND_OVER`).
+
+The reconciliation job also checks that each escrow shard holds exactly its pending tips (`market.tips.escrow_mismatch`).
+
 ## 8. Marketplace data model and rules
 
 Tables (the Flyway migrations are the source of truth):
 
 - `accounts(account_id, owner_type user|system, owner_id, created_at)`, `UNIQUE(owner_type, owner_id)`. `owner_id` is text: auth's user ids, or a system account's name. The system accounts `stripe_clearing` and `rewards_issuance` are created by the first migration; a user's account and balance row are created by their first posting.
 - `balances(account_id PK, owner_type, balance BIGINT, updated_at)`. `owner_type` is a copy tied to `accounts` by a composite foreign key `(account_id, owner_type)`, so the check `owner_type = 'system' OR balance >= 0` can be a plain `CHECK`: user balances are never negative, system accounts may be
-- `ledger_transactions(tx_id UUIDv7, type reward|stripe_purchase|sale, idempotency_key UNIQUE, metadata JSONB, created_at)`
+- `ledger_transactions(tx_id UUIDv7, type reward|stripe_purchase|sale|tip|tip_settlement|tip_refund, idempotency_key UNIQUE, metadata JSONB, created_at)`
 - `ledger_entries(entry_id, tx_id, account_id, amount BIGINT <> 0, created_at)`: signed amounts, partitioned by month on `created_at` (task 6.6): the primary key is `(entry_id, created_at)`, a posting's entries share one `created_at`, so one transaction never spans two partitions; the marketplace keeps three months of partitions ahead (`ledger_ensure_partitions`, at startup and daily), and `ledger_entries_default` catches anything outside them (LedgerPartitionMissing)
 - `ledger_months_closed(month, entries, closed_at, verified_at)` and `ledger_month_totals(month, account_id, total)`: each closed month's per-account sums, so reconciliation needn't rescan it (task 6.6)
 - `drawing_authors(drawing_id, user_id, author_order)`, primary key `(drawing_id, author_order)`, `UNIQUE(drawing_id, user_id)`
@@ -580,6 +593,8 @@ Tables (the Flyway migrations are the source of truth):
 - `idempotency_keys(user_id, key, operation, request_hash, status IN_PROGRESS|DONE, claim_token, locked_until, response_code, response_body TEXT, created_at, completed_at)`, primary key `(user_id, key)`, kept for 24 hours (ADR 0012)
 - `stripe_checkouts(session_id PK, user_id, pack_id, coins, amount_cents, currency, created_at)`: every Checkout Session the marketplace created; the webhook credits these coins
 - `stripe_events(stripe_event_id PK, type, session_id, result, processed_at)`: every verified webhook event, once
+- `tips(tip_id UUIDv7, tipper_id, room_id, match_id, round_no, amount 1..1000, shard 0..15, status PENDING|SETTLED|REFUNDED, tx_id, closing_tx_id, created_at, closed_at)`: a tip in escrow and how it left (ADR 0021); a `CHECK` ties `closing_tx_id` and `closed_at` to the status
+- `tip_rounds(match_id, round_no, room_id, drawer_ids TEXT[1..2], settlements, created_at)`: rounds the game server finished, so their tips can be paid; `settlements` numbers each settlement's idempotency key
 - `outbox(event_id, topic, key, payload, traceparent, created_at, published_at)`: `event_id` is also the event's `meta.event_id`. Rows Kafka acknowledged are deleted after 7 days (`app.outbox.retention`); unpublished rows are never deleted
 
 Every money movement goes through one ledger posting (`LedgerService.post`, task 4.1), inside the caller's transaction when there is one:
@@ -801,6 +816,7 @@ Releases:
 | D55 | Viewer guesses (ADR 0019, task 6.2): the room's owner decides the round's first correct viewer; relays check guesses against the snapshot's word, send correct ones to the owner through `room:{id}:viewer-guesses` (read by a blocking reader per live room, from the start, deduplicated by match and round), and wrong ones that don't contain the word to `live.guesses.v1`; the winner gets an announcement only; relays have their own Kafka and Redis users; top guesses go to viewers only; `AllocateRoomRequest.live` tells the owner a room is live | One writer and one order, fenced like every other room write, and a takeover replays it; the word never reaches Kafka or analytics; rewards would invite bot farming; relays face the public and must not mint coins or write rooms; players' screens stay free of the crowd's hints; only the lobby knew a room was live |
 | D56 | Data scale (task 6.6, ADR 0020): `make seed` writes about 5 million rows through SQL that keeps every invariant; `ledger_entries` partitioned by month with closed-month totals for reconciliation, re-verifying the oldest month each run; one physical streaming replica (a slot, `hot_standby_feedback`, `max_slot_wal_keep_size` 1 GB) that marketplace and assets read through a WAL-position cookie, falling back to the primary on any error or past 5 s of lag; indexes kept only where `EXPLAIN (ANALYZE, BUFFERS)` showed a gain | Measured before and after on realistic volume; partitions bound reconciliation's work by open months, not history, and keep a transaction's entries together; a time window would guess at lag and a primary-only rule for personal reads would send most reads back to it; a slot without a cap could fill the primary's disk; an index that isn't used only slows writes |
 
+| D57 | Tips (ADR 0021, task 6.3): a tip debits the tipper into one of 16 escrow system accounts at once; the round's `RoundFinished` pays its pending tips to its `drawer_ids` in one posting per batch of 5,000, split like royalties, refunding a drawer's own tip and one naming another room; a sweeper pays late tips and refunds tips whose round never finished within 10 minutes; tips close 30 s after the settlement; reconciliation checks each shard against its pending tips; 1 to 1,000 coins with an `Idempotency-Key` | The drawer's balance row is locked once per round instead of once per tip (measured: 987 against 361 tips a second to one drawer, p99 147 against 521 ms); the authoritative game server names the recipients, so the client can't; per-drawer sub-accounts or direct posting would both need a new way to check who is drawing |
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 15. Open questions

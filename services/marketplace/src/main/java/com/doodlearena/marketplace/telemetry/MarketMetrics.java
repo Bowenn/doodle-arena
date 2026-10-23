@@ -21,6 +21,8 @@ public class MarketMetrics {
 
 	private static final AttributeKey<String> RESULT = AttributeKey.stringKey("result");
 
+	private static final AttributeKey<String> TRIGGER = AttributeKey.stringKey("trigger");
+
 	private final Meter meter = GlobalOpenTelemetry.getMeter("marketplace");
 
 	private final DoubleHistogram lockWait = this.meter.histogramBuilder("market.db.lock_wait.duration")
@@ -48,6 +50,18 @@ public class MarketMetrics {
 		.setDescription("Stripe webhook requests, by outcome")
 		.build();
 
+	private final LongCounter tips = this.meter.counterBuilder("market.tips")
+		.setDescription("Tip requests, by outcome")
+		.build();
+
+	private final LongCounter tipsClosed = this.meter.counterBuilder("market.tips.settled")
+		.setDescription("Tips taken out of escrow: paid to the drawers or refunded, by what closed them")
+		.build();
+
+	private final LongCounter roundsReceived = this.meter.counterBuilder("market.rounds.received")
+		.setDescription("Records read from game.rounds.v1, by outcome")
+		.build();
+
 	public Meter meter() {
 		return this.meter;
 	}
@@ -70,6 +84,23 @@ public class MarketMetrics {
 	/** success, conflict (the listing was sold or cancelled) or insufficient_funds. */
 	public void purchase(String result) {
 		this.purchases.add(1, Attributes.of(RESULT, result));
+	}
+
+	/** accepted, insufficient_funds or round_over. */
+	public void tip(String result) {
+		this.tips.add(1, Attributes.of(RESULT, result));
+	}
+
+	/** {@code count} tips closed: result paid or refunded, trigger round (its RoundFinished) or sweep. */
+	public void tipsClosed(long count, String result, String trigger) {
+		if (count > 0) {
+			this.tipsClosed.add(count, Attributes.of(RESULT, result, TRIGGER, trigger));
+		}
+	}
+
+	/** One record from game.rounds.v1: settled, skipped or failed. */
+	public void roundReceived(String result) {
+		this.roundsReceived.add(1, Attributes.of(RESULT, result));
 	}
 
 	public void idempotencyReplay(String operation) {

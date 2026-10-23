@@ -77,6 +77,13 @@ button.selected {
 .room-header,
 .phase-bar,
 .toolbar,
+/* Viewers' tips (ADR 0021): the amounts in one row under the label. */
+.tips {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .guess {
   display: flex;
   flex-wrap: wrap;

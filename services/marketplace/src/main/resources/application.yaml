@@ -73,6 +73,13 @@ app:
     # Share of every sale paid to the drawing's authors who are neither the seller nor the buyer
     # (design doc, section 8).
     percent: 10
+  tips:
+    # ADR 0021. A tip is refused once its round was settled this long ago.
+    round-over-after: 30s
+    # A pending tip whose round never finished (no RoundFinished) goes back to its tipper.
+    refund-after: 10m
+    # How often the sweeper settles late tips and refunds stale ones.
+    sweep-interval: 10s
   rewards:
     # Coins per placement (design doc, section 7.9): 1st, 2nd, 3rd; everyone else gets participation-coins.
     # Players with equal scores share a placement, so they get the same amount.

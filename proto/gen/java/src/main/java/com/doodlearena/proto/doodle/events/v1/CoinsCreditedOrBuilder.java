@@ -88,7 +88,8 @@ public interface CoinsCreditedOrBuilder extends
 
   /**
    * <pre>
-   * What caused it: the Stripe Checkout session id for purchases, the match id for rewards.
+   * What caused it: the Stripe Checkout session id for purchases, the match id for rewards,
+   * "&lt;match_id&gt;:&lt;round_no&gt;" for tips, the tip id for refunds.
    * </pre>
    *
    * <code>string reference = 5 [json_name = "reference"];</code>
@@ -97,7 +98,8 @@ public interface CoinsCreditedOrBuilder extends
   java.lang.String getReference();
   /**
    * <pre>
-   * What caused it: the Stripe Checkout session id for purchases, the match id for rewards.
+   * What caused it: the Stripe Checkout session id for purchases, the match id for rewards,
+   * "&lt;match_id&gt;:&lt;round_no&gt;" for tips, the tip id for refunds.
    * </pre>
    *
    * <code>string reference = 5 [json_name = "reference"];</code>

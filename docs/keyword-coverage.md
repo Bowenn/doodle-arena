@@ -29,7 +29,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | NoSQL | MongoDB (replays), Redis | 2, 3 |
 | MongoDB | Stroke replays | 3 |
 | Schema migrations | Alembic (auth), Django migrations (assets), Flyway (marketplace), golang-migrate (notifier) | 1–4 |
-| Sharding, partitioning & replication | Rooms sharded across game servers; Kafka partitions by room; Postgres read replica; monthly ledger partitions; sharded tip entries | 2, 6 |
+| Sharding, partitioning & replication | Rooms sharded across game servers; Kafka partitions by room; Postgres read replica; monthly ledger partitions; a sharded tips escrow settled per round (ADR 0021) | 2, 6 |
 | Distributed systems | Leases, fencing tokens, failover, idempotent consumers | 2, 4 |
 | Consistency models & CAP theorem | Consistency model table (design doc section 10); read-your-writes with a replica | 4, 6 |
 | Load balancing & reverse proxies | Nginx gateway; least-loaded room allocation; AWS load balancer | 1, 2, 5 |

@@ -134,12 +134,18 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `market.purchases` | Counter | `result` = success, conflict (the listing was sold or cancelled: a lost race), insufficient_funds | marketplace |
 | `market.idempotency.replays` | Counter | `operation` = create_listing, purchase, checkout (requests answered from a stored response) | marketplace |
 | `market.stripe.webhooks` | Counter | `result` = processed (coins credited), duplicate (the event, or another event for the same session, was handled before), ignored (an unpaid or unrelated event), unknown_session (a paid session the marketplace didn't create, or for another user), invalid_signature | marketplace |
-| `market.db.lock_wait.duration` | Histogram (ms) | `operation` = ledger_post (the balance rows), purchase (the listing row, where concurrent buyers queue) | marketplace |
+| `market.db.lock_wait.duration` | Histogram (ms) | `operation` = ledger_post (the balance rows), purchase (the listing row, where concurrent buyers queue), tip_settlement (a round's row and its pending tips, ADR 0021) | marketplace |
 | `market.outbox.lag` | Gauge (s) | – (age of the oldest outbox event Kafka hasn't acknowledged; 0 when drained) | marketplace |
 | `market.ledger.imbalance` | Gauge (coins) | – | marketplace |
 | `market.ledger.mismatched_accounts` | Gauge | – | marketplace |
 | `market.ownership.violations` | Gauge | – | marketplace |
 | `market.ledger.default_partition_rows` | Gauge | – (ledger entries in `ledger_entries_default`, outside every monthly partition: must be 0, task 6.6; reported by the reconciliation job) | marketplace |
+| `market.tips` | Counter | `result` = accepted, insufficient_funds, round_over (ADR 0021, task 6.3) | marketplace |
+| `market.tips.settled` | Counter | `result` = paid (to the round's drawers), refunded; `trigger` = round (its RoundFinished), sweep (a late tip, or one whose round never finished) | marketplace |
+| `market.tips.pending` | Gauge | – (tips in escrow, measured by the sweeper every 10 s) | marketplace |
+| `market.tips.oldest_pending` | Gauge (s) | – (age of the oldest pending tip, 0 when none. Prometheus: `market_tips_oldest_pending_seconds`) | marketplace |
+| `market.tips.escrow_mismatch` | Gauge | – (tips escrow shards whose balance isn't the sum of their pending tips: must be 0; reported by the reconciliation job) | marketplace |
+| `market.rounds.received` | Counter | `result` = settled, skipped, failed (records read from `game.rounds.v1`) | marketplace |
 | `market.db.reads` | Counter | `target` = primary, replica; `reason` = no_write, caught_up (replica), behind, stale (more than max-lag, 5 s, behind the primary), replica_error, no_replica (primary). Routed reads of the read-heavy endpoints (ADR 0020) | marketplace |
 | `market.db.replica_lag` | Gauge (s) | – (how far the read replica is behind, measured on it every 15 s: 0 when it has replayed all it received, else the age of its last replayed transaction; missing while it can't be read. Prometheus: `market_db_replica_lag_seconds`) | marketplace |
 | `assets.db.reads` | Counter | `target`, `reason` as `market.db.reads` (the gallery and drawing pages) | assets |
@@ -257,6 +263,8 @@ Starting rules (tune the thresholds after the first load test):
 | WashTradingFlagged | Any `analytics.wash_trades.flagged` in 15 minutes, one alert per `rule` (ADR 0018): accounts passed a drawing round among themselves within 7 days. A signal for a human, not a verdict; each flag's accounts are in the analytics logs and on `analytics.flags.v1` | warning |
 | AnalyticsDown | The analytics Flink job ran in the last 6 hours but hasn't reported running for 2 minutes, or it has run for 5 minutes and no checkpoint completed in 300 s, for 3 minutes. Top guesses stop and wash trading isn't watched (sales wait on Kafka); a job that can't checkpoint would also lose its state on the next restart. The 6-hour look-back keeps a local stack that never started the `analytics` profile quiet | warning |
 | ReplicaLagHigh | The read replica more than 30 s behind (`market.db.replica_lag`), or reads falling back to the primary because it can't be reached or is more than 5 s behind (`market.db.reads` / `assets.db.reads` with `reason=replica_error` or `stale`), for 5 minutes (ADR 0020). Users still read their own writes; the primary carries the reads | warning |
+| TipEscrowMismatch | `market.tips.escrow_mismatch` above 0: an escrow shard doesn't hold exactly its pending tips (ADR 0021) | critical |
+| TipsStuck | The oldest pending tip (`market.tips.oldest_pending`) older than 15 minutes, for 5 minutes: neither its round's settlement, the sweeper nor the 10-minute refund closed it | warning |
 | LedgerPartitionMissing | `market.ledger.default_partition_rows` above 0: postings in a month without a partition (task 6.6), whose partition can't be created while they are there | warning |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`; task 5.2, not a Grafana rule) | critical |
 

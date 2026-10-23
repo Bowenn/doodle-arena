@@ -1,9 +1,18 @@
 package com.doodlearena.marketplace.ledger;
 
-/** Why coins moved. Stored as text; migration V1 lists the allowed values. */
+/** Why coins moved. Stored as text; migrations V1 and V10 list the allowed values. */
 public enum TransactionType {
 
-	REWARD("reward"), STRIPE_PURCHASE("stripe_purchase"), SALE("sale");
+	REWARD("reward"), STRIPE_PURCHASE("stripe_purchase"), SALE("sale"),
+
+	/** A tipper's coins into escrow (ADR 0021). */
+	TIP("tip"),
+
+	/** A round's pending tips out of escrow, to its drawers (and back to any tipper who drew it). */
+	TIP_SETTLEMENT("tip_settlement"),
+
+	/** A tip whose round never finished, back to its tipper. */
+	TIP_REFUND("tip_refund");
 
 	private final String dbValue;
 
