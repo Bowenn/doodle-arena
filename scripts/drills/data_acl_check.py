@@ -81,6 +81,7 @@ def main() -> int:
     game = rds("game-server", env["REDIS_GAME_SERVER_PASSWORD"])
     assets = rds("assets", env["REDIS_ASSETS_PASSWORD"])
     relay = rds("relay", env["REDIS_RELAY_PASSWORD"])
+    market = rds("marketplace", env["REDIS_MARKETPLACE_PASSWORD"])
     perm = (redis.exceptions.NoPermissionError,)
     auth = (redis.exceptions.AuthenticationError, redis.exceptions.ResponseError)
     probe = f"acl-check-{uuid.uuid4().hex[:8]}"
@@ -110,6 +111,13 @@ def main() -> int:
     check("relay can't take a room's lease", lambda: relay.set(f"room:{{{probe}}}:lease", "x"), perm)
     check("relay can't redeem a player's join ticket", lambda: relay.set(f"room:{{{probe}}}:ticket:x", "1", nx=True), perm)
     check("relay can't read lobby:names", lambda: relay.hgetall("lobby:names"), perm)
+    # The marketplace's drops and rate limits (ADR 0022): market:* only.
+    check("marketplace works on market:* (control)", lambda: market.set(f"market:{{drop:{probe}}}:x", "1", ex=60), None)
+    check("marketplace can't read lobby:names", lambda: market.hgetall("lobby:names"), perm)
+    check("marketplace can't take a room's lease", lambda: market.set(f"room:{{{probe}}}:lease", "x"), perm)
+    check("lobby can't take a drop's editions (market:*)", lambda: lobby.lpop(f"market:{{drop:{probe}}}:free"), perm)
+    check("relay can't skip a drop's waiting room (market:*)",
+          lambda: relay.zadd(f"market:{{drop:{probe}}}:queue", {"u_x": 0}), perm)
     check("lobby can't list every key (KEYS)", lambda: lobby.keys("*"), perm)
     check("lobby can't list key names with SCAN", lambda: lobby.scan(0), perm)
     check("assets can't list key names with RANDOMKEY", lambda: assets.randomkey(), perm)

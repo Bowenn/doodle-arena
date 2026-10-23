@@ -193,10 +193,13 @@ locals {
         PUBLIC_BASE_URL = local.public_url,
         # The read replica on the data host (ADR 0020), and its cookie behind https.
         DB_REPLICA_HOST = local.data_host, DB_REPLICA_PORT = "5433", DB_REPLICA_COOKIE_SECURE = "true",
+        # Limited drops (ADR 0022): market:* on the data host's Redis.
+        REDIS_HOST = local.data_host, REDIS_USERNAME = "marketplace",
       })
       secrets = {
         DB_PASSWORD           = local.secret_arn["marketplace-db-password"]
         KAFKA_PASSWORD        = local.secret_arn["kafka-marketplace-password"]
+        REDIS_PASSWORD        = local.secret_arn["redis-marketplace-password"]
         STRIPE_SECRET_KEY     = local.secret_arn["stripe/secret-key"]
         STRIPE_WEBHOOK_SECRET = local.secret_arn["stripe/webhook-secret"]
       }
