@@ -162,3 +162,17 @@ The 5,000-viewer number is measured in AWS (task 6.9), with k6 on a machine of i
 Rejected, because `EXPLAIN` didn't use it: a ledger index `(account_id) INCLUDE (amount)` for the accounts check (the planner kept a parallel sequential scan, which reads less than an index over every row).
 
 The migration to partitions (V8) copied the 1.7 million entries in 17.8 s. The read replica (ADR 0020) runs in both composes; locally it replays within a second of the primary (0 bytes behind at rest). Its lag and the primary's load under real traffic are measured in AWS in task 6.9.
+
+## 8. Tips: the hot wallet (task 6.3)
+
+Thousands of viewers tipping one drawer would all lock that drawer's balance row (ADR 0021). Tips go into 16 escrow accounts instead, and the round's `RoundFinished` pays the drawer once. Measured locally, 2026-10-22.
+
+| Run | Throughput | p50 | p95 | p99 | Notes |
+|---|---|---|---|---|---|
+| `TipContentionTests`: 1,000 tippers, one drawer, 32 threads and connections, direct posting (each tip locks the drawer's row) | 361 tips/s | 44.8 ms | – | 521 ms | Testcontainers Postgres |
+| The same, through the escrow | 987 tips/s | 24.2 ms | – | 147 ms | then one settlement of 38 ms |
+| `make loadtest-tips`: 200 seeded users, 300 tips a second for a minute, straight to the marketplace | 298 tips/s (all offered) | 6.7 ms | 344 ms | 737 ms | 17,907 tips, none refused, 94 not sent in time (k6's dropped iterations); lock wait p99 23 ms |
+
+After the k6 run, the drawer had all 17,907 coins 1.2 s after the `RoundFinished` was sent, paid in two settlements (5,000 tips each, then the rest).
+
+The k6 tail is not lock waits but the marketplace's garbage collector. Under its 1 GB container limit the JVM picks Serial GC, whose stop-the-world collections took 1.6 s (young) and 0.98 s (full) in those five minutes, with pauses up to about 1.5 s. Every request queues behind them, so the 250 ms p95 threshold in `loadtest/tips.js` fails locally until the marketplace runs a concurrent collector or more memory.

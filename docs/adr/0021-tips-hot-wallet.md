@@ -81,16 +81,27 @@ Bowen chose **C**, with these details:
   - It settles late tips, committed after their round was settled, to the same drawers.
   - It refunds a tip whose round never finished within 10 minutes, one transaction each, with key `tip-refund:<tip_id>`.
 - **Integrity:** escrow accounts are system accounts, so no `CHECK` keeps them at zero or above. The reconciliation job therefore checks each shard's balance against the sum of its pending tips (`market.tips.escrow_mismatch`, which must be 0), next to the existing ledger checks.
-- **Measurement:**
-  - A contention test compares C with A: concurrent tippers on one drawer, measuring throughput and lock wait.
-  - A k6 scenario tips one round with 2,000 seeded users.
-  - The numbers go to `docs/performance.md`.
+- **Measurement** (`docs/performance.md`, section 8):
+  - A contention test compares C with A (`TipContentionTests`: 1,000 tippers on one drawer, 32 threads and connections, locally):
+
+    | Option | Throughput | p50 | p99 |
+    |---|---|---|---|
+    | A, direct | 361 tips/s | 44.8 ms | 521 ms |
+    | C, escrow | 987 tips/s | 24.2 ms | 147 ms |
+
+    After C, one 38 ms settlement paid the drawer.
+  - A k6 scenario has 200 seeded users tip one round 300 times a second for a minute, straight to the marketplace (`make loadtest-tips`):
+    - 17,907 tips, none refused;
+    - the lock wait p99 was 23 ms;
+    - the drawer had every coin 1.2 s after the `RoundFinished`, in two settlements.
+    - The latency tail (p95 344 ms) came from the marketplace JVM's stop-the-world garbage collections, not from locks.
 
 ## Consequences
 
 - **Tipping scales with the number of shards, not the number of drawers.** Settlement locks every shard with pending tips for a few milliseconds per round, which briefly delays tips in flight.
 - **The drawer sees tips at the end of the round.** For a live audience that is a feature: a round-end total. A live tip feed would need the relays, and is out of scope.
 - **Coins can be stuck for up to 10 minutes** when a round never finishes. They are refunded, and TipsStuck alerts if the sweeper falls behind.
+- **`RoundFinished` now moves money.** A forged one could send a round's escrowed tips to anyone. Only the game server's Kafka user may write `game.rounds.v1` in AWS (ADR 0013; `dev-tools`, which can too, exists only locally and in CI). The first `RoundFinished` for a round wins: a later one with other drawers changes nothing.
 - **Tips move coins between accounts.** One user could tip another account they own while it draws. Coins can't be cashed out, so a wash-tip rule in the Flink job is a follow-up.
 - **What to watch:**
   - `market.tips` by result;

@@ -46,7 +46,7 @@ With KRaft, the authorizer is `org.apache.kafka.metadata.authorizer.StandardAuth
 
 | Topic | Write (producer) | Read (consumer) | Consumer group | Stage |
 |---|---|---|---|---|
-| `game.rounds.v1` | `game-server` | `assets` | `assets` | 2 |
+| `game.rounds.v1` | `game-server` | `assets`, `marketplace` (tips, since task 6.3) | `assets`, `marketplace` | 2 |
 | `game.matches.v1` | `game-server` | `marketplace`, `lobby` | `marketplace`, `lobby-leaderboard` | 2 |
 | `assets.drawings.v1` | `assets` | `marketplace` | `marketplace` | 3 |
 | `market.listings.v1` | `marketplace` | `assets` (Stage 6) | `assets` | 4 |
