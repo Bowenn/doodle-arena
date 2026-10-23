@@ -7,7 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
+	eventsv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1"
 )
 
 // errNoEvent means a wrapper's oneof is unset, or holds a case this build doesn't know

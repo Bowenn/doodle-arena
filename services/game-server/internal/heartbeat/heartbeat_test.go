@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/relay"
+	lobbyv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/lobby/v1"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/control"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/relay"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

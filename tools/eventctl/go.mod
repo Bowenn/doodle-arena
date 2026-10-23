@@ -1,14 +1,14 @@
-module github.com/Bowenn/gap-project_private/tools/eventctl
+module github.com/Bowenn/doodle-arena/tools/eventctl
 
 go 1.27
 
 toolchain go1.27.2
 
-replace github.com/Bowenn/gap-project_private/proto/gen/go => ../../proto/gen/go
+replace github.com/Bowenn/doodle-arena/proto/gen/go => ../../proto/gen/go
 
 require (
-	github.com/Bowenn/gap-project_private/libs/go v0.0.0-00010101000000-000000000000
-	github.com/Bowenn/gap-project_private/proto/gen/go v0.0.0-00010101000000-000000000000
+	github.com/Bowenn/doodle-arena/libs/go v0.0.0-00010101000000-000000000000
+	github.com/Bowenn/doodle-arena/proto/gen/go v0.0.0-00010101000000-000000000000
 	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.9
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.3
@@ -37,4 +37,4 @@ require (
 	google.golang.org/grpc v1.84.0 // indirect
 )
 
-replace github.com/Bowenn/gap-project_private/libs/go => ../../libs/go
+replace github.com/Bowenn/doodle-arena/libs/go => ../../libs/go

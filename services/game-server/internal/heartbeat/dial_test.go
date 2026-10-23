@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
+	lobbyv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/lobby/v1"
 	"golang.org/x/net/dns/dnsmessage"
 	"google.golang.org/grpc"
 )

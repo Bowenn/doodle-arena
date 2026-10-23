@@ -295,8 +295,8 @@ const file_doodle_events_v1_analytics_proto_rawDesc = "" +
 	"\rWashTradeRule\x12\x1f\n" +
 	"\x1bWASH_TRADE_RULE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aWASH_TRADE_RULE_ROUND_TRIP\x10\x01\x12\x19\n" +
-	"\x15WASH_TRADE_RULE_CYCLE\x10\x02B\xe8\x01\n" +
-	"&com.doodlearena.proto.doodle.events.v1B\x0eAnalyticsProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
+	"\x15WASH_TRADE_RULE_CYCLE\x10\x02B\xe1\x01\n" +
+	"&com.doodlearena.proto.doodle.events.v1B\x0eAnalyticsProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (
 	file_doodle_events_v1_analytics_proto_rawDescOnce sync.Once

@@ -24,10 +24,10 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/webhook"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/secretbox"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/ssrf"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/store"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/webhook"
 )
 
 // Config tunes the dispatcher. Defaults() is what the service runs with (design doc 4.7).

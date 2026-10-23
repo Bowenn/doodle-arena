@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
 )
 
 // startChoosing starts a match and runs the countdown, so the first round is choosing.

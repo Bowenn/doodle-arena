@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
 )
 
 // recorder plays a game the way the actor does: every step's events are "committed" with the

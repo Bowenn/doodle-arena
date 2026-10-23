@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/webhook"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/webhook"
 )
 
 func TestReceiverVerifiesAndObeysItsMode(t *testing.T) {

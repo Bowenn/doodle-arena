@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
+	eventsv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1"
 )
 
 // guessRecords builds live.guesses.v1 records: wrong guesses by viewers of a live room, as the

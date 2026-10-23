@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/words"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/words"
 )
 
 var t0 = time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)

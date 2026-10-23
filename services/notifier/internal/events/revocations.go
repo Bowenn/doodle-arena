@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 
-	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
+	eventsv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1"
 )
 
 const (

@@ -37,13 +37,13 @@ public final class GameProto extends com.google.protobuf.GeneratedFile {
     java.lang.String[] descriptorData = {
       "\n\031doodle/game/v1/game.proto\022\016doodle.game" +
       ".v1*<\n\010GameMode\022\031\n\025GAME_MODE_UNSPECIFIED" +
-      "\020\000\022\025\n\021GAME_MODE_CLASSIC\020\001B\325\001\n$com.doodle" +
+      "\020\000\022\025\n\021GAME_MODE_CLASSIC\020\001B\316\001\n$com.doodle" +
       "arena.proto.doodle.game.v1B\tGameProtoP\001Z" +
-      "Hgithub.com/Bowenn/gap-project_private/p" +
-      "roto/gen/go/doodle/game/v1;gamev1\242\002\003DGX\252" +
-      "\002\016Doodle.Game.V1\312\002\016Doodle\\Game\\V1\342\002\032Dood" +
-      "le\\Game\\V1\\GPBMetadata\352\002\020Doodle::Game::V" +
-      "1b\006proto3"
+      "Agithub.com/Bowenn/doodle-arena/proto/ge" +
+      "n/go/doodle/game/v1;gamev1\242\002\003DGX\252\002\016Doodl" +
+      "e.Game.V1\312\002\016Doodle\\Game\\V1\342\002\032Doodle\\Game" +
+      "\\V1\\GPBMetadata\352\002\020Doodle::Game::V1b\006prot" +
+      "o3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

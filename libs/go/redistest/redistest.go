@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Bowenn/gap-project_private/libs/go/tcretry"
+	"github.com/Bowenn/doodle-arena/libs/go/tcretry"
 	"github.com/redis/go-redis/v9"
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 )

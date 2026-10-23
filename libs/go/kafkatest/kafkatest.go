@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/libs/go/tcretry"
+	"github.com/Bowenn/doodle-arena/libs/go/tcretry"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"github.com/twmb/franz-go/pkg/kadm"

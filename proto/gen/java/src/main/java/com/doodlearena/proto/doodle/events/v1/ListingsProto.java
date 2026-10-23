@@ -69,13 +69,12 @@ public final class ListingsProto extends com.google.protobuf.GeneratedFile {
       "\022\035\n\ndrawing_id\030\003 \001(\tR\tdrawingId\022\033\n\tselle" +
       "r_id\030\004 \001(\tR\010sellerId\022=\n\014cancelled_at\030\005 \001" +
       "(\0132\032.google.protobuf.TimestampR\013cancelle" +
-      "dAtB\347\001\n&com.doodlearena.proto.doodle.eve" +
-      "nts.v1B\rListingsProtoP\001ZLgithub.com/Bowe" +
-      "nn/gap-project_private/proto/gen/go/dood" +
-      "le/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Eve" +
-      "nts.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Event" +
-      "s\\V1\\GPBMetadata\352\002\022Doodle::Events::V1b\006p" +
-      "roto3"
+      "dAtB\340\001\n&com.doodlearena.proto.doodle.eve" +
+      "nts.v1B\rListingsProtoP\001ZEgithub.com/Bowe" +
+      "nn/doodle-arena/proto/gen/go/doodle/even" +
+      "ts/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312" +
+      "\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GP" +
+      "BMetadata\352\002\022Doodle::Events::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

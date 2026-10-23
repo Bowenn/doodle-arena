@@ -26,14 +26,14 @@ from doodle.events.v1 import meta_pb2 as doodle_dot_events_dot_v1_dot_meta__pb2
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x64oodle/events/v1/users.proto\x12\x10\x64oodle.events.v1\x1a\x1b\x64oodle/events/v1/meta.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"m\n\tUserEvent\x12W\n\x13\x63redentials_revoked\x18\x01 \x01(\x0b\x32$.doodle.events.v1.CredentialsRevokedH\x00R\x12\x63redentialsRevokedB\x07\n\x05\x65vent\"\xb1\x01\n\x12\x43redentialsRevoked\x12/\n\x04meta\x18\x01 \x01(\x0b\x32\x1b.doodle.events.v1.EventMetaR\x04meta\x12\x17\n\x07user_id\x18\x02 \x01(\tR\x06userId\x12\x16\n\x06reason\x18\x03 \x01(\tR\x06reason\x12\x39\n\nrevoked_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\trevokedAtB\xe4\x01\n&com.doodlearena.proto.doodle.events.v1B\nUsersProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03\x44\x45X\xaa\x02\x10\x44oodle.Events.V1\xca\x02\x10\x44oodle\\Events\\V1\xe2\x02\x1c\x44oodle\\Events\\V1\\GPBMetadata\xea\x02\x12\x44oodle::Events::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1c\x64oodle/events/v1/users.proto\x12\x10\x64oodle.events.v1\x1a\x1b\x64oodle/events/v1/meta.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"m\n\tUserEvent\x12W\n\x13\x63redentials_revoked\x18\x01 \x01(\x0b\x32$.doodle.events.v1.CredentialsRevokedH\x00R\x12\x63redentialsRevokedB\x07\n\x05\x65vent\"\xb1\x01\n\x12\x43redentialsRevoked\x12/\n\x04meta\x18\x01 \x01(\x0b\x32\x1b.doodle.events.v1.EventMetaR\x04meta\x12\x17\n\x07user_id\x18\x02 \x01(\tR\x06userId\x12\x16\n\x06reason\x18\x03 \x01(\tR\x06reason\x12\x39\n\nrevoked_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\trevokedAtB\xdd\x01\n&com.doodlearena.proto.doodle.events.v1B\nUsersProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03\x44\x45X\xaa\x02\x10\x44oodle.Events.V1\xca\x02\x10\x44oodle\\Events\\V1\xe2\x02\x1c\x44oodle\\Events\\V1\\GPBMetadata\xea\x02\x12\x44oodle::Events::V1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'doodle.events.v1.users_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'\n&com.doodlearena.proto.doodle.events.v1B\nUsersProtoP\001ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle::Events::V1'
+  _globals['DESCRIPTOR']._serialized_options = b'\n&com.doodlearena.proto.doodle.events.v1B\nUsersProtoP\001ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle::Events::V1'
   _globals['_USEREVENT']._serialized_start=112
   _globals['_USEREVENT']._serialized_end=221
   _globals['_CREDENTIALSREVOKED']._serialized_start=224

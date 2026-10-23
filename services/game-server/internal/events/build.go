@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
-	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
+	eventsv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1"
+	gamev1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/room"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

@@ -417,8 +417,8 @@ const file_doodle_events_v1_live_proto_rawDesc = "" +
 	"\n" +
 	"GuessCount\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\rR\x05countB\xe3\x01\n" +
-	"&com.doodlearena.proto.doodle.events.v1B\tLiveProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
+	"\x05count\x18\x02 \x01(\rR\x05countB\xdc\x01\n" +
+	"&com.doodlearena.proto.doodle.events.v1B\tLiveProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (
 	file_doodle_events_v1_live_proto_rawDescOnce sync.Once

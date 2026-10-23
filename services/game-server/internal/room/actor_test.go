@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"

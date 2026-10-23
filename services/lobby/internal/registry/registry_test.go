@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/libs/go/redistest"
-	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
+	"github.com/Bowenn/doodle-arena/libs/go/redistest"
+	lobbyv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/lobby/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

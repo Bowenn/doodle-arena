@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/ws"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/room"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/ws"
 )
 
 // Viewer guesses (ADR 0019). A room's stream goroutine holds the room's snapshot, so the word,

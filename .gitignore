@@ -1,8 +1,10 @@
 # Secrets and local config
 .env
+.env.backup
 secrets/
 *.pem
 *.key
+docs/_review
 
 # OS and editors
 .DS_Store

@@ -66,13 +66,13 @@ public final class MatchesProto extends com.google.protobuf.GeneratedFile {
       "esults\030\007 \003(\0132\036.doodle.events.v1.PlayerRe" +
       "sultR\007results\"[\n\014PlayerResult\022\027\n\007user_id" +
       "\030\001 \001(\tR\006userId\022\024\n\005score\030\002 \001(\rR\005score\022\034\n\t" +
-      "placement\030\003 \001(\rR\tplacementB\346\001\n&com.doodl" +
+      "placement\030\003 \001(\rR\tplacementB\337\001\n&com.doodl" +
       "earena.proto.doodle.events.v1B\014MatchesPr" +
-      "otoP\001ZLgithub.com/Bowenn/gap-project_pri" +
-      "vate/proto/gen/go/doodle/events/v1;event" +
-      "sv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Ev" +
-      "ents\\V1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002" +
-      "\022Doodle::Events::V1b\006proto3"
+      "otoP\001ZEgithub.com/Bowenn/doodle-arena/pr" +
+      "oto/gen/go/doodle/events/v1;eventsv1\242\002\003D" +
+      "EX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1" +
+      "\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle" +
+      "::Events::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

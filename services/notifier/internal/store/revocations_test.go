@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/pgtest"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/pgtest"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/store"
 )
 
 // Task 4.R2 (ADR 0015): a CredentialsRevoked disables the owner's endpoints once.

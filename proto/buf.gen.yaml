@@ -8,7 +8,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/Bowenn/gap-project_private/proto/gen/go
+      value: github.com/Bowenn/doodle-arena/proto/gen/go
     - file_option: java_package_prefix
       value: com.doodlearena.proto
 plugins:

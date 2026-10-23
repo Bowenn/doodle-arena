@@ -184,9 +184,9 @@ const file_doodle_events_v1_users_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\x129\n" +
 	"\n" +
-	"revoked_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAtB\xe4\x01\n" +
+	"revoked_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAtB\xdd\x01\n" +
 	"&com.doodlearena.proto.doodle.events.v1B\n" +
-	"UsersProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
+	"UsersProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (
 	file_doodle_events_v1_users_proto_rawDescOnce sync.Once

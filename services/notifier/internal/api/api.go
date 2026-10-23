@@ -16,12 +16,12 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Bowenn/gap-project_private/libs/go/authn"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/webhook"
+	"github.com/Bowenn/doodle-arena/libs/go/authn"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/apikeys"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/secretbox"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/ssrf"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/store"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/webhook"
 )
 
 // Scope an API key needs for this API.

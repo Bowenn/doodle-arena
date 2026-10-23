@@ -79,13 +79,13 @@ public final class LiveProto extends com.google.protobuf.GeneratedFile {
       ".protobuf.TimestampR\twindowEnd\0226\n\007guesse" +
       "s\030\005 \003(\0132\034.doodle.events.v1.GuessCountR\007g" +
       "uesses\"6\n\nGuessCount\022\022\n\004text\030\001 \001(\tR\004text" +
-      "\022\024\n\005count\030\002 \001(\rR\005countB\343\001\n&com.doodleare" +
-      "na.proto.doodle.events.v1B\tLiveProtoP\001ZL" +
-      "github.com/Bowenn/gap-project_private/pr" +
-      "oto/gen/go/doodle/events/v1;eventsv1\242\002\003D" +
-      "EX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1" +
-      "\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle" +
-      "::Events::V1b\006proto3"
+      "\022\024\n\005count\030\002 \001(\rR\005countB\334\001\n&com.doodleare" +
+      "na.proto.doodle.events.v1B\tLiveProtoP\001ZE" +
+      "github.com/Bowenn/doodle-arena/proto/gen" +
+      "/go/doodle/events/v1;eventsv1\242\002\003DEX\252\002\020Do" +
+      "odle.Events.V1\312\002\020Doodle\\Events\\V1\342\002\034Dood" +
+      "le\\Events\\V1\\GPBMetadata\352\002\022Doodle::Event" +
+      "s::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

@@ -464,8 +464,8 @@ const file_doodle_lobby_v1_registry_proto_rawDesc = "" +
 	"\x12ROOM_PHASE_WAITING\x10\x01\x12\x16\n" +
 	"\x12ROOM_PHASE_PLAYING\x10\x022e\n" +
 	"\x0fRegistryService\x12R\n" +
-	"\tHeartbeat\x12!.doodle.lobby.v1.HeartbeatRequest\x1a\".doodle.lobby.v1.HeartbeatResponseB\xe0\x01\n" +
-	"%com.doodlearena.proto.doodle.lobby.v1B\rRegistryProtoP\x01ZJgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1;lobbyv1\xa2\x02\x03DLX\xaa\x02\x0fDoodle.Lobby.V1\xca\x02\x0fDoodle\\Lobby\\V1\xe2\x02\x1bDoodle\\Lobby\\V1\\GPBMetadata\xea\x02\x11Doodle::Lobby::V1b\x06proto3"
+	"\tHeartbeat\x12!.doodle.lobby.v1.HeartbeatRequest\x1a\".doodle.lobby.v1.HeartbeatResponseB\xd9\x01\n" +
+	"%com.doodlearena.proto.doodle.lobby.v1B\rRegistryProtoP\x01ZCgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/lobby/v1;lobbyv1\xa2\x02\x03DLX\xaa\x02\x0fDoodle.Lobby.V1\xca\x02\x0fDoodle\\Lobby\\V1\xe2\x02\x1bDoodle\\Lobby\\V1\\GPBMetadata\xea\x02\x11Doodle::Lobby::V1b\x06proto3"
 
 var (
 	file_doodle_lobby_v1_registry_proto_rawDescOnce sync.Once

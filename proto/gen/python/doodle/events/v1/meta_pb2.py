@@ -25,14 +25,14 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x64oodle/events/v1/meta.proto\x12\x10\x64oodle.events.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc5\x01\n\tEventMeta\x12\x19\n\x08\x65vent_id\x18\x01 \x01(\tR\x07\x65ventId\x12\x1d\n\nevent_type\x18\x02 \x01(\tR\teventType\x12%\n\x0eschema_version\x18\x03 \x01(\rR\rschemaVersion\x12;\n\x0boccurred_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\noccurredAt\x12\x1a\n\x08producer\x18\x05 \x01(\tR\x08producerB\xe3\x01\n&com.doodlearena.proto.doodle.events.v1B\tMetaProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03\x44\x45X\xaa\x02\x10\x44oodle.Events.V1\xca\x02\x10\x44oodle\\Events\\V1\xe2\x02\x1c\x44oodle\\Events\\V1\\GPBMetadata\xea\x02\x12\x44oodle::Events::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1b\x64oodle/events/v1/meta.proto\x12\x10\x64oodle.events.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc5\x01\n\tEventMeta\x12\x19\n\x08\x65vent_id\x18\x01 \x01(\tR\x07\x65ventId\x12\x1d\n\nevent_type\x18\x02 \x01(\tR\teventType\x12%\n\x0eschema_version\x18\x03 \x01(\rR\rschemaVersion\x12;\n\x0boccurred_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\noccurredAt\x12\x1a\n\x08producer\x18\x05 \x01(\tR\x08producerB\xdc\x01\n&com.doodlearena.proto.doodle.events.v1B\tMetaProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03\x44\x45X\xaa\x02\x10\x44oodle.Events.V1\xca\x02\x10\x44oodle\\Events\\V1\xe2\x02\x1c\x44oodle\\Events\\V1\\GPBMetadata\xea\x02\x12\x44oodle::Events::V1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'doodle.events.v1.meta_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'\n&com.doodlearena.proto.doodle.events.v1B\tMetaProtoP\001ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle::Events::V1'
+  _globals['DESCRIPTOR']._serialized_options = b'\n&com.doodlearena.proto.doodle.events.v1B\tMetaProtoP\001ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle::Events::V1'
   _globals['_EVENTMETA']._serialized_start=83
   _globals['_EVENTMETA']._serialized_end=280
 # @@protoc_insertion_point(module_scope)

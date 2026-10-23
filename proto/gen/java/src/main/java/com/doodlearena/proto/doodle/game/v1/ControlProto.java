@@ -80,13 +80,13 @@ public final class ControlProto extends com.google.protobuf.GeneratedFile {
       "le.game.v1.AllocateRoomRequest\032$.doodle." +
       "game.v1.AllocateRoomResponse\022V\n\013DrainSer" +
       "ver\022\".doodle.game.v1.DrainServerRequest\032" +
-      "#.doodle.game.v1.DrainServerResponseB\330\001\n" +
+      "#.doodle.game.v1.DrainServerResponseB\321\001\n" +
       "$com.doodlearena.proto.doodle.game.v1B\014C" +
-      "ontrolProtoP\001ZHgithub.com/Bowenn/gap-pro" +
-      "ject_private/proto/gen/go/doodle/game/v1" +
-      ";gamev1\242\002\003DGX\252\002\016Doodle.Game.V1\312\002\016Doodle\\" +
-      "Game\\V1\342\002\032Doodle\\Game\\V1\\GPBMetadata\352\002\020D" +
-      "oodle::Game::V1b\006proto3"
+      "ontrolProtoP\001ZAgithub.com/Bowenn/doodle-" +
+      "arena/proto/gen/go/doodle/game/v1;gamev1" +
+      "\242\002\003DGX\252\002\016Doodle.Game.V1\312\002\016Doodle\\Game\\V1" +
+      "\342\002\032Doodle\\Game\\V1\\GPBMetadata\352\002\020Doodle::" +
+      "Game::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

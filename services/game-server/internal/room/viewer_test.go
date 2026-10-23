@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
 )
 
 // ADR 0019: the owner announces the round's first correct viewer, once.

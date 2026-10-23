@@ -261,8 +261,8 @@ const file_doodle_events_v1_wallet_proto_rawDesc = "" +
 	"\x14CREDIT_REASON_REWARD\x10\x02\x12\x15\n" +
 	"\x11CREDIT_REASON_TIP\x10\x03\x12\x1c\n" +
 	"\x18CREDIT_REASON_TIP_REFUND\x10\x04\x12\x1b\n" +
-	"\x17CREDIT_REASON_DROP_SALE\x10\x05B\xe5\x01\n" +
-	"&com.doodlearena.proto.doodle.events.v1B\vWalletProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
+	"\x17CREDIT_REASON_DROP_SALE\x10\x05B\xde\x01\n" +
+	"&com.doodlearena.proto.doodle.events.v1B\vWalletProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (
 	file_doodle_events_v1_wallet_proto_rawDescOnce sync.Once

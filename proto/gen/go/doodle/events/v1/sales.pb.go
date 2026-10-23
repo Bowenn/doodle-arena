@@ -291,9 +291,9 @@ const file_doodle_events_v1_sales_proto_rawDesc = "" +
 	"\fcompleted_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAt\"A\n" +
 	"\x0eRoyaltyPayment\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x16\n" +
-	"\x06amount\x18\x02 \x01(\x03R\x06amountB\xe4\x01\n" +
+	"\x06amount\x18\x02 \x01(\x03R\x06amountB\xdd\x01\n" +
 	"&com.doodlearena.proto.doodle.events.v1B\n" +
-	"SalesProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
+	"SalesProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (
 	file_doodle_events_v1_sales_proto_rawDescOnce sync.Once
