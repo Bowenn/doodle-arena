@@ -98,7 +98,8 @@ class SearchUnavailable(Exception):
 
 @cache
 def client() -> Elasticsearch:
-    """The shared client. Every call has a 2-second timeout; nothing retries inside it."""
+    """The shared client. Every call has a 2-second timeout (searches are on the request path);
+    nothing retries inside it. Index management uses admin()."""
     if not settings.ELASTICSEARCH_URL:
         raise SearchUnavailable("ELASTICSEARCH_URL is not set")
     auth = None
@@ -113,12 +114,22 @@ def client() -> Elasticsearch:
     )
 
 
+# Creating an index, a bulk chunk or an alias swap can take seconds on a busy node.
+ADMIN_TIMEOUT = 30
+
+
+def admin(es: Elasticsearch) -> Elasticsearch:
+    """The same client with the longer timeout of index management."""
+    return es.options(request_timeout=ADMIN_TIMEOUT)
+
+
 def new_index_name() -> str:
     return f"{ALIAS}-v{time.time_ns() // 1_000_000}"
 
 
 def ensure_index(es: Elasticsearch) -> None:
     """Creates the first index and points the alias at it, if there is no alias yet."""
+    es = admin(es)
     if es.indices.exists_alias(name=ALIAS):
         return
     name = new_index_name()
@@ -185,7 +196,7 @@ def reindex(es: Elasticsearch | None = None, batch: int = 2000) -> dict[str, Any
     approved drawing in bulk, the alias swapped in one step, then a catch-up pass for what changed
     during the build (the indexer wrote those to the old index). External versions make every
     write safe to repeat."""
-    es = es or client()
+    es = admin(es or client())
     started = time.monotonic()
     name = new_index_name()
     es.indices.create(index=name, settings=INDEX_SETTINGS, mappings=MAPPINGS)
