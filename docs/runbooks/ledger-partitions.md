@@ -54,7 +54,7 @@ That old seed usually also leaves reconciliation reporting "invariants broken" (
 
 ## Fix 1: move the rows into monthly partitions
 
-One transaction: detach the default partition, create every month from its oldest row, and copy its rows back through the parent, which routes each into its month (or into the new default, if it is still outside every partition). The ledger never misses a row, and the balance trigger checks every copied transaction again. Detaching locks `ledger_entries`, so postings wait until the commit: about a minute for 1.7 million rows.
+One transaction: detach the default partition, create every month from its oldest row, and copy its rows back through the parent, which routes each into its month (or into the new default, if it is still outside every partition). The ledger never misses a row, and the balance trigger checks every copied transaction again. Detaching locks `ledger_entries`, so postings wait until the commit: about five minutes for 1.7 million rows on the dev box, four of them the balance checks. For that many rows, stop the marketplace first (`docker compose -f infra/docker-compose.yml --env-file .env stop marketplace`) so requests fail at once instead of queueing behind the lock, and start it again afterwards.
 
 ```sql
 BEGIN;
@@ -76,7 +76,7 @@ SELECT (SELECT count(*) FROM ledger_entries_default) AS still_in_default,
 COMMIT;
 ```
 
-`still_in_default` should be 0 (unless rows lie beyond three months ahead: a clock to fix, see Afterwards) and `ledger_sum` must be 0. Rehearsed on the GCP dev box on 2026-10-23 with the 1,693,750 rows of an old `make seed`.
+`still_in_default` should be 0 (unless rows lie beyond three months ahead: a clock to fix, see Afterwards) and `ledger_sum` must be 0. Rehearsed on 2026-10-23 on the GCP dev box: 1,693,750 rows of an old `make seed`, first in a throwaway copy, then on the stack. Fix 2 took 33 s more, and the new default refuses a `TRUNCATE` like the old one.
 
 ## Fix 2: rebuild stale closed months
 
