@@ -62,6 +62,22 @@ public class MarketMetrics {
 		.setDescription("Records read from game.rounds.v1, by outcome")
 		.build();
 
+	private final LongCounter dropRequests = this.meter.counterBuilder("market.drops.requests")
+		.setDescription("Drop purchase attempts and refusals, by outcome")
+		.build();
+
+	private final LongCounter dropJoins = this.meter.counterBuilder("market.drops.joins")
+		.setDescription("Joins of a drop's waiting room")
+		.build();
+
+	private final LongCounter dropsSettled = this.meter.counterBuilder("market.drops.settled")
+		.setDescription("Drop editions whose coins were paid to the drawing's authors")
+		.build();
+
+	private final LongCounter leakedReservations = this.meter.counterBuilder("market.drops.leaked_reservations")
+		.setDescription("Drop reservations the sweeper gave back: their purchase never committed")
+		.build();
+
 	public Meter meter() {
 		return this.meter;
 	}
@@ -101,6 +117,30 @@ public class MarketMetrics {
 	/** One record from game.rounds.v1: settled, skipped or failed. */
 	public void roundReceived(String result) {
 		this.roundsReceived.add(1, Attributes.of(RESULT, result));
+	}
+
+	/**
+	 * bought, sold_out, not_admitted, already_bought, insufficient_funds, not_open, closed,
+	 * conflict, rate_limited or unavailable.
+	 */
+	public void dropRequest(String result) {
+		this.dropRequests.add(1, Attributes.of(RESULT, result));
+	}
+
+	public void dropJoin() {
+		this.dropJoins.add(1);
+	}
+
+	public void dropsSettled(long editions) {
+		if (editions > 0) {
+			this.dropsSettled.add(editions);
+		}
+	}
+
+	public void leakedReservations(long count) {
+		if (count > 0) {
+			this.leakedReservations.add(count);
+		}
 	}
 
 	public void idempotencyReplay(String operation) {

@@ -21,7 +21,7 @@ REMOTE_DIR=doodle-arena             # the VM's checkout, in its home directory
 PORT=8090                           # the marketplace on the Mac (8080 is the gateway's forward)
 TUNNEL_PORT=18090                   # its reverse tunnel on the VM
 FORWARDER=doodle-arena-marketplace-remote
-FORWARDS="8080 3000 4318 9094 15432 15433"
+FORWARDS="8080 3000 4318 6379 9094 15432 15433"
 COMPOSE="docker compose -f infra/docker-compose.yml --env-file .env"
 
 remote() {
@@ -55,6 +55,7 @@ env_value() {
 }
 DB_PASSWORD="$(env_value MARKETPLACE_DB_PASSWORD)"
 KAFKA_PASSWORD="$(env_value KAFKA_MARKETPLACE_PASSWORD)"
+REDIS_PASSWORD="$(env_value REDIS_MARKETPLACE_PASSWORD)"
 STRIPE_SECRET_KEY="$(env_value STRIPE_SECRET_KEY)"
 STRIPE_WEBHOOK_SECRET="$(env_value STRIPE_WEBHOOK_SECRET)"
 
@@ -117,11 +118,12 @@ remote "$COMPOSE stop marketplace > /dev/null && docker rm -f $FORWARDER > /dev/
     $gateway_image sh -c \"printf 'events {}\nstream { server { listen 8080; proxy_pass $bridge_ip:$TUNNEL_PORT; } }\n' > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'\" > /dev/null"
 
 echo "==> Starting the marketplace on :$PORT (Ctrl-C stops it and restores the dev box)"
-export PORT DB_PASSWORD KAFKA_PASSWORD STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET
+export PORT DB_PASSWORD KAFKA_PASSWORD REDIS_PASSWORD STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET
 export DB_HOST=localhost DB_PORT=15432 DB_NAME=marketplace DB_USER=marketplace
 export DB_REPLICA_HOST=localhost DB_REPLICA_PORT=15433
 export AUTH_JWKS_URL=http://localhost:8080/api/auth/.well-known/jwks.json JWT_ISSUER=http://localhost:8080/api/auth
 export KAFKA_BROKERS=localhost:9094 KAFKA_USERNAME=marketplace
+export REDIS_HOST=localhost REDIS_PORT=6379 REDIS_USERNAME=marketplace
 export PUBLIC_BASE_URL=http://localhost:8080
 export SERVICE_VERSION="${SERVICE_VERSION:-0.1.0}" LOG_LEVEL=info DEPLOYMENT_ENVIRONMENT=local
 export SERVICE_INSTANCE_ID=marketplace-mac OTEL_SERVICE_NAME=marketplace

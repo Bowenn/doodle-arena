@@ -549,3 +549,22 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Tier checks by what they protect.** The core (health, telemetry, the drawing pipeline, Kafka and data ACLs, alert rules) catches a broken stack and runs on every PR. The feature drills and load-test smokes each test one feature, take about five more minutes, and run on `master`, on demand, or on a PR labelled `full-stack`. A label is a cheap, visible switch a reviewer can flip.
 - **A concurrency group can cancel the run you wanted.** Adding the label trigger meant every label event starts a run in the PR's group, and `cancel-in-progress` would let an unrelated label cancel a real run before the job's `if` skipped it. Unrelated labels now get a group of their own; `full-stack` shares the group on purpose, so it replaces a core run in progress.
 - **Merge-first is a deployment question, not a CI question.** It's safe here because nothing deploys from `master` (AWS changes only through `make aws-*`), the trunk takes one task at a time so a red run points at one merge, and a revert is one button. The rule still keeps waiting for the risky areas: infra, ACLs, migrations, money paths, fencing and contracts.
+
+### 6.8a Limited drops: no overselling
+
+- **Keep the burst away from the truth, but never trust the gate.** A drop is many buyers racing for few editions. Redis handles the race:
+  - a read-only Lua look answers "not admitted" or "sold out" before a request claims anything in Postgres;
+  - a reservation script hands out edition numbers atomically.
+
+  Postgres still decides every sale, behind `PRIMARY KEY(drop_id, edition_no)`, `UNIQUE(drop_id, buyer_id)` and `CHECK(edition_no BETWEEN 1 AND editions)`. The test proves it by making Redis lie: every edition number is handed out three times to 300 buyers, yet exactly 20 editions sell, 20 buyers are charged, and 40 extras are refused with their coins rolled back.
+- **Fairness is a design choice, not a side effect.** First come, first served rewards bots and refreshing. The waiting room gives everyone who joins before the open a random place, then admits places at a rate that is a pure function of time, so no job runs and no clock has to tick.
+- **A classic trap showed up in the baseline.** The Postgres-only comparison first locked the drop's row and counted its sales in the same statement. Under READ COMMITTED, a statement that waited for a lock still counts with its old snapshot, so two buyers saw the same count. Taking the lock in one statement and counting in the next fixed it. That's why the real design never counts under a lock at all.
+- **Two stores, one rule: disagreement may cost an unsold edition, never an extra one.** Every failure has its path:
+  - a rollback gives the reservation back;
+  - an edition Postgres already sold is forgotten, not returned;
+  - a reservation leaked by a crash is released by the sweeper after a minute;
+  - a Redis that lost its data is restocked from Postgres;
+  - a Redis that's down makes drops answer 503 rather than guess.
+
+  A security review found one more case: a buyer Redis forgot took a new edition that was then marked theirs and lost. The fix gives it back and relearns the edition they own.
+- **The payout reuses the tips pattern** (ADR 0021): buyers' coins go to 16 escrow accounts, so no author's balance row is hot, and one posting per batch pays the authors once the drop sold out. A closed drop that didn't sell out waits a minute first, because a purchase that passed its window check just before the close may still be committing.

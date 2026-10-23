@@ -14,11 +14,13 @@ class CreditReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     CREDIT_REASON_REWARD: _ClassVar[CreditReason]
     CREDIT_REASON_TIP: _ClassVar[CreditReason]
     CREDIT_REASON_TIP_REFUND: _ClassVar[CreditReason]
+    CREDIT_REASON_DROP_SALE: _ClassVar[CreditReason]
 CREDIT_REASON_UNSPECIFIED: CreditReason
 CREDIT_REASON_STRIPE_PURCHASE: CreditReason
 CREDIT_REASON_REWARD: CreditReason
 CREDIT_REASON_TIP: CreditReason
 CREDIT_REASON_TIP_REFUND: CreditReason
+CREDIT_REASON_DROP_SALE: CreditReason
 
 class WalletEvent(_message.Message):
     __slots__ = ("coins_credited",)

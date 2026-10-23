@@ -55,6 +55,14 @@ public enum CreditReason
    * <code>CREDIT_REASON_TIP_REFUND = 4;</code>
    */
   CREDIT_REASON_TIP_REFUND(4),
+  /**
+   * <pre>
+   * A limited drop's sales, paid to the drawing's authors once it sold out or closed (ADR 0022).
+   * </pre>
+   *
+   * <code>CREDIT_REASON_DROP_SALE = 5;</code>
+   */
+  CREDIT_REASON_DROP_SALE(5),
   UNRECOGNIZED(-1),
   ;
 
@@ -107,6 +115,14 @@ public enum CreditReason
    * <code>CREDIT_REASON_TIP_REFUND = 4;</code>
    */
   public static final int CREDIT_REASON_TIP_REFUND_VALUE = 4;
+  /**
+   * <pre>
+   * A limited drop's sales, paid to the drawing's authors once it sold out or closed (ADR 0022).
+   * </pre>
+   *
+   * <code>CREDIT_REASON_DROP_SALE = 5;</code>
+   */
+  public static final int CREDIT_REASON_DROP_SALE_VALUE = 5;
 
 
   public final int getNumber() {
@@ -138,6 +154,7 @@ public enum CreditReason
       case 2: return CREDIT_REASON_REWARD;
       case 3: return CREDIT_REASON_TIP;
       case 4: return CREDIT_REASON_TIP_REFUND;
+      case 5: return CREDIT_REASON_DROP_SALE;
       default: return null;
     }
   }

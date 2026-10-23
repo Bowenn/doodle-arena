@@ -754,11 +754,17 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       # Where Stripe Checkout sends the browser back to.
       PUBLIC_BASE_URL: http://localhost:8080
+      # Limited drops' inventory and waiting rooms, and rate limits (ADR 0022): market:* only.
+      REDIS_HOST: redis
+      REDIS_USERNAME: marketplace
+      REDIS_PASSWORD: ${REDIS_MARKETPLACE_PASSWORD:?}
     networks: [default, kafka]
     depends_on:
       otel-lgtm:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
@@ -889,6 +895,7 @@ services:
       REDIS_GAME_SERVER_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
       REDIS_ASSETS_PASSWORD: ${REDIS_ASSETS_PASSWORD:?}
       REDIS_RELAY_PASSWORD: ${REDIS_RELAY_PASSWORD:?}
+      REDIS_MARKETPLACE_PASSWORD: ${REDIS_MARKETPLACE_PASSWORD:?}
     volumes:
       - redis-data:/data
       - ./redis/start.sh:/etc/doodle-arena/redis-start.sh:ro

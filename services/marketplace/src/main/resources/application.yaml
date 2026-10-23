@@ -41,6 +41,16 @@ spring:
       # container on one by default. In AWS, ECS can start the marketplace before the data host's
       # kafka-init has created its user and grants (the lobby was refused for 2 s that way).
       auth-exception-retry-interval: 10s
+  data:
+    redis:
+      # Limited drops (ADR 0022): the marketplace's Redis user may touch market:* only. A command
+      # that takes longer than this fails, and the drop answers 503: drops fail closed.
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      timeout: 500ms
+      connect-timeout: 1s
   flyway:
     # Migrations run at startup; Flyway's advisory lock keeps two starting instances apart.
     locations: classpath:db/migration
@@ -73,6 +83,17 @@ app:
     # Share of every sale paid to the drawing's authors who are neither the seller nor the buyer
     # (design doc, section 8).
     percent: 10
+  drops:
+    # ADR 0022. Waiting-room places admitted per second once a drop opens.
+    admit-per-second: 50
+    # How often the sweeper pays sold-out or closed drops and repairs leaked reservations.
+    sweep-interval: 10s
+    sweeper-enabled: true
+    # A reservation this old without its Postgres row is given back.
+    leak-after: 60s
+    # The per-user token bucket on the drop endpoints.
+    rate-limit-per-second: 5
+    rate-limit-burst: 10
   tips:
     # ADR 0021. A tip is refused once its round was settled this long ago.
     round-over-after: 30s

@@ -105,6 +105,12 @@ public final class ReconciliationJob {
 			.setDescription("Tips escrow shards whose balance isn't the sum of their pending tips; must be 0")
 			.buildWithCallback((gauge) -> current().ifPresent((result) -> gauge.record(result.escrowMismatches())));
 		metrics.meter()
+			.gaugeBuilder("market.drops.escrow_mismatch")
+			.ofLongs()
+			.setUnit("{shard}")
+			.setDescription("Drop escrow shards whose balance isn't the sum of their paid editions; must be 0")
+			.buildWithCallback((gauge) -> current().ifPresent((result) -> gauge.record(result.dropEscrowMismatches())));
+		metrics.meter()
 			.gaugeBuilder("market.ledger.default_partition_rows")
 			.ofLongs()
 			.setUnit("{entry}")
@@ -129,11 +135,13 @@ public final class ReconciliationJob {
 			span.setAttribute("ledger.mismatched_accounts", result.mismatchedAccounts());
 			span.setAttribute("ownership.violations", result.ownershipViolations());
 			span.setAttribute("tips.escrow_mismatch", result.escrowMismatches());
+			span.setAttribute("drops.escrow_mismatch", result.dropEscrowMismatches());
 			var line = result.clean() ? log.atInfo() : log.atError();
 			line.addKeyValue("imbalance", result.imbalance())
 				.addKeyValue("mismatched_accounts", result.mismatchedAccounts())
 				.addKeyValue("ownership_violations", result.ownershipViolations())
 				.addKeyValue("escrow_mismatched_shards", result.escrowMismatchedShards())
+				.addKeyValue("drop_escrow_mismatched_shards", result.dropEscrowMismatchedShards())
 				.addKeyValue("duration_ms", durationMs);
 			if (!result.mismatchedAccountIds().isEmpty()) {
 				line = line.addKeyValue("mismatched_account_ids",
@@ -187,7 +195,8 @@ public final class ReconciliationJob {
 					ORDER BY a.account_id""".formatted(OPEN_FROM))
 				.query(Long.class)
 				.list();
-			return new ReconciliationResult(imbalance, mismatched, ownershipViolations(), escrowMismatches(), checkedAt);
+			return new ReconciliationResult(imbalance, mismatched, ownershipViolations(), escrowMismatches(),
+					dropEscrowMismatches(), checkedAt);
 		});
 		if (verified.imbalance() != 0 || !verified.mismatchedAccounts().isEmpty()) {
 			// A closed month's entries no longer match their stored totals: something changed
@@ -200,7 +209,8 @@ public final class ReconciliationJob {
 			TreeSet<Long> accounts = new TreeSet<>(result.mismatchedAccountIds());
 			accounts.addAll(verified.mismatchedAccounts());
 			result = new ReconciliationResult(result.imbalance() + verified.imbalance(), List.copyOf(accounts),
-					result.ownershipViolationIds(), result.escrowMismatchedShards(), result.checkedAt());
+					result.ownershipViolationIds(), result.escrowMismatchedShards(), result.dropEscrowMismatchedShards(),
+					result.checkedAt());
 		}
 		this.last.set(result);
 		return result;
@@ -225,6 +235,24 @@ public final class ReconciliationJob {
 				LEFT JOIN (SELECT shard, SUM(amount) AS pending FROM tips WHERE status = 'PENDING' GROUP BY shard) p
 					USING (shard)
 				WHERE s.balance <> COALESCE(p.pending, 0)
+				ORDER BY s.shard""")
+			.query(Integer.class)
+			.list();
+	}
+
+	/**
+	 * Drop escrow shards (ADR 0022) that don't hold exactly the price of their paid editions, which
+	 * are waiting to be paid to the drawing's authors.
+	 */
+	private List<Integer> dropEscrowMismatches() {
+		return this.db.sql("""
+				SELECT s.shard FROM (
+					SELECT CAST(substr(a.owner_id, length('drop_escrow:') + 1) AS INT) AS shard, b.balance
+					FROM accounts a JOIN balances b USING (account_id)
+					WHERE a.owner_type = 'system' AND a.owner_id LIKE 'drop\\_escrow:%') s
+				LEFT JOIN (SELECT shard, SUM(price) AS paid FROM drop_editions WHERE status = 'PAID' GROUP BY shard) p
+					USING (shard)
+				WHERE s.balance <> COALESCE(p.paid, 0)
 				ORDER BY s.shard""")
 			.query(Integer.class)
 			.list();

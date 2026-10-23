@@ -82,6 +82,7 @@ services:
       REDIS_GAME_SERVER_PASSWORD: ${REDIS_GAME_SERVER_PASSWORD:?}
       REDIS_ASSETS_PASSWORD: ${REDIS_ASSETS_PASSWORD:?}
       REDIS_RELAY_PASSWORD: ${REDIS_RELAY_PASSWORD:?}
+      REDIS_MARKETPLACE_PASSWORD: ${REDIS_MARKETPLACE_PASSWORD:?}
     volumes:
       - redis-data:/data
       - ./redis/start.sh:/etc/doodle-arena/redis-start.sh:ro

@@ -27,6 +27,8 @@ enum CreditReason {
   CREDIT_REASON_TIP = 3;
   // A tip given back to its tipper: its round never finished, or the tipper drew it (ADR 0021).
   CREDIT_REASON_TIP_REFUND = 4;
+  // A limited drop's sales, paid to the drawing's authors once it sold out or closed (ADR 0022).
+  CREDIT_REASON_DROP_SALE = 5;
 }
 
 // CoinsCredited says coins were added to a player's wallet by a committed ledger transaction.
@@ -40,6 +42,6 @@ message CoinsCredited {
   // Why the coins were added.
   CreditReason reason = 4;
   // What caused it: the Stripe Checkout session id for purchases, the match id for rewards,
-  // "<match_id>:<round_no>" for tips, the tip id for refunds.
+  // "<match_id>:<round_no>" for tips, the tip id for refunds, the drop id for drop sales.
   string reference = 5;
 }

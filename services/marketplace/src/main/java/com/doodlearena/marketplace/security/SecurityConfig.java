@@ -12,8 +12,8 @@ import tools.jackson.databind.json.JsonMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
@@ -26,6 +26,8 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -69,15 +71,29 @@ public class SecurityConfig {
 				// Stripe signs its webhook instead (StripeWebhookController).
 				.requestMatchers("/healthz", "/api/market/stripe/webhook")
 				.permitAll()
+				// Only an admin creates a limited drop (ADR 0022); grant it with scripts/grant-role.sh.
+				.requestMatchers(HttpMethod.POST, "/api/market/drops")
+				.hasRole("admin")
 				.anyRequest()
 				.authenticated())
 			.sessionManagement((sessions) -> sessions.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.csrf((csrf) -> csrf.disable())
-			.oauth2ResourceServer((server) -> server.jwt(Customizer.withDefaults()).authenticationEntryPoint(unauthenticated))
+			.oauth2ResourceServer((server) -> server.jwt((jwt) -> jwt.jwtAuthenticationConverter(roles()))
+				.authenticationEntryPoint(unauthenticated))
 			.exceptionHandling((errors) -> errors.authenticationEntryPoint(unauthenticated)
 				.accessDeniedHandler((request, response, ex) -> write(response, request, json,
 						HttpServletResponse.SC_FORBIDDEN, "FORBIDDEN", "not allowed")));
 		return http.build();
+	}
+
+	/** The token's {@code roles} claim (player, moderator, admin) as ROLE_ authorities. */
+	static JwtAuthenticationConverter roles() {
+		JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
+		authorities.setAuthoritiesClaimName("roles");
+		authorities.setAuthorityPrefix("ROLE_");
+		JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+		converter.setJwtGrantedAuthoritiesConverter(authorities);
+		return converter;
 	}
 
 	private static void write(HttpServletResponse response, HttpServletRequest request, JsonMapper json, int status,

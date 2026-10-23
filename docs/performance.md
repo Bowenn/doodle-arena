@@ -196,3 +196,16 @@ The JVM's settings changed (the marketplace's Dockerfile, so compose and ECS run
 - **`SweeperThreshold=50`.** Warm-up never reaches 120 MB of new code: the code cache settles near 45 MB. A nearly full code cache still unloads old code, when 10% is free.
 
 Latency with the final settings (`make loadtest-tips`, 300 tips a second for a minute, 10 connections): p95 150, 499 and 362 ms and p99 0.82, 2.29 and 0.82 s, against p95 685 and 979 ms with the old settings the same evening. So the 250 ms threshold is still missed in two of three runs, and what's left is the pool's queue. Twenty connections didn't settle it either: p95 61 to 770 ms with the new settings and 539 ms to 1.62 s with the old ones. More connections don't add capacity to a Postgres starved of CPU. Fewer checkouts per tip, and the same run on AWS's separate data host (task 6.9), are what's left.
+
+## 9. Limited drops (task 6.8)
+
+Many buyers racing for few editions at the same second (ADR 0022). The criterion is no overselling. Measured locally with Testcontainers (Postgres and Redis), 32 threads and connections, 2026-10-23:
+
+| Run | Answers | Sold | Charged |
+|---|---|---|---|
+| `DropOversellTests`: 300 buyers for 20 editions, Redis honest | 20 sales, 280 `SOLD_OUT` | 20 | 20 |
+| The same with Redis lying: every edition number handed out three times | 20 sales, 40 `DROP_CONFLICT` (Postgres's primary key refused them, their coins rolled back), 240 `SOLD_OUT` | 20 | 20 |
+| The same burst through the Redis gate | 58 ms for all 300 | 20 | 20 |
+| Through a Postgres-only counter (every buyer locks the drop's row, then counts) | 125 ms for all 300 | 20 | 20 |
+
+The flash sale at scale (`make loadtest-drops`: 1,000 seeded buyers for 100 editions on the dev box) is task 6.8b.
