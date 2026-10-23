@@ -33,7 +33,9 @@ run_one() {
     # The backup's logic (ADR 0016); the rest is checked by make lint s=terraform, make
     # backup-check and, live, make aws-check.
     terraform) python3 -m unittest discover -s scripts/aws -p 'test_*.py' ;;
-    web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm test) ;;
+    # Not just node_modules: on Linux, the web container's node_modules volume leaves an empty
+    # root-owned folder on the host.
+    web) (cd "$dir" && { [[ -x node_modules/.bin/vitest ]] || npm ci; } && npm test) ;;
   esac
 }
 
