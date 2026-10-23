@@ -182,6 +182,8 @@ locals {
       health  = ["CMD", "python", "-c", "import glob, os, sys, time; sys.exit(time.time() - max(os.path.getmtime(f) for f in glob.glob('/tmp/celerybeat-schedule*')) > 180)"],
       env     = local.assets_env, secrets = local.assets_secrets
     }
+    # The JVM's flags are in the image (services/marketplace/Dockerfile): Serial GC and a fixed heap
+    # of half the task's memory, as in compose. 0.5 vCPU is one processor to the JVM.
     marketplace = {
       image  = "marketplace", ports = [8080], discover = true, cpu = 512, memory = 1024, start_period = 90,
       health = ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/healthz"]
