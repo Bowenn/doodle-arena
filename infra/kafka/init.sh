@@ -91,6 +91,7 @@ GRANTS=$(cat <<'EOF'
 game-server   Write    --topic game.rounds.v1 --topic game.matches.v1
 lobby         Read     --topic game.matches.v1 --group lobby-leaderboard
 assets        Read     --topic game.rounds.v1 --group assets
+assets        Read     --topic assets.drawings.v1 --topic market.listings.v1 --topic market.sales.v1 --group assets-search
 assets        Write    --topic assets.drawings.v1
 marketplace   Read     --topic game.matches.v1 --topic game.rounds.v1 --topic assets.drawings.v1 --group marketplace
 marketplace   Write    --topic market.listings.v1 --topic market.sales.v1 --topic market.wallet.v1

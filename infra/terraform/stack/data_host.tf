@@ -35,6 +35,9 @@ locals {
     REDIS_ASSETS_PASSWORD      = "stack/redis-assets-password"
     REDIS_RELAY_PASSWORD       = "stack/redis-relay-password"
     REDIS_MARKETPLACE_PASSWORD = "stack/redis-marketplace-password"
+    # Search (ADR 0023): Elasticsearch's superuser (the init job) and assets' user.
+    ELASTIC_PASSWORD              = "stack/elastic-password"
+    ELASTICSEARCH_ASSETS_PASSWORD = "stack/elasticsearch-assets-password"
   }
   # Read with the instance role too: the broker's TLS key and the CA, written to files at boot.
   data_host_secrets = concat(values(local.data_host_env), ["stack/kafka-server-pem", "stack/kafka-ca-pem"])
@@ -50,6 +53,7 @@ locals {
     { for f in ["pg_hba.conf", "replication.sh", "replica.sh"] : "postgres/${f}" => "${local.repo}/infra/postgres/${f}" },
     { for f in fileset("${local.repo}/infra/kafka", "*") : "kafka/${f}" => "${local.repo}/infra/kafka/${f}" },
     { "redis/start.sh" = "${local.repo}/infra/redis/start.sh" },
+    { "elasticsearch/init.sh" = "${local.repo}/infra/elasticsearch/init.sh" },
     { "mongo/create-users.js" = "${local.repo}/infra/mongo/create-users.js" },
     # The backup and restore scripts, run through SSM Run Command (ADR 0016).
     { for f in fileset("${local.repo}/infra/backup", "*.sh") : "backup/${f}" => "${local.repo}/infra/backup/${f}" },

@@ -71,6 +71,11 @@ x-assets-env: &assets-env
   # Moderation (design doc 4.8). Not a startup dependency: while the AI service is down,
   # drawings retry and then wait in the review queue.
   AI_URL: http://ai:8080
+  # Search (ADR 0023, the opt-in profile search): the assets user may touch drawings* only.
+  # Without Elasticsearch running, search answers 503 and nothing else changes.
+  ELASTICSEARCH_URL: http://elasticsearch:9200
+  ELASTICSEARCH_USERNAME: assets
+  ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_ASSETS_PASSWORD:?}
 
 # Kafka for assets' round consumer and outbox relay only (ADR 0013): the web process, the
 # Celery worker and beat get no Kafka credential and aren't on the Kafka network, so a bug in
@@ -650,6 +655,38 @@ services:
       start_period: 20s
       retries: 3
 
+  # Search (ADR 0023): reads assets.drawings.v1, market.listings.v1 and market.sales.v1, keeps
+  # assets' projection of active listings, and writes each drawing's document to Elasticsearch.
+  assets-indexer:
+    <<: *app
+    profiles: [search]
+    build:
+      context: ..
+      dockerfile: services/assets/Dockerfile
+    command: ["python", "manage.py", "index_search"]
+    environment:
+      <<: [*app-env, *assets-env, *assets-kafka-env]
+      SERVICE_INSTANCE_ID: assets-indexer-1
+      OTEL_SERVICE_NAME: assets
+      OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-indexer-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
+    networks: [default, kafka, seaweedfs]
+    depends_on:
+      otel-lgtm:
+        condition: service_healthy
+      assets-migrate:
+        condition: service_completed_successfully
+      kafka-init:
+        condition: service_completed_successfully
+      elasticsearch-init:
+        condition: service_completed_successfully
+    healthcheck:
+      # The poll loop touches this file every second, even while Kafka or Elasticsearch is down.
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/indexer-alive') > 30)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
   # Publishes the outbox (DrawingApproved, DrawingRejected) to assets.drawings.v1.
   assets-relay:
     <<: *app
@@ -944,6 +981,50 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Search (ADR 0023), opt-in: PROFILES=search make up (about 1 GB). One node, security on, the
+  # heap fixed at 512 MB; the user assets is created by elasticsearch-init.
+  elasticsearch:
+    profiles: [search]
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
+    environment:
+      discovery.type: single-node
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?}
+      xpack.security.enabled: "true"
+      # One node on the private network: no transport between nodes to encrypt, and HTTP stays
+      # inside the stack (port 9200 is published on 127.0.0.1 for humans only).
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      xpack.ml.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      # The Docker VM's disk fills with everything else too; don't make the index read-only.
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+    mem_limit: 1g
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u \"elastic:$$ELASTIC_PASSWORD\" 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+
+  # One-shot job: the role assets_search (drawings* only) and the user assets (ADR 0023).
+  elasticsearch-init:
+    profiles: [search]
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
+    entrypoint: ["bash", "/init.sh"]
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?}
+      ELASTICSEARCH_ASSETS_PASSWORD: ${ELASTICSEARCH_ASSETS_PASSWORD:?}
+    volumes:
+      - ./elasticsearch/init.sh:/init.sh:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: "no"
+
   kafka:
     # SCRAM-SHA-512 users and ACLs, deny by default (ADR 0013): infra/kafka/broker.sh writes the
     # broker config and formats the storage with the first credentials on first start. The image
@@ -1130,6 +1211,7 @@ volumes:
   redis-data:
   mongo-data:
   kafka-data:
+  elasticsearch-data:
   seaweedfs-data:
   lgtm-data:
 

@@ -22,7 +22,7 @@ ps:
 # s=game-server shows both instances (the compose services are game-server-1 and -2), s=analytics
 # Flink's JobManager and TaskManager.
 logs:
-	$(COMPOSE) logs -f --tail=100 $(if $(filter game-server,$(s)),game-server-1 game-server-2,$(if $(filter assets,$(s)),assets assets-worker assets-consumer assets-relay assets-beat,$(if $(filter auth,$(s)),auth auth-relay,$(if $(filter analytics,$(s)),analytics-jobmanager analytics-taskmanager,$(s)))))
+	$(COMPOSE) logs -f --tail=100 $(if $(filter game-server,$(s)),game-server-1 game-server-2,$(if $(filter assets,$(s)),assets assets-worker assets-consumer assets-relay assets-beat assets-indexer,$(if $(filter auth,$(s)),auth auth-relay,$(if $(filter analytics,$(s)),analytics-jobmanager analytics-taskmanager,$(s)))))
 
 test:
 	@./scripts/test.sh $(s)
