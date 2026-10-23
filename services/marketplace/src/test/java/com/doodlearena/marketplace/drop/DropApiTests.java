@@ -127,6 +127,26 @@ class DropApiTests extends DropTestSupport {
 	}
 
 	@Test
+	void aBuyerRedisForgotGetsNoSecondEditionAndLosesNone() throws Exception {
+		Drop drop = openDrop(4, 10);
+		AccountRef buyer = this.fixtures.newUserWith(100);
+		join(buyer, drop);
+		String first = buy(buyer, drop, key()).andReturn().getResponse().getContentAsString();
+		int owned = JsonPath.read(first, "$.edition_no");
+		// Redis forgets who bought (a flush): the buyer's next try reserves a new edition.
+		this.redis.delete(DropGate.key(drop.dropId(), "buyers"));
+
+		buy(buyer, drop, key()).andExpect(status().isConflict())
+			.andExpect(jsonPath("$.error.code").value("ALREADY_BOUGHT"));
+
+		// That edition went back for someone else, and Redis learned the one they own.
+		assertThat(this.redis.opsForList().size(DropGate.key(drop.dropId(), "free"))).isEqualTo(3);
+		assertThat(this.redis.opsForHash().get(DropGate.key(drop.dropId(), "buyers"), buyer.ownerId()))
+			.isEqualTo("p:" + owned);
+		assertThat(this.fixtures.balance(buyer)).isEqualTo(90);
+	}
+
+	@Test
 	void aBuyerMustJoinAndBeAdmitted() throws Exception {
 		Drop drop = openDrop(5, 10);
 		AccountRef buyer = this.fixtures.newUserWith(100);

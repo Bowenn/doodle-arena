@@ -123,6 +123,18 @@ class DropOversellTests extends DropTestSupport {
 			.purchase(buyer.ownerId(), drop.dropId(), UUID.randomUUID().toString(), "h", "r")));
 		assertThat(again.containsKey("201")).isFalse();
 		assertSoldExactly(drop, buyers);
+		// Whatever Redis now marks as paid is exactly the edition Postgres holds for that buyer: a paid
+		// buyer's retry gave its new reservation back and Redis relearned what they own.
+		Map<Object, Object> entries = this.redis.opsForHash().entries(DropGate.key(drop.dropId(), "buyers"));
+		entries.forEach((user, held) -> {
+			if (String.valueOf(held).startsWith("p:")) {
+				Integer owned = this.db.sql("SELECT edition_no FROM drop_editions WHERE drop_id = ? AND buyer_id = ?")
+					.params(drop.dropId(), user)
+					.query(Integer.class)
+					.single();
+				assertThat(held).isEqualTo("p:" + owned);
+			}
+		});
 	}
 
 	/**

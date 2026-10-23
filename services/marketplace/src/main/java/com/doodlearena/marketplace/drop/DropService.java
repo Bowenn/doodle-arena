@@ -250,8 +250,11 @@ public class DropService {
 		/** Postgres holds the edition for someone else: don't give the number back. */
 		boolean forget;
 
-		/** Postgres already holds this buyer's edition: leave the entry as it is. */
-		boolean keep;
+		/**
+		 * The edition Postgres already holds for this buyer (Redis forgot they bought): the new
+		 * reservation goes back, and Redis learns the edition they own.
+		 */
+		Integer owned;
 
 		Reservation(int edition) {
 			this.edition = edition;
@@ -336,7 +339,11 @@ public class DropService {
 		}
 		if (paid.replayed()) {
 			// The ledger already has this buyer's purchase (one per buyer): Redis forgot it.
-			reservation.keep = true;
+			reservation.owned = this.db.sql("SELECT edition_no FROM drop_editions WHERE drop_id = ? AND buyer_id = ?")
+				.params(drop.dropId(), buyer)
+				.query(Integer.class)
+				.optional()
+				.orElse(null);
 			throw alreadyBought();
 		}
 		Edition bought;
@@ -385,8 +392,16 @@ public class DropService {
 	 */
 	private void settleReservation(Drop drop, String buyer, Reservation reservation, boolean committed) {
 		try {
-			if (committed || reservation.keep) {
+			if (committed) {
 				this.gate.paid(drop, buyer, reservation.edition, this.clock.instant());
+			}
+			else if (reservation.owned != null) {
+				// The edition just reserved goes back, unless it is the one they own (a retry of the
+				// same purchase racing its own commit); then Redis records what they own.
+				if (reservation.owned != reservation.edition) {
+					this.gate.release(drop, buyer, reservation.edition);
+				}
+				this.gate.paid(drop, buyer, reservation.owned, this.clock.instant());
 			}
 			else if (reservation.forget) {
 				this.gate.forget(drop, buyer, reservation.edition);
