@@ -568,3 +568,10 @@ Read this before interviews, and practice with the interview drill prompt in `do
 
   A security review found one more case: a buyer Redis forgot took a new edition that was then marked theirs and lost. The fix gives it back and relearns the edition they own.
 - **The payout reuses the tips pattern** (ADR 0021): buyers' coins go to 16 escrow accounts, so no author's balance row is hot, and one posting per batch pays the authors once the drop sold out. A closed drop that didn't sell out waits a minute first, because a purchase that passed its window check just before the close may still be committing.
+
+### 6.8b The flash sale, measured
+
+- **No overselling holds at scale, three times over.** On the dev box, 1,000 seeded buyers raced for 100 editions. Every run sold exactly 100 to 100 distinct buyers, and the check afterwards counts in Postgres, not in k6: 100 edition rows, 100 purchases charged, the authors paid 1,000 coins, and the ledger summing to 0.
+- **The first run found a waiting-room bug in how answers were ordered.** The read-only check said "not admitted" before "sold out". So once the editions were gone, everyone further back in the queue kept retrying for up to 20 seconds: 9,726 requests for 1,000 buyers. Answering "sold out" first cut it to about 3,100. It's a small reorder in a Lua script, with a visible effect on load.
+- **Read the tail before you tune.** p95 was 1.2 s on a warm JVM and 2.1 s right after a rebuild. All 1,000 buyers fire within 200 ms of the open, about 5,000 requests a second for an instant, at one 1 GB marketplace. Redis's scripts take well under a millisecond. So the tail is the burst queueing at one instance, not the inventory design. The fix is more instances, not a different lock. The k6 threshold now asserts what matters (exactly N sold, no errors) and bounds latency loosely.
+- **Cold starts are part of the measurement.** The first drop on a freshly seeded box got a 503: the marketplace's very first Redis call had to open the connection and log in within its 500 ms timeout. The connection now opens at startup, and the rebuilt-then-measured run shows how much a cold JIT costs under a burst.

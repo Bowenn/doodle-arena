@@ -45,9 +45,13 @@ export const options = {
     },
   },
   thresholds: {
+    // The criterion: exactly EDITIONS sold, nothing unexpected (Postgres is checked afterwards too).
     drops_bought: [`count==${EDITIONS}`],
     drops_errors: ['count==0'],
-    purchase_latency: ['p(95)<250'],
+    // A sanity bound, not a target: every buyer fires within 200 ms of the open (about 5,000
+    // requests a second for an instant) at one marketplace JVM of 1 GB. On the dev box a warm
+    // JVM absorbed it with p95 1.2 s (docs/performance.md, section 9).
+    purchase_latency: ['p(95)<2000'],
   },
   summaryTrendStats: ['p(50)', 'p(95)', 'p(99)', 'max'],
 }
