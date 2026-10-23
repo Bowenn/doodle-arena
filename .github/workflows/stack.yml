@@ -1,10 +1,16 @@
-# Boots the whole local stack (make up) and runs make smoke: every /healthz through the
-# gateway, plus the gateway's rate limit. Runs only when the stack itself changes, on master,
-# and on demand, because it takes about five runner-minutes.
+# Boots the whole local stack (make up, every image and profile) and checks it end to end.
+#
+# Two tiers. The core (smoke, telemetry, pipeline, Kafka and data ACLs, alerts) runs on every
+# run: it catches a broken stack. The full run adds the feature drills and the load-test smokes
+# (analytics, wash trading, tips, k6), about five more minutes, on pushes to master, on
+# workflow_dispatch, and on a PR labelled full-stack. A PR runs only when the stack itself
+# changes (the paths below); for a PR outside them, dispatch the workflow on its branch.
 name: stack
 
 on:
   pull_request:
+    # labeled: adding full-stack reruns the PR with the full tier (other labels are skipped).
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - infra/**
       - scripts/**
@@ -24,12 +30,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A PR's other labels (the job skips them) get a group of their own, or they would cancel a
+  # real run; full-stack shares the group, so it replaces a core run in progress.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'full-stack') && github.run_id || 'run' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   smoke:
     name: make up and make smoke
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-stack'
     # Not ubuntu-24.04: its kernel is now in the 6.19 to 7.0.13 range, where MongoDB 8.0 refuses
     # to start (SERVER-121912; MongoDB's 8.0 release notes). Move back once the runner's kernel
     # is 7.0.14 or newer, or a MongoDB 8.0 patch supports it. Checked 2026-10-20 (task 5.5): no
@@ -39,20 +48,19 @@ jobs:
     env:
       # Show otel-lgtm's collector and Loki logs, so a failed export to Loki is explained.
       OTEL_LGTM_COMPONENT_LOGS: "true"
+      # The full tier: everything except a PR without the full-stack label.
+      FULL_STACK: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-stack') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The runner's disk is ~94% full once every service image is built, and Loki stops
-      # accepting logs above 90% disk usage ("Ingester is shutting down"). Remove large
-      # preinstalled toolchains this job never uses.
-      - name: Kernel (MongoDB 8.0 refuses 6.19 to 7.0.13)
-        run: uname -r
-      - name: Free disk space
+      # Loki stops accepting logs above 90% disk usage ("Ingester is shutting down"). The
+      # ubuntu-22.04 runner has room (146 GB, 41% used before the build and 39% after a full run,
+      # 2026-10-23), so nothing is deleted first; the disk is printed before and after to notice
+      # if that changes, for example on a move back to ubuntu-24.04.
+      - name: Kernel (MongoDB 8.0 refuses 6.19 to 7.0.13) and disk
         run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
-          docker image prune -af > /dev/null
+          uname -r
           df -h /
       - name: make up (creates .env and the JWT key, builds every image, the opt-in parts included)
         run: PROFILES=live,analytics make up
@@ -62,38 +70,47 @@ jobs:
         run: make telemetry-check
       - name: make pipeline-check (a round becomes an approved, stored, published drawing)
         run: make pipeline-check
-      # analytics-check publishes and reads events with tools/eventctl.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.2"
-          cache: false
-      - name: make analytics-check (viewer guesses in, the Flink job's TopGuesses out, ADR 0018)
-        run: make analytics-check
       - name: make kafka-acl-check (the broker refuses what each service must not do, ADR 0013)
         run: make kafka-acl-check
       - name: make data-acl-check (Redis and SeaweedFS refuse other services' keys and buckets)
         run: make data-acl-check
       - name: make alerts-check (dashboards, alert rules and the contact point load and evaluate)
         run: make alerts-check
+      # The full tier from here: the core above needs no Go, uv or k6.
+      # analytics-check publishes and reads events with tools/eventctl.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: env.FULL_STACK == 'true'
+        with:
+          go-version: "1.27.2"
+          cache: false
+      - name: make analytics-check (viewer guesses in, the Flink job's TopGuesses out, ADR 0018)
+        if: env.FULL_STACK == 'true'
+        run: make analytics-check
       # uv runs the Python drills (wash-check) and the load test's token minting.
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        if: env.FULL_STACK == 'true'
         with:
           version: "0.13.1"
           enable-cache: false
       # Real sales through the marketplace close a round trip and a cycle across a restart of
       # Flink, and both flags come out of the job (ADR 0018). Needs uv, above.
       - name: make wash-check (wash trading end to end, with real sales and a Flink restart)
+        if: env.FULL_STACK == 'true'
         run: make wash-check
       # Real tips through the gateway, a RoundFinished, the drawers paid out of escrow (ADR 0021).
       - name: make tips-check (tips into escrow, settled when the round finishes)
+        if: env.FULL_STACK == 'true'
         run: make tips-check
       # The load test's script must keep working: two rooms for a minute, thresholds included.
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
+        if: env.FULL_STACK == 'true'
         with:
           k6-version: "2.3.0"
       - name: make loadtest-smoke (k6, two four-player rooms through the gateway)
+        if: env.FULL_STACK == 'true'
         run: make loadtest-smoke
       - name: make loadtest-live-smoke (k6, a live room and 50 viewers through the relays)
+        if: env.FULL_STACK == 'true'
         run: make loadtest-live-smoke
       - name: Disk usage after the run
         if: always()
@@ -109,6 +126,3 @@ jobs:
           # Loki logs in logfmt (lines start with level=); the collector's lines don't.
           docker compose -f infra/docker-compose.yml --env-file .env logs --no-color --no-log-prefix otel-lgtm |
             grep -E '^level=' | grep -v 'logproto.Pusher/Push' | head -120 || true
-      - name: make down
-        if: always()
-        run: docker compose -f infra/docker-compose.yml --env-file .env down -v --remove-orphans
