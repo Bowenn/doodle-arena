@@ -215,6 +215,16 @@ The forward makes the VM's gateway `http://localhost:8080` and Grafana `http://l
 3. Run the checks there (`make smoke`, `make pipeline-check`, `make test s=<svc>` for a Testcontainers suite that's too big for the Mac). The VM is the main checkout, so the worktree variables (`ENV_FILE`, `DRILL_JWT_KEY`) aren't needed.
 4. Open a PR from the Mac; CI is the gate.
 
+### Run the marketplace on the Mac against the VM
+
+`scripts/remote-dev.sh marketplace` runs only the marketplace on the Mac (the jar with the image's OpenTelemetry agent and JVM flags, on port 8090), wired to the rest of the stack on the VM, for a fast edit-and-restart loop or a debugger. Everything else, Stripe's `stripe listen` included, stays on the VM. It needs the Mac's stack down (`make down`) and the VM's up, and runs in the foreground; Ctrl-C puts the VM back as it was (if the script died without that, run `docker rm -f doodle-arena-marketplace-remote` and `make up` on the VM).
+
+- **Forwards over one SSH connection:** the gateway (8080), Grafana (3000), the collector (4318), Kafka's external listener (9094) and Postgres' primary and replica (15432, 15433), each to the same port on the Mac. Kafka is why the Mac's stack must be down: the broker advertises `localhost:9094`, so the client reconnects to whatever listens there.
+- **The way back:** the script stops the VM's `marketplace` container and starts a forwarder in its place (the gateway's nginx image with a two-line `stream` proxy) under the network alias `marketplace`, so the gateway and every container still call `marketplace:8080`. The forwarder sends each connection to Docker's bridge address on the VM, where a reverse tunnel (`-R 172.17.0.1:18090:localhost:8090`) carries it to the Mac. Binding the tunnel there needs sshd's `GatewayPorts clientspecified` (`scripts/devbox/setup.sh` sets it); the GCP firewall still admits only IAP's SSH.
+- **Credentials:** the marketplace's database and Kafka passwords and the Stripe values are read from the VM's `.env` over SSH into the script's environment, never printed or written to disk. Access tokens are verified against auth's JWKS through the forwarded gateway.
+- **Telemetry:** the Mac's process reports as `service.instance.id=marketplace-mac` to the VM's collector, so its traces, logs and metrics are in the VM's Grafana next to the other services.
+- **Measured (2026-10-22):** the marketplace started in 2.5 s once built; `make smoke` from the Mac and `make tips-check` on the VM passed through it, and a tips trace in Tempo had 43 spans from `marketplace-mac` followed by the notifier's.
+
 ### Claude Code on the VM
 
 Claude Desktop can run a Code session on the VM over SSH: in the environment selector under the prompt box, New environment, SSH, Add SSH connection, with SSH host `devbox` (the alias above; leave the key empty, the config names it) and the folder `/home/<os-login-user>/doodle-arena`. Desktop installs Claude Code under `~/.claude/remote/` on first connect. The VM is reached only while it runs, the browser pane doesn't work over SSH, and ports aren't forwarded for you (run the `ssh -N -L …` above). Sessions there can't push (read-only deploy key): commit on the VM, then bring the commits to the Mac (`git fetch devbox` with the VM as a remote, `ssh://devbox/home/<os-login-user>/doodle-arena`) and push from there.
