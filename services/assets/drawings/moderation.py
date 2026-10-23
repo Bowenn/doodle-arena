@@ -15,7 +15,7 @@ from django.db import transaction
 from django.utils import timezone
 from opentelemetry import trace
 
-from drawings import events
+from drawings import cache, events
 from drawings.models import DecidedBy, Drawing, Status
 
 log = logging.getLogger(__name__)
@@ -84,6 +84,10 @@ def decide(
             )
             if changed:
                 events.enqueue_decision(Drawing.objects.get(pk=drawing_id))
+                if approve:
+                    # A new approval changes the gallery's pages (ADR 0024). After the commit, so
+                    # a reader that sees the new generation also sees the drawing.
+                    transaction.on_commit(cache.gallery_changed)
         span.set_attribute("decision.applied", changed == 1)
         extra = {"drawing_id": str(drawing_id), "status": status.value, "decided_by": by.value}
         if moderator is not None:

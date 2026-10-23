@@ -547,6 +547,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pymongo" },
+    { name = "redis" },
     { name = "whitenoise" },
 ]
 
@@ -588,6 +589,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.16.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
     { name = "pymongo", specifier = ">=4.19.0" },
+    { name = "redis", specifier = ">=8.1.0" },
     { name = "whitenoise", specifier = ">=6.12.0" },
 ]
 

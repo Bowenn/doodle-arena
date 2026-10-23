@@ -345,6 +345,42 @@ groups:
           runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/search-unavailable.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "17"
+      - uid: assets-cache-degraded
+        title: AssetsCacheDegraded
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Lookups that met a Redis error, or were skipped after one (ADR 0024).
+              expr: "sum(increase(assets_cache_requests_total{result=~\"error|skipped\"}[10m])) or vector(0)"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              expr: "sum(increase(assets_cache_requests_total[10m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$B > 0 && $A / $B > 0.5"
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+          service: assets
+        annotations:
+          summary: "{{ $values.A }} of {{ $values.B }} gallery cache lookups in 10 minutes met a Redis error or were skipped: Postgres answers every gallery read itself. Pages still load, slower."
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/assets-cache-degraded.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "21"
       - uid: market-outbox-stuck
         title: MarketOutboxStuck
         condition: C

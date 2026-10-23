@@ -1179,6 +1179,233 @@
         "w": 12,
         "h": 8
       }
+    },
+    {
+      "id": 105,
+      "type": "row",
+      "title": "Gallery cache (task 6.7b, ADR 0024)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 85,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Cache lookups",
+      "description": "Lookups by cache (drawing: detail pages and ids= lookups; gallery: the unfiltered list's first pages) and result. off: ASSETS_CACHE=off; skipped and error: Redis failing, Postgres answers (AssetsCacheDegraded).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (cache, result) (rate(assets_cache_requests_total[$__rate_interval]))",
+          "legendFormat": "{{cache}} {{result}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 86,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Cache hit ratio",
+      "description": "Hits over hits and misses, per cache. A gallery miss follows each approval (a new generation), so heavy play lowers it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (cache) (rate(assets_cache_requests_total{result=\"hit\"}[$__rate_interval])) / sum by (cache) (rate(assets_cache_requests_total{result=~\"hit|miss\"}[$__rate_interval]))",
+          "legendFormat": "{{cache}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 86,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Gallery fills and invalidations",
+      "description": "Invalidations (gallery: a generation bump after an approval) and requests that waited for another request's fill (filled) or gave up after 200 ms and read Postgres (timed_out).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (cache) (rate(assets_cache_invalidations_total[$__rate_interval]))",
+          "legendFormat": "invalidated {{cache}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(assets_cache_lock_waits_total[$__rate_interval]))",
+          "legendFormat": "waited: {{result}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 94,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Gallery latency",
+      "description": "p50 and p95 of the assets drawings endpoints (the gallery, ids= lookups and detail pages), cache or not.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"assets\", http_route=~\".*drawings.*\"}[$__rate_interval])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"assets\", http_route=~\".*drawings.*\"}[$__rate_interval])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 94,
+        "w": 12,
+        "h": 8
+      }
     }
   ]
 }

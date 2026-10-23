@@ -572,6 +572,9 @@ services:
     environment:
       <<: [*app-env, *assets-env]
       SERVICE_INSTANCE_ID: assets-1
+      # The gallery cache (ADR 0024): off sends every read to Postgres (make loadtest-gallery
+      # CACHE=off measures that).
+      ASSETS_CACHE: ${ASSETS_CACHE:-on}
       # Search (ADR 0023, the opt-in profile search): the web process only reads drawings*.
       # Without Elasticsearch running, search answers 503 and nothing else changes.
       ELASTICSEARCH_URL: http://elasticsearch:9200

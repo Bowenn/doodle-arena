@@ -24,7 +24,7 @@ from elasticsearch import ApiError
 from opentelemetry import metrics, trace
 
 from config.authn import Claims, InvalidTokenError, bearer_token, verifier
-from drawings import replica, search, storage
+from drawings import cache, replica, search, storage
 from drawings.models import Drawing, SearchListing, Status
 
 log = logging.getLogger(__name__)
@@ -79,8 +79,10 @@ def visible(claims: Claims) -> QuerySet[Drawing]:
     )
 
 
-def represent(d: Drawing) -> dict[str, Any]:
-    body: dict[str, Any] = {
+def fields(d: Drawing) -> dict[str, Any]:
+    """What the API shows of a drawing, with its image keys instead of URLs: the form the gallery
+    cache stores (ADR 0024). render() signs the URLs."""
+    return {
         "id": str(d.id),
         "match_id": d.match_id,
         "round_no": d.round_no,
@@ -91,13 +93,27 @@ def represent(d: Drawing) -> dict[str, Any]:
         "ended_at": d.ended_at.isoformat(),
         "created_at": d.created_at.isoformat(),
         "has_replay": bool(d.replay_id),
-        "image_url": None,
-        "thumb_url": None,
+        "image_key": d.image_key,
+        "thumb_key": d.thumb_key,
     }
-    if d.image_key:
-        body["image_url"] = storage.presigned_url(d.image_key)
-        body["thumb_url"] = storage.presigned_url(d.thumb_key)
+
+
+def render(entry: dict[str, Any]) -> dict[str, Any]:
+    """A drawing's response from its fields: the image keys become fresh presigned URLs."""
+    body = dict(entry)
+    image_key, thumb_key = body.pop("image_key"), body.pop("thumb_key")
+    body["image_url"] = storage.presigned_url(image_key) if image_key else None
+    body["thumb_url"] = storage.presigned_url(thumb_key) if image_key else None
     return body
+
+
+def represent(d: Drawing) -> dict[str, Any]:
+    return render(fields(d))
+
+
+def _cache_approved(drawings: list[Drawing]) -> None:
+    """Approved drawings never change (a decision is final), so they are cached for everyone."""
+    cache.put_drawings({d.id: fields(d) for d in drawings if d.status == Status.APPROVED})
 
 
 def _uuid(value: str | None) -> uuid.UUID | None:
@@ -118,11 +134,16 @@ def lookup_drawings(request: HttpRequest, claims: Claims, raw: str) -> HttpRespo
     ids = [i for i in parsed if i is not None]
     if not parts or len(parts) > MAX_IDS or len(ids) != len(parts):
         return error(request, 400, "INVALID_REQUEST", f"ids must be 1 to {MAX_IDS} drawing ids")
-    found = replica.read(
-        request, lambda db: {d.id: d for d in visible(claims).using(db).filter(id__in=ids)}
-    )
+    found = cache.get_drawings(ids)
+    missing = [i for i in ids if i not in found]
+    if missing:
+        rows = replica.read(
+            request, lambda db: list(visible(claims).using(db).filter(id__in=missing))
+        )
+        _cache_approved(rows)
+        found.update({d.id: fields(d) for d in rows})
     ordered = [found[i] for i in dict.fromkeys(ids) if i in found]
-    return JsonResponse({"drawings": [represent(d) for d in ordered], "next_cursor": None})
+    return JsonResponse({"drawings": [render(e) for e in ordered], "next_cursor": None})
 
 
 @authenticated
@@ -148,6 +169,16 @@ def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
         return error(request, 400, "INVALID_REQUEST", "bad author_id or match_id")
 
     filtered = bool(author or match)
+    if not filtered:
+        # The unfiltered gallery is the same for everyone: its first pages come from the cache.
+        cached = cache.gallery_page(limit, cursor, _gallery_from_primary)
+        if cached is not None:
+            return JsonResponse(
+                {
+                    "drawings": [render(e) for e in cached["drawings"]],
+                    "next_cursor": cached["next_cursor"],
+                }
+            )
     drawings = visible(claims) if filtered else Drawing.objects.filter(status=Status.APPROVED)
     if author:
         drawings = drawings.filter(author_ids__contains=[author])
@@ -167,13 +198,24 @@ def list_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
     )
 
 
+def _gallery_from_primary(n: int) -> list[dict[str, Any]]:
+    """The newest n approved drawings, from the primary: a cache fill must see every approval
+    whose generation bump it might be stored under (ADR 0024)."""
+    rows = Drawing.objects.using(replica.PRIMARY).filter(status=Status.APPROVED).order_by("-id")[:n]
+    return [fields(d) for d in rows]
+
+
 @authenticated
 def get_drawing(request: HttpRequest, claims: Claims, drawing_id: uuid.UUID) -> HttpResponse:
+    cached = cache.get_drawings([drawing_id])
+    if drawing_id in cached:
+        return JsonResponse(render(cached[drawing_id]))
     drawing = replica.read(
         request, lambda db: visible(claims).using(db).filter(pk=drawing_id).first()
     )
     if drawing is None:
         return error(request, 404, "DRAWING_NOT_FOUND", "no such drawing")
+    _cache_approved([drawing])
     return JsonResponse(represent(drawing))
 
 
