@@ -91,7 +91,9 @@ export default function () {
       return
     }
     if (code === 'NOT_ADMITTED' || code === 'RATE_LIMITED' || code === 'DROP_CONFLICT' || code === 'DROP_NOT_OPEN') {
-      sleep(1)
+      // About a second, jittered as a real client would: otherwise every waiting buyer retries on
+      // the same beat and the marketplace sees a burst every second.
+      sleep(0.5 + Math.random())
       continue
     }
     errors.add(1, { step: 'purchase', code })

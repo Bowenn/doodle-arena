@@ -12,8 +12,14 @@ import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -34,6 +40,8 @@ public class DropGate {
 
 	/** Keys outlive their drop by this much, for late buyers' answers and the sweeper's repairs. */
 	static final Duration KEEP_AFTER_CLOSE = Duration.ofDays(7);
+
+	private static final Logger log = LoggerFactory.getLogger(DropGate.class);
 
 	private static final AttributeKey<String> SCRIPT = AttributeKey.stringKey("script");
 
@@ -79,6 +87,21 @@ public class DropGate {
 			.setUnit("ms")
 			.setDescription("Time a drop's Redis script took, per script")
 			.build();
+	}
+
+	/**
+	 * Opens the Redis connection at startup, so the first drop request doesn't pay for connecting
+	 * and logging in within its 500 ms timeout (the first drop on a busy dev box got a 503 that
+	 * way). A Redis that is down now only means drops answer 503 until it is back.
+	 */
+	@EventListener(ApplicationReadyEvent.class)
+	public void warmUp() {
+		try {
+			run("ping", () -> this.redis.execute((RedisCallback<String>) (connection) -> connection.ping()));
+		}
+		catch (DropsUnavailableException ex) {
+			log.atWarn().addKeyValue("error", ex.getMessage()).log("Redis not reachable at startup: drops answer 503 until it is");
+		}
 	}
 
 	private static <T> RedisScript<T> script(String name, Class<T> type) {

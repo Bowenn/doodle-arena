@@ -70,6 +70,8 @@ class DropGateTests extends DropTestSupport {
 		}
 
 		assertThat(this.gate.reserve(drop, "u_b", OPENS)).isEqualTo(new Answer(Outcome.NOT_ADMITTED, 1));
+		assertThat(this.gate.peek(drop, "u_b", OPENS)).isEqualTo(new Answer(Outcome.NOT_ADMITTED, 1));
+		assertThat(this.gate.peek(drop, "u_z", OPENS)).isEqualTo(new Answer(Outcome.NOT_JOINED, 0));
 		Answer a = this.gate.reserve(drop, "u_a", OPENS);
 		assertThat(a).isEqualTo(new Answer(Outcome.RESERVED, 1));
 		// Asking again returns the same reservation, not a second edition.
@@ -77,7 +79,8 @@ class DropGateTests extends DropTestSupport {
 		assertThat(this.gate.reserve(drop, "u_b", OPENS.plusSeconds(1))).isEqualTo(new Answer(Outcome.RESERVED, 2));
 		assertThat(this.gate.reserve(drop, "u_c", OPENS.plusSeconds(2))).isEqualTo(new Answer(Outcome.SOLD_OUT, 0));
 		assertThat(this.gate.peek(drop, "u_c", OPENS.plusSeconds(2))).isEqualTo(new Answer(Outcome.SOLD_OUT, 0));
-		assertThat(this.gate.peek(drop, "u_z", OPENS.plusSeconds(2))).isEqualTo(new Answer(Outcome.NOT_JOINED, 0));
+		// Sold out is told to everyone at once, joined or not.
+		assertThat(this.gate.peek(drop, "u_z", OPENS.plusSeconds(2))).isEqualTo(new Answer(Outcome.SOLD_OUT, 0));
 
 		// Someone else's reservation, or the wrong edition, stays.
 		assertThat(this.gate.release(drop, "u_c", 1)).isFalse();
