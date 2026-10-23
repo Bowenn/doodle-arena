@@ -53,6 +53,13 @@ if ! id -nG | grep -qw docker; then
   echo "Added $USER to the docker group: log out and back in before using docker."
 fi
 
+# scripts/remote-dev.sh's reverse tunnel binds to Docker's bridge address, so the stack's
+# containers can reach a service running on the Mac.
+if [[ ! -f /etc/ssh/sshd_config.d/doodle-remote-dev.conf ]]; then
+  echo "GatewayPorts clientspecified" | sudo tee /etc/ssh/sshd_config.d/doodle-remote-dev.conf > /dev/null
+  sudo systemctl reload ssh
+fi
+
 # Tarball installs into /usr/local, replaced when the pinned version changes.
 install_go() {
   if [[ "$(/usr/local/go/bin/go version 2>/dev/null)" == *"go$GO_VERSION "* ]]; then return; fi
