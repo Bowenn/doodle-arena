@@ -45,12 +45,30 @@ public class ListingController {
 
 	private final JsonMapper json;
 
+	private final ListingRepublisher republisher;
+
 	public ListingController(ListingService listings, PurchaseService purchases, IdempotencyService idempotency,
-			JsonMapper json) {
+			JsonMapper json, ListingRepublisher republisher) {
 		this.listings = listings;
 		this.purchases = purchases;
 		this.idempotency = idempotency;
 		this.json = json;
+		this.republisher = republisher;
+	}
+
+	/**
+	 * Admins only (SecurityConfig): every active listing announced again on market.listings.v1,
+	 * for search's projection after its first deploy or a restore (ADR 0023).
+	 */
+	@PostMapping("/republish")
+	public ResponseEntity<String> republish(@AuthenticationPrincipal Jwt token,
+			@RequestHeader(name = "Idempotency-Key", required = false) String key,
+			@RequestBody(required = false) String body, HttpServletRequest request) {
+		String admin = token.getSubject();
+		return this.idempotency
+			.execute(admin, key, "republish_listings", IdempotencyService.hash("POST", request.getRequestURI(), body),
+					ErrorBody.requestId(request), HttpStatus.OK, (claim) -> this.republisher.republish(admin))
+			.toResponseEntity();
 	}
 
 	@PostMapping

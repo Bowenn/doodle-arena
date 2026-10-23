@@ -85,7 +85,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 
 | Keyword | Where it's covered | Stage |
 |---|---|---|
-| Elasticsearch | Search over drawings and listings | 6 |
+| Elasticsearch | Self-hosted, security on with a read and a write user; an alias over versioned indices, an edge n-gram prefix field, fuzzy matching, filters, `search_after`, a price range aggregation; an event-fed indexer with external versioning and zero-downtime rebuilds (ADR 0023, task 6.7) | 6 |
 | Scalability | Relays for the live-stream room; horizontal game servers | 6 |
 | Reliability / stability | Same as reliability and high availability above | 2, 5, 6 |
 | gRPC & Protocol Buffers | Lobby and game-server gRPC; protobuf event schemas | 1, 2 |
@@ -107,7 +107,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Security (TODO) | OAuth with PKCE, JWT, token rotation, HMAC signatures, secrets handling | 1, 4 |
 | AWS Lambda (TODO) | Lambda thumbnails | 7 |
 | Natural language processing, vector search & embeddings (TODO) | "Close!" hints with embeddings | 7 |
-| Search / retrieval (TODO) | Elasticsearch; pHash | 6, 7 |
+| Search / retrieval | Elasticsearch: relevance (fuzzy and prefix matching, boosting), facets, keyset paging, results read back from the source of truth (task 6.7); pHash still TODO | 6, 7 |
 | Computer vision (TODO) | AI guesser | 7 |
 | LLM evaluation (TODO) | Eval set for the AI guesser built from real drawings | 7 |
 | Data pipelines / ETL (TODO) | Round logs into replays; analytics jobs | 3, 6 |

@@ -152,11 +152,44 @@ def main() -> int:
     check("analytics deletes its probe (control)",
           s3_call(lambda: ans3.delete_object(Bucket="analytics-checkpoints", Key=f"acl-check/{probe}")), None)
 
+    elasticsearch_checks(probe)
+
     if failures:
         print(f"data-acl-check: {failures} check(s) failed")
         return 1
     print("data-acl-check: OK")
     return 0
+
+
+def elasticsearch_checks(probe: str) -> None:
+    """Search (ADR 0023): assets reads drawings*, assets-indexer writes it, and neither touches
+    anything else. Skipped when the search profile isn't running."""
+    from elasticsearch import AuthorizationException, Elasticsearch
+
+    url = "http://elasticsearch:9200"
+    read = Elasticsearch(url, basic_auth=("assets", os.environ["ELASTICSEARCH_ASSETS_PASSWORD"]), request_timeout=5)
+    write = Elasticsearch(
+        url, basic_auth=("assets-indexer", os.environ["ELASTICSEARCH_INDEXER_PASSWORD"]), request_timeout=5
+    )
+    try:
+        read.info()
+    except AuthorizationException:
+        pass  # info needs a cluster privilege the users don't have: reachable, logged in
+    except Exception as e:  # noqa: BLE001
+        print(f"Elasticsearch users: skipped (no search profile: {type(e).__name__})")
+        return
+    denied = (AuthorizationException,)
+    index = f"drawings-acl-check-{probe}"
+    print("Elasticsearch users (ADR 0023):")
+    check("assets-indexer creates and deletes a drawings* index (control)",
+          lambda: write.indices.create(index=index) and write.indices.delete(index=index), None)
+    check("assets reads drawings* metadata (control)", lambda: read.indices.exists(index="drawings"), None)
+    check("assets can't write a drawing document", lambda: read.index(index="drawings", id="x", document={}), denied)
+    check("assets can't create an index", lambda: read.indices.create(index=f"drawings-x-{probe}"), denied)
+    check("assets-indexer can't create an index outside drawings*",
+          lambda: write.indices.create(index=f"acl-check-{probe}"), denied)
+    check("assets-indexer can't read the cluster's settings", lambda: write.cluster.get_settings(), denied)
+    check("assets can't read the security index", lambda: read.search(index=".security"), denied)
 
 
 if __name__ == "__main__":

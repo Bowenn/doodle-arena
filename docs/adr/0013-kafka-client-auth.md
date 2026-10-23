@@ -48,9 +48,9 @@ With KRaft, the authorizer is `org.apache.kafka.metadata.authorizer.StandardAuth
 |---|---|---|---|---|
 | `game.rounds.v1` | `game-server` | `assets`, `marketplace` (tips, since task 6.3) | `assets`, `marketplace` | 2 |
 | `game.matches.v1` | `game-server` | `marketplace`, `lobby` | `marketplace`, `lobby-leaderboard` | 2 |
-| `assets.drawings.v1` | `assets` | `marketplace` | `marketplace` | 3 |
-| `market.listings.v1` | `marketplace` | `assets` (Stage 6) | `assets` | 4 |
-| `market.sales.v1` | `marketplace` | `notifier`, `analytics` | `notifier`, `analytics` (its Flink group) | 4 |
+| `assets.drawings.v1` | `assets` | `marketplace`, `assets` (search, ADR 0023) | `marketplace`, `assets-search` | 3 |
+| `market.listings.v1` | `marketplace` | `assets` (search, ADR 0023) | `assets-search` | 4 |
+| `market.sales.v1` | `marketplace` | `notifier`, `analytics`, `assets` (search, ADR 0023) | `notifier`, `analytics` (its Flink group), `assets-search` | 4 |
 | `market.wallet.v1` | `marketplace` | `notifier` | `notifier` | 4 |
 | `notifier.dlq.v1` | `notifier` | humans (`dev-tools`) | none | 4 |
 | `auth.users.v1` | `auth` | `notifier` | `notifier-auth` | 4 (ADR 0015) |
@@ -64,7 +64,7 @@ Notes on the table:
 - **Operations.** A producer gets `Write` on its topics. A consumer gets `Read` on its topics and `Read` on its group's literal name. `Read` and `Write` imply `Describe`. Use explicit `--operation` flags in `kafka-acls.sh`, not `--producer`, which also grants `Create` on the topic.
 - **Idempotent producers need nothing extra.** franz-go's default producer, the assets relay (`enable.idempotence`) and the marketplace (`enable.idempotence: true`) are all idempotent. Since Kafka 3.0 (KIP-679), `Write` on a topic implies the old cluster-level `IdempotentWrite`. Nobody uses Kafka transactions today. A Flink exactly-once sink (Stage 6) would need `Write` on a `PREFIXED` `TransactionalId` such as `analytics-`.
 - **Two game servers share one principal**, as ADR 0006's "per-class identity". They already share `room:*` and `round-logs`, and one game server impersonating the other gains nothing on Kafka.
-- **Assets' credential goes only to the processes that use Kafka**: the round consumer (`Read` on `game.rounds.v1`, group `assets`) and the outbox relay (`Write` on `assets.drawings.v1`). The web process, the Celery worker and beat get no Kafka credential at all, so a rendering exploit in the worker can't reach Kafka with the service's identity. Splitting them into `assets-consumer` and `assets-relay` would be stricter still, but a compromised relay can already publish any `DrawingApproved`, so the gain is small.
+- **Assets' credential goes only to the processes that use Kafka**: the round consumer (`Read` on `game.rounds.v1`, group `assets`), the outbox relay (`Write` on `assets.drawings.v1`) and, since task 6.7, the search indexer (`Read` on `assets.drawings.v1`, `market.listings.v1` and `market.sales.v1`, group `assets-search`). The web process, the Celery worker and beat get no Kafka credential at all, so a rendering exploit in the worker can't reach Kafka with the service's identity. Splitting them into `assets-consumer` and `assets-relay` would be stricter still, but a compromised relay can already publish any `DrawingApproved`, so the gain is small.
 - **`dev-tools`** is the host tools' principal, on the `EXTERNAL` listener: `Read` on every topic (eventctl assigns partitions and uses no group) and `Write` on `game.rounds.v1` and `game.matches.v1` for `fake-events.sh` and `pipeline-check`. It can mint coins, which is its purpose. It exists only locally and in CI, never in AWS.
 - **`admin`** is the super user (`super.users`). The init job and humans use it to create topics, SCRAM users and ACLs. No service has it. (As built, the init job has a super user of its own, `kafka-init`, and `admin` is for humans only, on the broker's localhost listener: see the implementation notes.)
 

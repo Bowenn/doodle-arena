@@ -72,7 +72,7 @@ public class SecurityConfig {
 				.requestMatchers("/healthz", "/api/market/stripe/webhook")
 				.permitAll()
 				// Only an admin creates a limited drop (ADR 0022); grant it with scripts/grant-role.sh.
-				.requestMatchers(HttpMethod.POST, "/api/market/drops")
+				.requestMatchers(HttpMethod.POST, "/api/market/drops", "/api/market/listings/republish")
 				.hasRole("admin")
 				.anyRequest()
 				.authenticated())

@@ -61,6 +61,12 @@ locals {
     MONGO_URL         = local.secret_arn["mongo-url"]
     REDIS_PASSWORD    = local.secret_arn["redis-assets-password"]
   }
+  # Search (ADR 0023): the web process reads drawings*, only the indexer writes; the other
+  # assets processes get no Elasticsearch credential, as in compose.
+  assets_web_env     = merge(local.assets_env, { ELASTICSEARCH_URL = "http://${local.data_host}:9200", ELASTICSEARCH_USERNAME = "assets" })
+  assets_web_secrets = merge(local.assets_secrets, { ELASTICSEARCH_PASSWORD = local.secret_arn["elasticsearch-assets-password"] })
+  indexer_env        = merge(local.assets_kafka_env, { ELASTICSEARCH_URL = "http://${local.data_host}:9200", ELASTICSEARCH_USERNAME = "assets-indexer" })
+  indexer_secrets    = merge(local.assets_kafka_secrets, { ELASTICSEARCH_PASSWORD = local.secret_arn["elasticsearch-indexer-password"] })
   # Kafka for assets' round consumer and outbox relay only, as in compose (ADR 0013).
   assets_kafka_env     = merge(local.assets_env, local.kafka_env, { KAFKA_USERNAME = "assets" })
   assets_kafka_secrets = merge(local.assets_secrets, { KAFKA_PASSWORD = local.secret_arn["kafka-assets-password"] })
@@ -70,6 +76,7 @@ locals {
   py_health     = ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).status != 200)"]
   alive_health  = ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/relay-alive') > 30)"]
   consumer_live = ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/consumer-alive') > 30)"]
+  indexer_live  = ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/indexer-alive') > 30)"]
 
   # name => settings. image: the ECR repository; role: the task role (local.task_roles);
   # discover: other services call it by name.
@@ -158,7 +165,7 @@ locals {
     }
     assets = {
       image = "assets", role = "assets", ports = [8080], discover = true, health = local.py_health,
-      cpu   = 512, memory = 1024, env = local.assets_env, secrets = local.assets_secrets
+      cpu   = 512, memory = 1024, env = local.assets_web_env, secrets = local.assets_web_secrets
     }
     assets-worker = {
       image   = "assets", role = "assets", cpu = 512, memory = 1024, instance_service = "assets",
@@ -170,6 +177,12 @@ locals {
       image   = "assets", role = "assets", singleton = true, instance_service = "assets",
       command = ["python", "manage.py", "consume_rounds"], health = local.consumer_live,
       env     = local.assets_kafka_env, secrets = local.assets_kafka_secrets
+    }
+    # Search (ADR 0023): the projection of listings and the documents in Elasticsearch.
+    assets-indexer = {
+      image   = "assets", role = "assets", singleton = true, instance_service = "assets",
+      command = ["python", "manage.py", "index_search"], health = local.indexer_live,
+      env     = local.indexer_env, secrets = local.indexer_secrets
     }
     assets-relay = {
       image   = "assets", role = "assets", singleton = true, instance_service = "assets",

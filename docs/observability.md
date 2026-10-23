@@ -155,6 +155,10 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `market.db.reads` | Counter | `target` = primary, replica; `reason` = no_write, caught_up (replica), behind, stale (more than max-lag, 5 s, behind the primary), replica_error, no_replica (primary). Routed reads of the read-heavy endpoints (ADR 0020) | marketplace |
 | `market.db.replica_lag` | Gauge (s) | – (how far the read replica is behind, measured on it every 15 s: 0 when it has replayed all it received, else the age of its last replayed transaction; missing while it can't be read. Prometheus: `market_db_replica_lag_seconds`) | marketplace |
 | `assets.db.reads` | Counter | `target`, `reason` as `market.db.reads` (the gallery and drawing pages) | assets |
+| `assets.search.requests` | Counter | `result` = ok, invalid, unavailable (ADR 0023, task 6.7) | assets |
+| `assets.search.duration` | Histogram (ms) | – (one search: Elasticsearch plus hydration from Postgres) | assets |
+| `assets.search.indexed` | Counter | `event` = approved, rejected, listing_created, listing_closed, unknown; `result` = indexed, deleted, stale (a newer version was already there), absent, skipped | assets (indexer) |
+| `assets.search.index_lag` | Histogram (s) | – (an event's time until its drawing's document was written; Prometheus: `assets_search_index_lag_seconds`) | assets (indexer) |
 | `market.matches.received` | Counter | `result` = paid, duplicate (the match was paid before: a redelivery), ineligible (fewer than two players), skipped (undecodable, or an unset or unknown event), failed (an event that breaks its contract, or a record Postgres refuses as data) | marketplace |
 | `market.drawings.received` | Counter | `result` = minted, duplicate (the drawing was minted before: a redelivery), rejected (a `DrawingRejected`, nothing to do), skipped (undecodable, or an unset or unknown event), failed (an event that breaks its contract, or a record Postgres refuses as data) | marketplace |
 | `notifier.deliveries` | Counter | `result` = success, retry (failed, will try again), dead (failed for the last time) | notifier |
@@ -273,6 +277,8 @@ Starting rules (tune the thresholds after the first load test):
 | TipsStuck | The oldest pending tip (`market.tips.oldest_pending`) older than 15 minutes, for 5 minutes: neither its round's settlement, the sweeper nor the 10-minute refund closed it | warning |
 | DropEscrowMismatch | `market.drops.escrow_mismatch` above 0: a drop escrow shard doesn't hold exactly its paid editions (ADR 0022) | critical |
 | DropsUnavailable | Drop requests answered 503 (`market.drops.requests{result="unavailable"}`) for 5 minutes: Redis, the drops' gate, can't be reached; drops fail closed, the rest of the marketplace works | warning |
+| SearchIndexLagging | Search documents written more than 60 s after their events (p95 of `assets.search.index_lag`), for 10 minutes (ADR 0023) | warning |
+| SearchUnavailable | Searches answered 503 (`assets.search.requests{result="unavailable"}`) for 5 minutes: Elasticsearch can't be reached; the gallery and market still list without search | warning |
 | LedgerPartitionMissing | `market.ledger.default_partition_rows` above 0: postings in a month without a partition (task 6.6), whose partition can't be created while they are there | warning |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`; task 5.2, not a Grafana rule) | critical |
 

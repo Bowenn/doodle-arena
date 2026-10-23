@@ -96,6 +96,8 @@ expect "marketplace can't write analytics.flags.v1 (forge or bury a flag)" "TOPI
   bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $marketplace --topic analytics.flags.v1 --producer-property enable.idempotence=false"
 expect "analytics can't write game.matches.v1" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
   bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $analytics --topic game.matches.v1 --producer-property enable.idempotence=false"
+expect "assets can't write market.listings.v1 (forge a listing for search)" "TOPIC_AUTHORIZATION_FAILED|Topic authorization failed|Not authorized to access topics" \
+  bash -c "echo x | $BIN/kafka-console-producer.sh --bootstrap-server $BOOTSTRAP --command-config $assets --topic market.listings.v1 --producer-property enable.idempotence=false"
 expect "assets can't join group marketplace (skip its records)" "Not authorized to access group|GroupAuthorization" \
   "$BIN/kafka-console-consumer.sh" --bootstrap-server "$BOOTSTRAP" --command-config "$assets" \
   --topic game.rounds.v1 --group marketplace --max-messages 1 --timeout-ms 10000

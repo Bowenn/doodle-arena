@@ -68,6 +68,10 @@ class Drawing(models.Model):
     status = models.CharField(max_length=16, choices=Status, default=Status.PROCESSING)
     # Moderation calls made so far (task 3.3), for the retry budget and the admin.
     moderation_attempts = models.PositiveSmallIntegerField(default=0)
+    # Search (ADR 0023): grows by one with every change to the drawing's search document (its
+    # decision, its listing). Elasticsearch keeps it as the document's external version, so an
+    # older write can never replace a newer one.
+    search_version = models.BigIntegerField(default=0)
     # Set while one task is calling the AI service about this drawing, so a duplicate task
     # (a redelivery, the sweeper) doesn't call too and spend the budget twice. It expires on its
     # own if that task dies.
@@ -164,3 +168,31 @@ class OutboxEvent(models.Model):
                 fields=["id"], condition=Q(published_at__isnull=True), name="outbox_unpublished"
             ),
         ]
+
+
+class SearchListing(models.Model):
+    """The drawing's active listing, as the marketplace announced it (ADR 0023). Assets' own
+    projection of market.listings.v1 and market.sales.v1, kept by the indexer; the marketplace
+    owns listings, this is only what search shows. No foreign key: events may name a drawing
+    before its row exists here."""
+
+    drawing_id = models.UUIDField(primary_key=True)
+    listing_id = models.UUIDField(unique=True)
+    seller_id = models.CharField(max_length=64)
+    price = models.BigIntegerField()
+    listed_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "search_listings"
+
+
+class SearchClosedListing(models.Model):
+    """A listing that was cancelled or sold (ADR 0023): its ListingCreated, arriving late from
+    another topic, must not make it active again."""
+
+    listing_id = models.UUIDField(primary_key=True)
+    drawing_id = models.UUIDField()
+    closed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "search_closed_listings"

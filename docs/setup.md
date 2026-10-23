@@ -18,7 +18,7 @@ Things the humans prepare. Claude Code can install packages and write config, bu
 
 | Tool | Version | Needed from | Notes |
 |---|---|---|---|
-| Docker (Desktop, OrbStack or Colima) with Compose | current | Stage 1 | Give the VM at least 8 GB of memory, 11 GB with both opt-in profiles (`PROFILES=live,analytics`) |
+| Docker (Desktop, OrbStack or Colima) with Compose | current | Stage 1 | Give the VM at least 8 GB of memory, 11 GB with the `live` and `analytics` profiles, 12 GB with `search` too |
 | Git | current | Stage 1 | |
 | Go | 1.27.x | Stage 1 | Each module's `go.mod` pins the toolchain |
 | JDK | Temurin 25 (LTS) | Stage 1 | The Gradle wrapper (9.8.x) downloads Gradle itself |
@@ -46,6 +46,7 @@ Images are pinned to exact tags in `infra/docker-compose.yml`. Versions were che
 | Telemetry | `grafana/otel-lgtm:0.36.0` | See ADR 0003 |
 | Kafka lag collector | `otel/opentelemetry-collector-contrib:0.162.0` (the collector version inside otel-lgtm 0.36.0) | The same container, or the collector of the AWS telemetry setup (ADR 0003) |
 | Load generator | `grafana/k6:2.3.0` for the live-room test, inside the stack's network (`scripts/loadtest.sh live`); the same k6 version CI installs with `setup-k6` | k6 on a machine outside AWS |
+| Search | `docker.elastic.co/elasticsearch/elasticsearch:9.5.5` (Elastic's official image; one node, security on, 512 MB heap, ADR 0023) | The same image on the data host; Amazon OpenSearch Service is a different engine and API, so it would need its own ADR |
 | Stream processing | `flink:2.2.1-java21` with the Kafka connector `5.0.0-2.2` (no connector supports Flink 2.3 yet; ADR 0018) | The same image on ECS (task 6.9), or Amazon Managed Service for Apache Flink |
 | Gateway | `nginx:1.30.6-otel` (the variant with the OpenTelemetry and njs modules) | Container behind a load balancer |
 | Service build images | `golang:1.27.2-trixie`, `eclipse-temurin:25.0.4.1_1-jdk` (`21.0.12.1_1-jdk` for analytics, Flink's Java), `python:3.14.8-slim-trixie`, `node:24.22.0-trixie-slim` (the web app) | Same images in CI |
@@ -125,7 +126,7 @@ DOMAIN=icanfly.click make aws-down
 
 - **aws-down** stops the gateway, the web app, the lobby, auth and the game servers, waits (at most 5 minutes, `DRAIN_TIMEOUT`) until the consumers, the Celery worker and the outbox relays are idle, stops the rest, then dumps the `auth`, `assets`, `marketplace` and `notifier` databases and assets' MongoDB database on the data host and copies the drawings bucket, all into `s3://doodle-arena-backups-<account>/backups/<UTC time>/`. Each file's size and SHA-256 are checked in S3, and `manifest.json` is written last. Only then does `terraform destroy` run. A failure prints `BACKUP FAILED`, leaves the stack up with its services at 0 (it still costs money), and exits: fix the cause and rerun, or end without keeping the data with `SKIP_BACKUP=1 DOMAIN=icanfly.click make aws-down`. The newest 10 backups are kept; a removed one stays recoverable as a noncurrent version for 30 days.
 - **aws-up** on a fresh stack restores the newest backup that has a manifest, before the migrations: `BACKUP_ID=<id>` picks another (`aws s3 ls --profile doodle-arena s3://doodle-arena-backups-<account>/backups/`), `RESTORE=none` starts empty. It refuses a backup with a migration the deployed code (`IMAGE_TAG`) doesn't have, and fails if any table's rows differ from the manifest's after the load. The runbook is `docs/runbooks/aws-backup.md`.
-- **What comes back:** accounts, drawings, wallets, ownership, listings, purchases and webhook endpoints. Signing keys still rotate every session, so everyone signs in again. Rooms, tickets and the weekly leaderboard (Redis) and the Kafka topics start empty.
+- **What comes back:** accounts, drawings, wallets, ownership, listings, purchases and webhook endpoints. Signing keys still rotate every session, so everyone signs in again. Rooms, tickets and the weekly leaderboard (Redis), the Kafka topics and the search index start empty. Fill search after `aws-up`: `POST /api/market/listings/republish` with an admin token and an `Idempotency-Key` (every active listing), then `reindex_search` in the `assets-indexer` task (ECS Exec), which indexes every approved drawing (ADR 0023).
 - **Where it shows:** CloudWatch metrics in the namespace `DoodleArena/Backups` and log lines in `/doodle-arena/backups` (docs/observability.md), and the Backups row of the service overview in AWS's Grafana.
 - **Restores download through presigned URLs** that `aws-up` signs with your SSO session (valid one hour): the data host's role may only put objects in the backup bucket. The URLs are part of the SSM Run Command, so they stay in the command history (`aws ssm list-commands`) until they expire.
 
@@ -206,7 +207,7 @@ ssh -N -L 8080:localhost:8080 -L 3000:localhost:3000 devbox
 gcloud compute instances stop devbox
 ```
 
-The forward makes the VM's gateway `http://localhost:8080` and Grafana `http://localhost:3000` on the Mac, so the Mac's own stack must be down (`make down`) while it runs; use other local ports (`-L 18080:localhost:8080`) to keep both, but Google sign-in's redirect URI is exactly `http://localhost:8080`. Add `-L 9000:localhost:9000` for `webhook-receiver` or `-L 8081:localhost:8081` for Flink. A stopped VM keeps its disk, Docker volumes included; only a few services restart on their own after a start, so run `PROFILES=live,analytics make up` again (it rebuilds nothing that hasn't changed).
+The forward makes the VM's gateway `http://localhost:8080` and Grafana `http://localhost:3000` on the Mac, so the Mac's own stack must be down (`make down`) while it runs; use other local ports (`-L 18080:localhost:8080`) to keep both, but Google sign-in's redirect URI is exactly `http://localhost:8080`. Add `-L 9000:localhost:9000` for `webhook-receiver` or `-L 8081:localhost:8081` for Flink. A stopped VM keeps its disk, Docker volumes included; only a few services restart on their own after a start, so run `PROFILES=live,analytics,search make up` again (it rebuilds nothing that hasn't changed).
 
 ### Daily workflow
 

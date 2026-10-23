@@ -287,6 +287,64 @@ groups:
           runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/drops-unavailable.md
           __dashboardUid__: da-marketplace
           __panelId__: "22"
+      - uid: search-index-lagging
+        title: SearchIndexLagging
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # p95 seconds from an event until its drawing's document was written (ADR 0023).
+              expr: "histogram_quantile(0.95, sum by (le) (rate(assets_search_index_lag_seconds_bucket[10m]))) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 60"
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+          service: assets
+        annotations:
+          summary: "Search documents are written {{ $values.A }} s after their events (p95): new drawings and listing changes show up late in search."
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/search-index-lagging.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "20"
+      - uid: search-unavailable
+        title: SearchUnavailable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Searches answered 503: Elasticsearch can't be reached (ADR 0023).
+              expr: "sum(increase(assets_search_requests_total{result=\"unavailable\"}[5m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: assets
+        annotations:
+          summary: "{{ $values.A }} searches in 5 minutes answered 503: Elasticsearch can't be reached. The gallery and the market still list without search."
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/search-unavailable.md
+          __dashboardUid__: da-async-pipeline
+          __panelId__: "17"
       - uid: market-outbox-stuck
         title: MarketOutboxStuck
         condition: C

@@ -28,6 +28,7 @@ urlpatterns = [
     path("admin/sso/", sso_views.sso),
     path("admin/", admin.site.urls),
     path("api/assets/drawings", api.list_drawings),
+    path("api/assets/search", api.search_drawings),
     path("api/assets/drawings/<uuid:drawing_id>", api.get_drawing),
     path("api/assets/drawings/<uuid:drawing_id>/replay", api.get_replay),
 ]

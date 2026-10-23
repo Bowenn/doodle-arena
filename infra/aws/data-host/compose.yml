@@ -201,6 +201,45 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Search (ADR 0023): one node, security on, heap 512 MB within a 1 GB cap; assets reaches it
+  # on 9200 (the security group allows assets and the indexer only).
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?}
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      xpack.ml.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    mem_limit: 1g
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u \"elastic:$$ELASTIC_PASSWORD\" 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+
+  elasticsearch-init:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
+    entrypoint: ["bash", "/init.sh"]
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?}
+      ELASTICSEARCH_ASSETS_PASSWORD: ${ELASTICSEARCH_ASSETS_PASSWORD:?}
+      ELASTICSEARCH_INDEXER_PASSWORD: ${ELASTICSEARCH_INDEXER_PASSWORD:?}
+    volumes:
+      - ./elasticsearch/init.sh:/init.sh:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: "no"
+
   kafka-metrics:
     image: otel/opentelemetry-collector-contrib:0.162.0
     restart: unless-stopped
@@ -276,4 +315,5 @@ volumes:
   redis-data:
   mongo-data:
   kafka-data:
+  elasticsearch-data:
   lgtm-data:

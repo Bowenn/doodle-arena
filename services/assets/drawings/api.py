@@ -8,6 +8,7 @@ GET URLs straight to object storage, fresh on every read.
 
 import functools
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -17,13 +18,19 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.defaults import page_not_found as django_page_not_found
 from django.views.defaults import server_error as django_server_error
-from opentelemetry import trace
+from elastic_transport import ConnectionError as ESConnectionError
+from elastic_transport import ConnectionTimeout, TransportError
+from elasticsearch import ApiError
+from opentelemetry import metrics, trace
 
 from config.authn import Claims, InvalidTokenError, bearer_token, verifier
-from drawings import replica, storage
-from drawings.models import Drawing, Status
+from drawings import replica, search, storage
+from drawings.models import Drawing, SearchListing, Status
 
 log = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
+# Elasticsearch unreachable, timing out or refusing: search answers 503.
+SEARCH_DOWN = (ESConnectionError, ConnectionTimeout, TransportError, ApiError)
 DEFAULT_LIMIT, MAX_LIMIT = 20, 50
 
 View = Callable[..., HttpResponse]
@@ -196,3 +203,104 @@ def server_error(request: HttpRequest) -> HttpResponse:
     if request.path.startswith("/api/"):
         return error(request, 500, "INTERNAL", "something went wrong; try again")
     return django_server_error(request)
+
+
+search_requests = metrics.get_meter(__name__).create_counter(
+    "assets.search.requests",
+    description="Search requests by result: ok, invalid (bad parameters), unavailable "
+    "(no Elasticsearch)",
+)
+search_duration = metrics.get_meter(__name__).create_histogram(
+    "assets.search.duration", unit="ms", description="One search, Elasticsearch and hydration"
+)
+
+
+def _whole(request: HttpRequest, name: str, low: int, high: int) -> int | None:
+    raw = request.GET.get(name)
+    if raw is None or raw == "":
+        return None
+    if not raw.isdigit() or not low <= int(raw) <= high:
+        raise ValueError(f"{name} must be a whole number from {low} to {high}")
+    return int(raw)
+
+
+def _query(request: HttpRequest) -> search.Query:
+    """The search parameters, checked; ValueError names the first bad one."""
+    q = request.GET.get("q", "").strip()
+    if len(q) > 64:
+        raise ValueError("q is at most 64 characters")
+    sort = request.GET.get("sort", "relevance")
+    if sort not in search.SORTS:
+        raise ValueError("sort is one of " + ", ".join(search.SORTS))
+    listed = request.GET.get("listed", "")
+    if listed not in ("", "true", "false"):
+        raise ValueError("listed is true or false")
+    author = request.GET.get("author_id", "")
+    if len(author) > 64:
+        raise ValueError("author_id is at most 64 characters")
+    cursor = request.GET.get("cursor")
+    return search.Query(
+        q=q,
+        listed=listed == "true",
+        min_price=_whole(request, "min_price", 1, 1_000_000),
+        max_price=_whole(request, "max_price", 1, 1_000_000),
+        author_id=author,
+        sort=sort,
+        limit=_whole(request, "limit", 1, MAX_LIMIT) or DEFAULT_LIMIT,
+        after=search.decode_cursor(cursor) if cursor else None,
+    )
+
+
+@authenticated
+def search_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
+    """GET /api/assets/search?q=&listed=&min_price=&max_price=&author_id=&sort=&limit=&cursor=
+    (ADR 0023). Elasticsearch ranks; the hits are hydrated from Postgres, which re-checks that
+    each drawing is approved and signs fresh image URLs, with the listing assets knows of."""
+    started = time.monotonic()
+    try:
+        query = _query(request)
+    except ValueError as e:
+        search_requests.add(1, {"result": "invalid"})
+        return error(request, 400, "INVALID_REQUEST", str(e))
+    with tracer.start_as_current_span("search.query") as span:
+        span.set_attribute("search.sort", query.sort)
+        span.set_attribute("search.listed", query.listed)
+        try:
+            hits = search.search(query)
+        except (search.SearchUnavailable, *SEARCH_DOWN) as e:
+            log.warning("search unavailable", extra={"error": str(e)[:300]})
+            search_requests.add(1, {"result": "unavailable"})
+            return error(request, 503, "SEARCH_UNAVAILABLE", "search is unavailable right now")
+        span.set_attribute("search.hits", len(hits.ids))
+        rows = {d.id: d for d in Drawing.objects.filter(id__in=hits.ids, status=Status.APPROVED)}
+        listings = {
+            row.drawing_id: row for row in SearchListing.objects.filter(drawing_id__in=hits.ids)
+        }
+    drawings = []
+    for drawing_id in hits.ids:
+        d = rows.get(drawing_id)
+        if d is None:
+            continue  # rejected (or gone) since it was indexed: Postgres is the truth
+        listing = listings.get(drawing_id)
+        drawings.append(
+            {
+                **represent(d),
+                "listing": None
+                if listing is None
+                else {
+                    "listing_id": str(listing.listing_id),
+                    "price": listing.price,
+                    "seller_id": listing.seller_id,
+                },
+            }
+        )
+    search_requests.add(1, {"result": "ok"})
+    search_duration.record((time.monotonic() - started) * 1000)
+    return JsonResponse(
+        {
+            "drawings": drawings,
+            "total": hits.total,
+            "facets": {"price": hits.facets},
+            "next_cursor": search.encode_cursor(hits.next_after) if hits.next_after else None,
+        }
+    )

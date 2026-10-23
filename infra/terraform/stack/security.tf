@@ -29,6 +29,8 @@ locals {
     [for c in ["marketplace", "assets"] : [5433, c]],
     [for c in ["lobby", "game-server-1", "game-server-2", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat", "marketplace"] : [6379, c]],
     [for c in ["assets", "assets-worker"] : [27017, c]],
+    # Search (ADR 0023): the web process queries, the indexer writes.
+    [for c in ["assets", "assets-indexer"] : [9200, c]],
     # Kafka: its clients only (ADR 0013). The assets web process and worker have no Kafka user.
     [for c in ["lobby", "game-server-1", "game-server-2", "notifier", "auth-relay", "marketplace", "assets-consumer", "assets-relay"] : [9092, c]],
     # Telemetry: OTLP/HTTP from every service, OTLP/gRPC from the gateway's module.

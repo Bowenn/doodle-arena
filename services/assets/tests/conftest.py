@@ -408,3 +408,56 @@ def fake_ai(settings: Any) -> Iterator[FakeAI]:
     yield ai
     ai.server.shutdown()
     ai_client.reset_client_for_tests()
+
+
+# The same image as infra/docker-compose.yml (ADR 0023). Security is off here: the users and
+# their privileges are checked against the stack (make data-acl-check).
+ELASTICSEARCH_IMAGE = "docker.elastic.co/elasticsearch/elasticsearch:9.5.5"
+
+
+@pytest.fixture(scope="session")
+def elasticsearch_url() -> Iterator[str]:
+    import urllib.request
+
+    from testcontainers.core.container import DockerContainer
+
+    container = (
+        DockerContainer(ELASTICSEARCH_IMAGE)
+        .with_exposed_ports(9200)
+        .with_env("discovery.type", "single-node")
+        .with_env("xpack.security.enabled", "false")
+        .with_env("xpack.ml.enabled", "false")
+        .with_env("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
+        .with_env("cluster.routing.allocation.disk.threshold_enabled", "false")
+        # Only here: each test clears drawings* with a wildcard, which Elasticsearch refuses by
+        # default (the stack keeps that default).
+        .with_env("action.destructive_requires_name", "false")
+    )
+    with container:
+        url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(9200)}"
+        deadline = time.monotonic() + 120
+        while True:
+            try:
+                with urllib.request.urlopen(
+                    f"{url}/_cluster/health?wait_for_status=yellow&timeout=2s", timeout=5
+                ):
+                    break
+            except Exception:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(1)
+        yield url
+
+
+@pytest.fixture
+def es(settings: Any, elasticsearch_url: str) -> Iterator[Any]:
+    """A clean Elasticsearch for one test: no drawings* indices, the client pointed at it."""
+    from drawings import search
+
+    settings.ELASTICSEARCH_URL = elasticsearch_url
+    settings.ELASTICSEARCH_USERNAME = ""
+    search.client.cache_clear()
+    client = search.client()
+    client.options(ignore_status=404).indices.delete(index="drawings*", expand_wildcards="all")
+    yield client
+    search.client.cache_clear()

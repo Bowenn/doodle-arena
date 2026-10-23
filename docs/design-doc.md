@@ -51,7 +51,7 @@ flowchart TB
   assets -->|HTTP| ai["AI service<br/>FastAPI"]
 ```
 
-Data stores: PostgreSQL, Redis, MongoDB, S3-compatible object storage (SeaweedFS locally, S3 in AWS) and, in Stage 6, Elasticsearch. Telemetry goes to an OpenTelemetry Collector, then to Prometheus, Tempo and Loki, with Grafana on top (see `docs/observability.md`).
+Data stores: PostgreSQL, Redis, MongoDB, S3-compatible object storage (SeaweedFS locally, S3 in AWS) and Elasticsearch (search, task 6.7). Telemetry goes to an OpenTelemetry Collector, then to Prometheus, Tempo and Loki, with Grafana on top (see `docs/observability.md`).
 
 The web app talks REST and WebSocket through the gateway. The lobby and game servers talk gRPC. Everything that happens *after* something else (rewards, rendering, notifications, analytics) goes through Kafka, so a slow or broken consumer never blocks a game round.
 
@@ -140,7 +140,7 @@ Owns the Redis key prefix `room:*` and the bucket `round-logs`.
 
 ### 4.5 Assets (Django + Celery)
 
-Owns the Postgres database `assets`, the MongoDB database `assets`, the bucket `drawings`, a Redis logical database for Celery, and (Stage 6) the Elasticsearch index `drawings`.
+Owns the Postgres database `assets`, the MongoDB database `assets`, the bucket `drawings`, a Redis logical database for Celery, and the Elasticsearch alias `drawings` (search, ADR 0023).
 
 Consumes `RoundFinished` and runs a Celery pipeline for each drawing:
 
@@ -176,7 +176,15 @@ Progress inside `processing` is the pipeline's own columns (`replay_id`, `sha256
 
 Moderators sign in to the admin with Google (ADR 0001): `/admin/login/` sends the browser to the web app's `/moderate`, which calls `POST /admin/sso/` once with its access token. Role `moderator` makes a staff user in the `moderators` group (view drawings, approve or reject in the queue); `admin` makes a superuser. Drawings are read-only in the admin.
 
-The service also serves drawing metadata, presigned image URLs and replays over REST. Django admin is the moderation console. In Stage 6 it indexes drawings and active listings (from `market.listings.v1`) into Elasticsearch.
+The service also serves drawing metadata, presigned image URLs and replays over REST. Django admin is the moderation console.
+
+Search (ADR 0023, task 6.7) covers approved drawings and their active listings:
+
+- **The indexer.** `assets-indexer` (`manage.py index_search`, group `assets-search`) reads `assets.drawings.v1`, `market.listings.v1` and `market.sales.v1`. Per record, one Postgres transaction applies the event to a projection of active listings (`search_listings`, plus `search_closed_listings` so a late `ListingCreated` can't revive a closed listing) and bumps the drawing's `search_version`. After the commit it builds the drawing's whole document from assets' own tables and writes it with `version_type=external`, so an older write never replaces a newer one; a drawing that isn't approved is deleted. Then the offset is committed. A drawing's events arrive on three topics in no fixed order, and the rules make every order end in the same state (a test runs every permutation). Elasticsearch or Postgres down is retried on the same record.
+- **The index.** The alias `drawings` points at `drawings-v<ms>`, a strict mapping: `word` (standard analyzer with ASCII folding, plus an edge n-gram subfield for prefixes), `author_ids`, `match_id`, `ended_at`, `listed` and `listing.{listing_id, seller_id, price, listed_at}`. `manage.py reindex_search` rebuilds from Postgres while the indexer runs: a new index in bulk, an atomic alias swap, a catch-up pass for drawings whose version moved during the build, then the old index is deleted.
+- **The query.** `GET /api/assets/search` matches `word` with `fuzziness: AUTO` (boosted) and `word.prefix`; filters (`listed`, price range, author) don't score; a `range` aggregation counts listed prices. Elasticsearch ranks and Postgres answers: the hits are read back from assets' tables, so a drawing rejected a moment ago is dropped and the image URLs are fresh. When Elasticsearch is down, search answers `503 SEARCH_UNAVAILABLE` and the gallery's and the market's plain lists keep working.
+- **The backfill.** Kafka keeps 7 days, so the first fill (and the one after a restore) is the marketplace's `POST /api/market/listings/republish`, which writes a `ListingCreated` for every active listing to its outbox; approved drawings come from `reindex_search`.
+- **Credentials.** Two Elasticsearch users: `assets` (read on `drawings*`) for the web process, `assets-indexer` (write and manage on `drawings*`) for the indexer. `elastic` is for the init job and humans.
 
 Drawing metadata lives in Postgres because Django's ORM and admin are built for SQL databases. MongoDB holds the replays: large, write-once documents that are always read whole and whose stroke format may change over time.
 
@@ -290,7 +298,7 @@ The economy pages (task 4.8):
 | Object storage | `round-logs` bucket | Raw round stroke logs; a lifecycle rule deletes them after 7 days. Assets reads them: the claim check in `RoundFinished` (D13) is the one deliberate exception to "no service reads another's bucket" | game-server |
 | Object storage | `drawings` bucket | PNGs and thumbnails, content-addressed | assets |
 | Object storage | `analytics-checkpoints` bucket | Flink's checkpoints (ADR 0018) | analytics |
-| Elasticsearch | `drawings` index | Search over drawings and listings (Stage 6) | assets |
+| Elasticsearch | `drawings` alias (`drawings-v<ms>` indices) | Search documents for approved drawings and their active listings, rebuilt from assets' Postgres (ADR 0023) | assets |
 | Kafka | Topics in section 6.2 | Events between services | Each topic's producer |
 
 Locally there is one Postgres server with four databases and one database user per service, and a streaming read replica of it (ADR 0020: marketplace and assets read from it; it is a copy, so the owners don't change), plus one Redis, one MongoDB, SeaweedFS for S3, and one Kafka broker in KRaft mode.
@@ -306,6 +314,7 @@ The owners are enforced, not just agreed on (task 5.5):
   - assets may only read it, and read and write `drawings`.
   - analytics may only read and write `analytics-checkpoints`.
 - **MongoDB:** the `assets` user with `readWrite` on `assets` only.
+- **Elasticsearch:** security on; the `assets` user may only read `drawings*`, and `assets-indexer` only write and manage `drawings*` (`infra/elasticsearch/init.sh`). Neither reads cluster settings or system indices.
 - **Kafka:** per-topic ACLs (ADR 0013).
 
 `make data-acl-check` and `make kafka-acl-check` prove the refusals in CI's stack job.
@@ -333,9 +342,9 @@ Every message on a topic is that topic's wrapper message: one `oneof event` with
 |---|---|---|---|---|---|---|
 | `game.rounds.v1` | `RoundEvent` | `RoundFinished` | game-server | assets, marketplace (tips, ADR 0021) | `room_id` | 2 |
 | `game.matches.v1` | `MatchEvent` | `MatchFinished` | game-server | marketplace, lobby | `room_id` | 2 |
-| `assets.drawings.v1` | `DrawingEvent` | `DrawingApproved`, `DrawingRejected` | assets | marketplace | `drawing_id` | 3 |
-| `market.listings.v1` | `ListingEvent` | `ListingCreated`, `ListingCancelled` | marketplace (outbox) | assets (search, Stage 6) | `drawing_id` | 4 |
-| `market.sales.v1` | `SaleEvent` | `SaleCompleted` | marketplace (outbox) | notifier, analytics (Stage 6) | `drawing_id` | 4 |
+| `assets.drawings.v1` | `DrawingEvent` | `DrawingApproved`, `DrawingRejected` | assets | marketplace, assets (search, group `assets-search`) | `drawing_id` | 3 |
+| `market.listings.v1` | `ListingEvent` | `ListingCreated`, `ListingCancelled` | marketplace (outbox) | assets (search, group `assets-search`) | `drawing_id` | 4 |
+| `market.sales.v1` | `SaleEvent` | `SaleCompleted` | marketplace (outbox) | notifier, analytics (Stage 6), assets (search) | `drawing_id` | 4 |
 | `market.wallet.v1` | `WalletEvent` | `CoinsCredited` | marketplace (outbox) | notifier | `user_id` | 4 |
 | `auth.users.v1` | `UserEvent` | `CredentialsRevoked` | auth (outbox, `auth-relay`) | notifier (group `notifier-auth`) | `user_id` | 4 |
 | `notifier.dlq.v1` | `DeadLetterEvent` | `DeliveryDead` | notifier | alerting, humans | `endpoint_id` | 4 |
@@ -383,7 +392,7 @@ Assets:
 - `GET /api/assets/drawings/{id}` returns `{id, match_id, round_no, word, author_ids, initial_owner_id, status, ended_at, created_at, has_replay, image_url, thumb_url}`. `image_url` and `thumb_url` are presigned GET URLs straight to object storage, valid 15 minutes and handed out again for 10 (so a browser's cache works), `null` before the images exist. Approved drawings are visible to every signed-in player; other drawings only to their authors, and `404 DRAWING_NOT_FOUND` to everyone else.
 - `GET /api/assets/drawings/{id}/replay` returns the replay document: `{drawing_id, schema_version, canvas_width, canvas_height, round_started_at, strokes: [{user_id, color, width, undone, server_received_ms, points: [[x, y, t_ms], ...]}]}`, or `404 REPLAY_NOT_FOUND`.
 - A bad `limit`, `cursor` or `author_id` is `400 INVALID_REQUEST`; a missing or invalid token `401 UNAUTHENTICATED`; another method `405 METHOD_NOT_ALLOWED`; any other path under `/api/assets/` `404 NOT_FOUND`, all in the shared error format. The API authenticates with the `Authorization` header only, never a cookie, so it is exempt from Django's CSRF checks.
-- `GET /api/assets/search?q=...` (Stage 6)
+- `GET /api/assets/search?q=&listed=&min_price=&max_price=&author_id=&sort=&limit=<1..50>&cursor=` (ADR 0023) returns `{drawings: [{...drawing, listing: {listing_id, price, seller_id} | null}], total, facets: {price: [{key, from, to, count}]}, next_cursor}`. `q` matches words with typos and prefixes (up to 64 characters); `listed=true` keeps listed drawings; prices are whole coins; `sort` is `relevance` (the default), `newest`, `price_asc` or `price_desc`; the price facet's buckets are 1-10, 11-50, 51-200, 201-1000 and 1000+. Only approved drawings are returned. A bad parameter or cursor is `400 INVALID_REQUEST`; Elasticsearch down or unconfigured is `503 SEARCH_UNAVAILABLE`.
 - `/admin/`: Django admin for moderators. `/admin/login/` redirects to the web app's `/moderate`, which signs in through `GET /admin/sso/` (returns `{csrf_token}`) and `POST /admin/sso/?next=<admin page>` with the access token in `Authorization` and the CSRF token in `X-CSRFToken` (returns `{next}`; `401 UNAUTHENTICATED` for a missing or invalid token, `403 FORBIDDEN` without the `moderator` or `admin` role)
 
 Marketplace:
@@ -406,6 +415,7 @@ Marketplace:
 - `POST /api/market/drops` (the `admin` role; requires `Idempotency-Key`) takes `{drawing_id, editions 1..1000, price 1..100000, opens_at (RFC 3339, 30 s to 30 days ahead), duration_minutes 1..1440}` and returns `201` with the drop: `{drop_id, drawing_id, editions, editions_left, price, opens_at, closes_at, status}`, `status` one of `UPCOMING`, `OPEN`, `SOLD_OUT`, `CLOSED`. `403 FORBIDDEN` without the role, `404 DRAWING_NOT_FOUND` for a drawing never minted. `GET /api/market/drops` lists the upcoming, open and recently closed ones; `GET /api/market/drops/{id}` returns one (`404 DROP_NOT_FOUND`).
 - `POST /api/market/drops/{id}/join` and `GET /api/market/drops/{id}/queue` return `{drop_id, position, admitted, waiting, editions_left, opens_at, status}`: `position` is the places still ahead of being admitted (null before joining). `409 DROP_CLOSED` for a join after the close.
 - `POST /api/market/drops/{id}/purchase` (requires `Idempotency-Key`, no body) returns `201 {drop_id, drawing_id, edition_no, editions, price, purchased_at}`: one edition per buyer. `403 NOT_ADMITTED` (not joined, or places still ahead), `409 SOLD_OUT`, `ALREADY_BOUGHT`, `DROP_NOT_OPEN`, `DROP_CLOSED` or `DROP_CONFLICT` (try again), `422 INSUFFICIENT_FUNDS`, `503 DROPS_UNAVAILABLE` (Redis down; drops fail closed). `GET /api/market/editions?owner=me&limit=` lists the caller's editions.
+- `POST /api/market/listings/republish` (the `admin` role; requires `Idempotency-Key`, no body) writes a `ListingCreated` for every active listing to the outbox and returns `200 {listings}` (ADR 0023: search's backfill after a first deploy or a restore). It moves no coins and changes no listing; `403 FORBIDDEN` without the role.
 - The drop endpoints share a per-user token bucket (5 a second, a burst of 10): `429 RATE_LIMITED` with `Retry-After`.
 - `POST /api/market/stripe/webhook` (no JWT; verified by the `Stripe-Signature` header) returns `200 {received, result}` with `result` one of `processed`, `duplicate`, `ignored`, `unknown_session`; `400 INVALID_SIGNATURE` for a missing, wrong or more than 5-minute-old signature; `503 STRIPE_NOT_CONFIGURED` without a webhook secret.
 
@@ -593,6 +603,16 @@ ADR 0022, task 6.8. Many buyers race for few editions at the same second; most m
 3. A purchase passes the user's token bucket and a read-only Lua look at the drop, which answers sold out (first, so everyone hears it at once), not joined and not admitted without touching Postgres. Then, under the `Idempotency-Key`, a Lua script reserves one edition, and one Postgres transaction inserts the edition row and posts a `drop_purchase` (buyer to one of 16 `drop_escrow` accounts, key `drop:<drop_id>:<buyer>`). `PRIMARY KEY(drop_id, edition_no)`, `UNIQUE(drop_id, buyer_id)` and `CHECK(edition_no <= editions)` make overselling impossible even if Redis is wrong. After the commit Redis marks the reservation paid; a rollback gives it back.
 4. Once the drop sold out, or a minute after it closed, the sweeper pays its escrow to the drawing's authors (split like royalties) in one posting per batch (`drop-settle:<drop_id>:<n>`), with `CoinsCredited` (`DROP_SALE`). It also gives back reservations older than a minute whose purchase never committed, and rebuilds a drop's list from Postgres if Redis lost it.
 
+### 7.15 Searching drawings and listings
+
+ADR 0023, task 6.7.
+
+1. A seller lists a drawing. The marketplace commits the listing and its `ListingCreated` in one transaction; its relay publishes the event.
+2. `assets-indexer` reads it (group `assets-search`). One assets transaction records the listing in `search_listings`, unless that listing is already closed or a newer one is active, and bumps the drawing's `search_version`.
+3. After the commit, the indexer builds the drawing's document from assets' tables and writes it to the alias with that version as an external version. A retry or a rebuild holding an older version gets a 409 and changes nothing. Then it commits the offset.
+4. A buyer searches. Elasticsearch ranks the approved drawings that match and counts the price facet; assets reads the hits back from Postgres (approved only), adds the listing and fresh image URLs, and answers.
+5. The sale's `SaleCompleted` records the listing as closed and clears it, and the document is written again without a listing: the drawing is no longer found with `listed=true`.
+
 ## 8. Marketplace data model and rules
 
 Tables (the Flyway migrations are the source of truth):
@@ -718,7 +738,7 @@ Relays (ADR 0017, task 6.1) are the same binary in a relay role. They fan live r
 | Coins, ownership, listings | Strong: a single Postgres primary with ACID transactions | Money and items must never be lost or duplicated |
 | State inside a room | Linearizable through a single owner (actor plus lease plus fencing) | Fairness: everyone must agree on who guessed first |
 | Leaderboard | Eventual (Kafka to Redis) | A few seconds of lag is fine |
-| Drawing metadata and search | Eventual | A few seconds of lag is fine |
+| Drawing metadata and search | Eventual | A few seconds of lag is fine. Search reads its hits back from Postgres, so it can miss a new listing for a moment but never shows a rejected drawing or a stale image URL |
 | Read replica (ADR 0020, task 6.6) | Eventual within 5 s, with read-your-writes for a user's own actions | A write's response carries the primary's WAL position in a cookie; a read goes to the replica only once it has replayed past it, otherwise to the primary. A read also needs the replica within 5 s of the primary, so other users' changes (a cancelled listing, a rejected drawing) are never later than that |
 
 In CAP terms, the marketplace chooses consistency during a network partition: it rejects writes rather than risk double-spending. Room state does too: a game server that can't commit to Redis, or whose lease was taken, stops the room rather than diverge (ADR 0007). The leaderboard and search choose availability and catch up later.
@@ -744,7 +764,7 @@ See `docs/observability.md` for the pipeline, the log format, metric names, trac
 
 Local:
 
-- Docker Compose runs everything: two game-server instances, one instance of every other service, Postgres, Redis, MongoDB, Kafka (KRaft), SeaweedFS, `grafana/otel-lgtm` (with the dashboards, alert rules and Discord contact point of `infra/observability/` provisioned into it), and a `kafka-metrics` collector for consumer lag.
+- Docker Compose runs everything: two game-server instances, one instance of every other service, Postgres, Redis, MongoDB, Kafka (KRaft), SeaweedFS, Elasticsearch (the opt-in `search` profile), `grafana/otel-lgtm` (with the dashboards, alert rules and Discord contact point of `infra/observability/` provisioned into it), and a `kafka-metrics` collector for consumer lag.
 - Everything is reached through the gateway at `http://localhost:8080`, one origin with no TLS (section 4.1).
 - `make test` runs each service's tests with the host toolchains (Go, JDK, uv, Node). Integration tests start their own containers with Testcontainers. CI does the same with `setup-*` actions.
 - The Stripe CLI forwards test webhooks to the marketplace.
@@ -755,7 +775,7 @@ CI (GitHub Actions, `.github/workflows/`):
 - One workflow per service, triggered by path filters: lint, unit tests, integration tests (Testcontainers on the runner's Docker), Docker image build. The service workflows are thin; they call reusable workflows per language (`_go`, `_python`, `_java`, `_web`) and `_docker`.
 - CI runs the same `scripts/lint.sh` and `scripts/test.sh` as `make lint` and `make test`, so local and CI results match.
 - `proto.yml`: `buf breaking` against the PR base (or the previous push), then `make proto`, failing if the committed generated code differs.
-- `stack.yml`: `make up` with every profile, then two tiers. The core (`make smoke`, `telemetry-check`, `pipeline-check`, `kafka-acl-check`, `data-acl-check`, `alerts-check`) runs on every run: PRs that change the stack (infra, scripts, load tests, gateway, Dockerfiles), every push to `master`, and on demand. The full tier adds the feature drills and load-test smokes (`analytics-check`, `wash-check`, `tips-check`, `loadtest-smoke`, `loadtest-live-smoke`, about five minutes) on `master`, on `workflow_dispatch`, and on a PR labelled `full-stack`.
+- `stack.yml`: `make up` with every profile, then two tiers. The core (`make smoke`, `telemetry-check`, `pipeline-check`, `kafka-acl-check`, `data-acl-check`, `alerts-check`) runs on every run: PRs that change the stack (infra, scripts, load tests, gateway, Dockerfiles), every push to `master`, and on demand. The full tier adds the feature drills and load-test smokes (`analytics-check`, `wash-check`, `tips-check`, `drops-check`, `search-check`, `loadtest-smoke`, `loadtest-live-smoke`, about five minutes) on `master`, on `workflow_dispatch`, and on a PR labelled `full-stack`.
 - Merge first, revert if needed: nothing deploys from `master` (AWS changes only through `make aws-*` from a developer's machine), so a low-risk PR may merge before `stack` finishes, and the `master` run is the safety net. A red `master` run is reverted at once (the merged PR's Revert button), then fixed on a branch. The rule for which PRs must wait is in `CLAUDE.md`, Definition of done.
 - `observability.yml`: dashboards, alert rules and runbooks checked against each other and `docs/observability.md` (`make lint s=observability`).
 - `workflows.yml`: actionlint on the workflow files (`make lint s=ci` locally).
@@ -837,6 +857,7 @@ Releases:
 
 | D57 | Tips (ADR 0021, task 6.3): a tip debits the tipper into one of 16 escrow system accounts at once; the round's `RoundFinished` pays its pending tips to its `drawer_ids` in one posting per batch of 5,000, split like royalties, refunding a drawer's own tip and one naming another room; a sweeper pays late tips and refunds tips whose round never finished within 10 minutes; tips close 30 s after the settlement; reconciliation checks each shard against its pending tips; 1 to 1,000 coins with an `Idempotency-Key` | The drawer's balance row is locked once per round instead of once per tip (measured: 987 against 361 tips a second to one drawer, p99 147 against 521 ms); the authoritative game server names the recipients, so the client can't; per-drawer sub-accounts or direct posting would both need a new way to check who is drawing |
 | D58 | Limited drops (ADR 0022, task 6.8): an admin drops N editions of a minted drawing; Redis (`market:*`, a marketplace user of its own) gates the burst with Lua scripts (a read-only look, then a reservation) and runs a lottery waiting room admitted at 50 a second; Postgres records each sale behind a primary key, one-per-buyer `UNIQUE` and a `CHECK` on the supply, with the coins in 16 escrow accounts paid to the authors at sell-out or close; drops fail closed when Redis is down; the sweeper repairs leaked reservations and lost inventory | Most of a burst is refused by Redis without reaching Postgres, and no row is hot; Postgres's constraints make a wrong Redis cost an unsold edition, never an oversold one (tested by handing out every edition three times); a lottery doesn't reward bots and early refreshing; a Postgres-only counter makes every buyer queue on the drop's row |
+| D59 | Search (ADR 0023, task 6.7): self-hosted Elasticsearch 9 (security on, a read user for the web process and a write user for the indexer); one indexer reading `assets.drawings.v1`, `market.listings.v1` and `market.sales.v1` that keeps a projection of active listings in assets' Postgres and writes each drawing's whole document with an external version; an alias with rebuilds from Postgres; hits read back from Postgres; the marketplace's admin republish as the backfill | Building every document from assets' own tables makes the order of three topics irrelevant and a rebuild needs nothing outside assets; external versions make retries and a concurrent rebuild safe; Kafka keeps 7 days, so replaying topics can't rebuild; dual writes from the request path could leave Elasticsearch and Postgres disagreeing; a managed search service was more cost than this project needs |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 
@@ -848,5 +869,5 @@ New decisions become ADRs (`/adr`) and get a line here when accepted.
 
 ## 16. Deferred and optional features
 
-- Stage 6: the live-stream room, tipping, Flink jobs, Elasticsearch search, limited drops (flash sales), query tuning, a read replica and table partitioning.
+- Stage 6: the live-stream room, tipping, Flink jobs, limited drops (flash sales), query tuning, a read replica and table partitioning, and search are built. Search over replays or users, and synonyms, are not.
 - Stage 7 (optional): auctions, including a live auction in the room; a full co-op mode with per-player undo; ranked mode (Elo or MMR); pHash plagiarism detection; the AI guesser, "close!" hints and evals; an MCP server; A/B testing; Lambda thumbnails; GCP and Azure extras; Jenkins; Kubernetes.

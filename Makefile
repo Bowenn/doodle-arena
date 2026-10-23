@@ -4,10 +4,10 @@
 # --profile '*': down, ps and logs also reach the opt-in services (PROFILES on make up).
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env --profile '*'
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check tips-check drops-check seed explain kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke loadtest-tips loadtest-drops lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check tips-check drops-check search-check search-bench seed explain kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke loadtest-tips loadtest-drops lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | tips-check | drops-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | loadtest-tips | loadtest-drops | lighthouse | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | tips-check | drops-check | search-check | search-bench | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | loadtest-tips | loadtest-drops | lighthouse | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
@@ -22,7 +22,7 @@ ps:
 # s=game-server shows both instances (the compose services are game-server-1 and -2), s=analytics
 # Flink's JobManager and TaskManager.
 logs:
-	$(COMPOSE) logs -f --tail=100 $(if $(filter game-server,$(s)),game-server-1 game-server-2,$(if $(filter assets,$(s)),assets assets-worker assets-consumer assets-relay assets-beat,$(if $(filter auth,$(s)),auth auth-relay,$(if $(filter analytics,$(s)),analytics-jobmanager analytics-taskmanager,$(s)))))
+	$(COMPOSE) logs -f --tail=100 $(if $(filter game-server,$(s)),game-server-1 game-server-2,$(if $(filter assets,$(s)),assets assets-worker assets-consumer assets-relay assets-beat assets-indexer,$(if $(filter auth,$(s)),auth auth-relay,$(if $(filter analytics,$(s)),analytics-jobmanager analytics-taskmanager,$(s)))))
 
 test:
 	@./scripts/test.sh $(s)
@@ -69,6 +69,18 @@ tips-check:
 drops-check:
 	@PATH="$$HOME/.docker/bin:$$PATH" uv run --project services/auth --with confluent-kafka --with boto3 \
 		--with 'protobuf>=7.36.2,<8' python scripts/drills/drops.py
+
+# Search end to end: drawings minted, listed and sold, every change found through the indexer, and
+# a rebuild (ADR 0023, task 6.7). Needs PROFILES=search make up. In a worktree, set ENV_FILE and
+# DRILL_JWT_KEY to the main checkout's.
+search-check:
+	@PATH="$$HOME/.docker/bin:$$PATH" uv run --project services/auth --with confluent-kafka --with boto3 \
+		--with 'protobuf>=7.36.2,<8' python scripts/drills/search.py
+
+# Search on the seeded data (make seed first): a rebuild of every approved drawing, then typical
+# searches timed in the indexer's container (ADR 0023).
+search-bench:
+	@$(COMPOSE) exec -T assets-indexer python manage.py search_bench
 
 # The broker refuses what each service must not do (ADR 0013).
 kafka-acl-check:

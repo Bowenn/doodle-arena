@@ -497,3 +497,20 @@ table.ledger td.debit {
   flex-direction: column;
   gap: 0.25rem;
 }
+
+/* Search (ADR 0023): the box and its filters in one wrapping row. */
+.search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.search input:first-child {
+  flex: 1 1 14rem;
+}
+
+.search input[inputmode='numeric'] {
+  width: 5rem;
+}

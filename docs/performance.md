@@ -217,3 +217,26 @@ The flash sale at scale (`make loadtest-drops`, task 6.8b) on the GCP dev box (e
 | The same, warm JVM | 3,596 | exactly 100 | 128 ms | 1.23 s | 1.45 s |
 
 Every run: 100 editions to 100 distinct buyers, 100 purchases charged, 1,000 coins to the authors, the ledger at 0, checked in Postgres. The tail is the burst itself: 1,000 requests inside 200 ms at one 1 GB marketplace, absorbed in about a second. More marketplace instances or a bigger one would shorten it; the inventory isn't the limit (the gate's scripts take well under a millisecond).
+
+## 10. Search (task 6.7)
+
+Measured on the GCP dev box (e2-standard-8), 2026-10-23, after `make seed`: 300,011 approved drawings and 50,001 active listings, Elasticsearch 9.5.5 with a 512 MB heap (ADR 0023).
+
+| Step | Result |
+|---|---|
+| `POST /api/market/listings/republish` (the backfill) | 50,001 `ListingCreated` written to the marketplace's outbox in 12 s |
+| The indexer applying them | 1,024 s, about 49 events a second: each record is one Postgres transaction, one document write and a synchronous offset commit |
+| `reindex_search` (a new index, bulk, the alias swapped, the old index deleted) | 300,011 documents in 53.5 s, about 5,600 a second; 57.0 s during `search-check` |
+
+`make search-bench`: each search 30 times after one warm-up, in the indexer's container. "With read-back" adds reading the 20 hits and their listings from Postgres.
+
+| Search | Hits | Elasticsearch p50 | p95 | With read-back p50 | p95 |
+|---|---|---|---|---|---|
+| A word | 37,500 | 48.5 ms | 71.2 ms | 54.2 ms | 76.5 ms |
+| Its first three letters (prefix) | 37,500 | 24.3 ms | 43.3 ms | 28.7 ms | 47.4 ms |
+| The word with two letters swapped (typo) | 37,500 | 22.3 ms | 24.8 ms | 26.4 ms | 29.3 ms |
+| Listed only, cheapest first | 50,001 | 17.0 ms | 56.8 ms | 22.2 ms | 62.9 ms |
+| A word, listed, 10 to 500 coins | 5,729 | 17.0 ms | 24.4 ms | 23.0 ms | 29.2 ms |
+| Everything, newest first | 300,011 | 40.7 ms | 53.6 ms | 44.8 ms | 58.6 ms |
+
+The read-back from Postgres costs about 5 ms. The slowest searches are the ones that score or sort the most documents (the seed uses only eight words, so one word matches 37,500 drawings); a real word list spreads them out. The indexer's 49 a second is plenty for live traffic, where an event follows a sale or a listing; a backfill that has to be faster would batch records (one transaction and one bulk request per poll) instead of one each.

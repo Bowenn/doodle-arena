@@ -33,6 +33,8 @@ Restore:
 - **To start without the backup:** `RESTORE=none DOMAIN=icanfly.click make aws-up`. The backup stays in the bucket; the next `aws-down` writes a new one, and the 10 newest are kept.
 - **Looking inside a backup:** `aws s3 cp s3://doodle-arena-backups-<account>/backups/<id>/pg-marketplace.dump .` and `pg_restore --list pg-marketplace.dump`. The dumps hold every account, wallet and webhook endpoint: delete the copy afterwards.
 
+After a restore, search starts empty: the indexer only sees new events. Republish the listings and rebuild the index as `docs/setup.md` (Backups) says.
+
 ## Afterwards
 
 - Add the failure and its cause to the evidence log in docs/roadmap.md.
