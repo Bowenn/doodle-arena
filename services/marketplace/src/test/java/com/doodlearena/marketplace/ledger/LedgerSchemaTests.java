@@ -32,10 +32,14 @@ class LedgerSchemaTests {
 				+ "WHERE owner_type = 'system' ORDER BY owner_id")
 			.query(String.class)
 			.list();
-		// The two sources of coins (V1) and the 16 tips escrow shards (V10, ADR 0021).
+		// The two sources of coins (V1), the 16 tips escrow shards (V10, ADR 0021) and the 16 drop
+		// escrow shards (V11, ADR 0022).
 		List<String> expected = new ArrayList<>(List.of("rewards_issuance", "stripe_clearing"));
 		for (int shard = 0; shard < AccountRef.TIPS_ESCROW_SHARDS; shard++) {
 			expected.add(AccountRef.tipsEscrow(shard).ownerId());
+		}
+		for (int shard = 0; shard < AccountRef.DROP_ESCROW_SHARDS; shard++) {
+			expected.add(AccountRef.dropEscrow(shard).ownerId());
 		}
 		assertThat(names).containsExactlyInAnyOrderElementsOf(expected);
 	}

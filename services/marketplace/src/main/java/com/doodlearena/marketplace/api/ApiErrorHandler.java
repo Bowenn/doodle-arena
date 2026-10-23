@@ -21,7 +21,11 @@ public class ApiErrorHandler {
 
 	@ExceptionHandler(ApiException.class)
 	ResponseEntity<ErrorBody> api(ApiException ex, HttpServletRequest request) {
-		return ResponseEntity.status(ex.status()).body(ErrorBody.of(ex.code(), ex.getMessage(), request));
+		ResponseEntity.BodyBuilder response = ResponseEntity.status(ex.status());
+		if (ex instanceof RateLimitedException limited) {
+			response.header("Retry-After", Long.toString(limited.retryAfterSeconds()));
+		}
+		return response.body(ErrorBody.of(ex.code(), ex.getMessage(), request));
 	}
 
 	@ExceptionHandler({ MethodArgumentTypeMismatchException.class, MissingServletRequestParameterException.class })

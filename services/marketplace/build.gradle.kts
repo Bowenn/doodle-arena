@@ -35,6 +35,8 @@ dependencies {
 	// Kafka events in and out (design doc, section 6.2), as protobuf from proto/gen/java.
 	implementation("org.springframework.boot:spring-boot-starter-kafka")
 	implementation("com.doodlearena:doodle-proto")
+	// Limited drops' inventory, waiting rooms and per-user rate limits (ADR 0022), through Lettuce.
+	implementation("org.springframework.boot:spring-boot-starter-data-redis")
 	// Stripe Checkout and webhook signatures (design doc, section 7.7).
 	implementation("com.stripe:stripe-java:34.0.0")
 	// stripe-java's model classes carry Gson annotations; without Gson on the compile classpath,
