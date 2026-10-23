@@ -56,6 +56,43 @@ export function listDrawings(q: DrawingQuery = {}): Promise<DrawingPage> {
   return call('GET', `/api/assets/drawings?${params.toString()}`)
 }
 
+/** Search (ADR 0023): approved drawings ranked by Elasticsearch, with their active listing. */
+export type SearchSort = 'relevance' | 'newest' | 'price_asc' | 'price_desc'
+
+export type SearchQuery = {
+  q?: string
+  listed?: boolean
+  minPrice?: number
+  maxPrice?: number
+  authorId?: string
+  sort?: SearchSort
+  cursor?: string | null
+}
+
+export type SearchHit = Drawing & { listing: { listing_id: string; price: number; seller_id: string } | null }
+
+export type PriceFacet = { key: string; from: number | null; to: number | null; count: number }
+
+export type SearchPage = {
+  drawings: SearchHit[]
+  total: number
+  facets: { price: PriceFacet[] }
+  next_cursor: string | null
+}
+
+export function searchDrawings(s: SearchQuery): Promise<SearchPage> {
+  const params = new URLSearchParams()
+  if (s.q) params.set('q', s.q)
+  if (s.listed) params.set('listed', 'true')
+  if (s.minPrice !== undefined) params.set('min_price', String(s.minPrice))
+  if (s.maxPrice !== undefined) params.set('max_price', String(s.maxPrice))
+  if (s.authorId) params.set('author_id', s.authorId)
+  if (s.sort) params.set('sort', s.sort)
+  if (s.cursor) params.set('cursor', s.cursor)
+  params.set('limit', '24')
+  return call('GET', `/api/assets/search?${params.toString()}`)
+}
+
 /** Several drawings by id (at most 50), in the order asked; ones the caller can't see are left out. */
 export async function getDrawingsByIds(ids: string[]): Promise<Drawing[]> {
   if (ids.length === 0) return []

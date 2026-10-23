@@ -1,9 +1,10 @@
 // The gallery: everyone's approved drawings, your own (in any state), or one match's.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError } from '../api.ts'
 import { listDrawings, type Drawing, type DrawingQuery } from '../gallery.ts'
 import { STATUS_LABEL } from './names.ts'
+import { SearchResults } from './SearchResults.tsx'
 
 type Tab = 'all' | 'mine'
 type Props = {
@@ -16,7 +17,14 @@ type Props = {
 
 export function Gallery({ meId, matchId = null, onOpen, onBack }: Props) {
   const [tab, setTab] = useState<Tab>('all')
+  const [text, setText] = useState('')
+  const [searched, setSearched] = useState('')
   const query: DrawingQuery = matchId ? { matchId } : tab === 'mine' ? { authorId: meId } : {}
+
+  function search(e: FormEvent) {
+    e.preventDefault()
+    setSearched(text.trim())
+  }
 
   return (
     <main>
@@ -32,16 +40,43 @@ export function Gallery({ meId, matchId = null, onOpen, onBack }: Props) {
             </button>
           ))}
       </div>
+      {!matchId && (
+        <form className="search" role="search" onSubmit={search}>
+          <input
+            aria-label="Search drawings"
+            placeholder="Search by word, for example cat"
+            value={text}
+            maxLength={64}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <button type="submit">Search</button>
+          {searched && (
+            <button
+              type="button"
+              onClick={() => {
+                setText('')
+                setSearched('')
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </form>
+      )}
       {matchId && <p className="muted">Each round's drawing appears here a few seconds after the round, once it's moderated.</p>}
-      {/* Keyed by the query, so switching tabs starts a fresh list. */}
-      <DrawingGrid
+      {searched && !matchId ? (
+        <SearchResults key={searched} query={{ q: searched }} onOpen={onOpen} />
+      ) : (
+        /* Keyed by the query, so switching tabs starts a fresh list. */
+        <DrawingGrid
         key={JSON.stringify(query)}
         query={query}
         inRoundOrder={Boolean(matchId)}
         refreshable={Boolean(matchId)}
         emptyText={tab === 'mine' && !matchId ? "You haven't drawn anything yet. Play a round!" : 'No drawings yet.'}
         onOpen={onOpen}
-      />
+        />
+      )}
     </main>
   )
 }

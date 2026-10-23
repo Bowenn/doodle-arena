@@ -287,7 +287,11 @@ def search_drawings(request: HttpRequest, claims: Claims) -> HttpResponse:
                 **represent(d),
                 "listing": None
                 if listing is None
-                else {"listing_id": str(listing.listing_id), "price": listing.price},
+                else {
+                    "listing_id": str(listing.listing_id),
+                    "price": listing.price,
+                    "seller_id": listing.seller_id,
+                },
             }
         )
     search_requests.add(1, {"result": "ok"})
