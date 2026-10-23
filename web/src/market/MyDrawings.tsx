@@ -1,9 +1,19 @@
-// My drawings: the drawings I own (bought, or drawn and minted to me), to list for sale or take back.
+// My drawings: the drawings I own (bought, or drawn and minted to me), to list for sale or take back,
+// and the numbered editions I bought in limited drops.
 
 import { useEffect, useState } from 'react'
 import { ApiError } from '../api.ts'
 import { useIdempotencyKeys } from '../idempotency.ts'
-import { cancelListing, coins, createListing, listOwnedDrawings, MAX_PRICE, type OwnedDrawing } from '../money.ts'
+import {
+  cancelListing,
+  coins,
+  createListing,
+  listEditions,
+  listOwnedDrawings,
+  MAX_PRICE,
+  type Edition,
+  type OwnedDrawing,
+} from '../money.ts'
 import { DrawingThumb } from './DrawingThumb.tsx'
 import { useDrawings } from './useDrawings.ts'
 
@@ -61,6 +71,7 @@ export function MyDrawings({ onOpen }: Props) {
           Load more
         </button>
       )}
+      <Editions onOpen={onOpen} />
     </main>
   )
 }
@@ -142,5 +153,35 @@ function SellControls({ owned, onChange }: { owned: OwnedDrawing; onChange: (o: 
         </span>
       )}
     </>
+  )
+}
+
+/** Editions bought in limited drops (ADR 0022). They can't be resold. */
+function Editions({ onOpen }: Props) {
+  const [editions, setEditions] = useState<Edition[] | null>(null)
+  const drawings = useDrawings(editions?.map((e) => e.drawing_id) ?? [])
+
+  useEffect(() => {
+    listEditions()
+      .then(setEditions)
+      .catch(() => setEditions([]))
+  }, [])
+
+  if (!editions || editions.length === 0) return null
+  return (
+    <section aria-label="Editions">
+      <h2>Editions</h2>
+      <p className="muted">Numbered editions you bought in drops.</p>
+      <ul className="gallery-grid">
+        {editions.map((e) => (
+          <li key={`${e.drop_id}:${e.edition_no}`} className="market-card">
+            <DrawingThumb drawingId={e.drawing_id} drawing={drawings.get(e.drawing_id)} onOpen={onOpen} />
+            <p>
+              Edition #{e.edition_no} of {e.editions} · {coins(e.price)}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }

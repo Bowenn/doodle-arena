@@ -1,11 +1,19 @@
 // Marketplace REST client (design doc, section 6.3): wallet, coin packs, listings, purchases,
-// owned drawings, ownership history and tips. Amounts are whole coins; prices in cents only for Stripe.
+// owned drawings, ownership history, tips and limited drops. Amounts are whole coins; prices in cents only for Stripe.
 
 import { call } from './api.ts'
 
 export type Wallet = { user_id: string; balance: number; updated_at: string | null }
 
-export type TransactionType = 'reward' | 'stripe_purchase' | 'sale' | 'tip' | 'tip_settlement' | 'tip_refund'
+export type TransactionType =
+  | 'reward'
+  | 'stripe_purchase'
+  | 'sale'
+  | 'tip'
+  | 'tip_settlement'
+  | 'tip_refund'
+  | 'drop_purchase'
+  | 'drop_settlement'
 
 /** One wallet entry: amount is signed (+ credited, - debited). */
 export type Transaction = { tx_id: string; type: TransactionType; amount: number; created_at: string }
@@ -79,6 +87,41 @@ export type Tip = {
   created_at: string
 }
 
+/** A limited drop (ADR 0022): N numbered editions of a drawing, sold from opens_at. */
+export type Drop = {
+  drop_id: string
+  drawing_id: string
+  editions: number
+  editions_left: number
+  price: number
+  opens_at: string
+  closes_at: string
+  status: 'UPCOMING' | 'OPEN' | 'SOLD_OUT' | 'CLOSED'
+}
+
+/** Where the caller stands in a drop's waiting room; position is null before joining. */
+export type QueueStatus = {
+  drop_id: string
+  position: number | null
+  admitted: boolean
+  waiting: number
+  editions_left: number
+  opens_at: string
+  status: Drop['status']
+}
+
+/** One numbered edition the caller owns. */
+export type Edition = {
+  drop_id: string
+  drawing_id: string
+  edition_no: number
+  editions: number
+  price: number
+  purchased_at: string
+}
+
+export type NewDrop = { drawing_id: string; editions: number; price: number; opens_at: string; duration_minutes: number }
+
 /** The largest listing price the web app offers (the server only needs a positive integer). */
 export const MAX_PRICE = 1_000_000
 
@@ -135,6 +178,35 @@ export function tip(round: { roomId: string; matchId: string; roundNo: number },
     { room_id: round.roomId, match_id: round.matchId, round_no: round.roundNo, amount },
     idem(key),
   )
+}
+
+export async function listDrops(): Promise<Drop[]> {
+  return (await call<{ drops: Drop[] }>('GET', '/api/market/drops')).drops
+}
+
+export function getDrop(dropId: string): Promise<Drop> {
+  return call('GET', `/api/market/drops/${encodeURIComponent(dropId)}`)
+}
+
+/** Admins only: a new drop (ADR 0022). */
+export function createDrop(drop: NewDrop, key: string): Promise<Drop> {
+  return call('POST', '/api/market/drops', drop, idem(key))
+}
+
+export function joinDrop(dropId: string): Promise<QueueStatus> {
+  return call('POST', `/api/market/drops/${encodeURIComponent(dropId)}/join`)
+}
+
+export function dropQueue(dropId: string): Promise<QueueStatus> {
+  return call('GET', `/api/market/drops/${encodeURIComponent(dropId)}/queue`)
+}
+
+export function buyEdition(dropId: string, key: string): Promise<Edition> {
+  return call('POST', `/api/market/drops/${encodeURIComponent(dropId)}/purchase`, undefined, idem(key))
+}
+
+export async function listEditions(): Promise<Edition[]> {
+  return (await call<{ editions: Edition[] }>('GET', '/api/market/editions?owner=me&limit=50')).editions
 }
 
 export function listOwnedDrawings(cursor?: string | null): Promise<OwnedPage> {

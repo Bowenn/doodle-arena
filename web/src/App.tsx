@@ -5,6 +5,7 @@ import { DrawingPage } from './gallery/DrawingPage.tsx'
 import { Gallery } from './gallery/Gallery.tsx'
 import { Leaderboard } from './Leaderboard.tsx'
 import { Lobby } from './Lobby.tsx'
+import { Drops } from './market/Drops.tsx'
 import { Market } from './market/Market.tsx'
 import { MyDrawings } from './market/MyDrawings.tsx'
 import { Wallet } from './market/Wallet.tsx'
@@ -28,6 +29,7 @@ const NAV: [path: string, label: string][] = [
   ['/', 'Lobby'],
   ['/gallery', 'Gallery'],
   ['/market', 'Market'],
+  ['/drops', 'Drops'],
   ['/my-drawings', 'My drawings'],
   ['/wallet', 'Wallet'],
   ['/developer', 'Developer'],
@@ -148,6 +150,12 @@ export default function App() {
           />
         ) : path === '/market' ? (
           <Market meId={me.id} onOpen={(id) => go(`/drawings/${id}`)} onWallet={() => go('/wallet')} />
+        ) : path === '/drops' ? (
+          <Drops
+            isAdmin={me.roles.includes('admin')}
+            onOpen={(id) => go(`/drawings/${id}`)}
+            onWallet={() => go('/wallet')}
+          />
         ) : path === '/my-drawings' ? (
           <MyDrawings onOpen={(id) => go(`/drawings/${id}`)} />
         ) : path === '/wallet' ? (
