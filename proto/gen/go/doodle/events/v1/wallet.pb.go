@@ -35,6 +35,8 @@ const (
 	CreditReason_CREDIT_REASON_TIP CreditReason = 3
 	// A tip given back to its tipper: its round never finished, or the tipper drew it (ADR 0021).
 	CreditReason_CREDIT_REASON_TIP_REFUND CreditReason = 4
+	// A limited drop's sales, paid to the drawing's authors once it sold out or closed (ADR 0022).
+	CreditReason_CREDIT_REASON_DROP_SALE CreditReason = 5
 )
 
 // Enum value maps for CreditReason.
@@ -45,6 +47,7 @@ var (
 		2: "CREDIT_REASON_REWARD",
 		3: "CREDIT_REASON_TIP",
 		4: "CREDIT_REASON_TIP_REFUND",
+		5: "CREDIT_REASON_DROP_SALE",
 	}
 	CreditReason_value = map[string]int32{
 		"CREDIT_REASON_UNSPECIFIED":     0,
@@ -52,6 +55,7 @@ var (
 		"CREDIT_REASON_REWARD":          2,
 		"CREDIT_REASON_TIP":             3,
 		"CREDIT_REASON_TIP_REFUND":      4,
+		"CREDIT_REASON_DROP_SALE":       5,
 	}
 )
 
@@ -166,7 +170,7 @@ type CoinsCredited struct {
 	// Why the coins were added.
 	Reason CreditReason `protobuf:"varint,4,opt,name=reason,proto3,enum=doodle.events.v1.CreditReason" json:"reason,omitempty"`
 	// What caused it: the Stripe Checkout session id for purchases, the match id for rewards,
-	// "<match_id>:<round_no>" for tips, the tip id for refunds.
+	// "<match_id>:<round_no>" for tips, the tip id for refunds, the drop id for drop sales.
 	Reference     string `protobuf:"bytes,5,opt,name=reference,proto3" json:"reference,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -250,13 +254,14 @@ const file_doodle_events_v1_wallet_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06amount\x18\x03 \x01(\x03R\x06amount\x126\n" +
 	"\x06reason\x18\x04 \x01(\x0e2\x1e.doodle.events.v1.CreditReasonR\x06reason\x12\x1c\n" +
-	"\treference\x18\x05 \x01(\tR\treference*\x9f\x01\n" +
+	"\treference\x18\x05 \x01(\tR\treference*\xbc\x01\n" +
 	"\fCreditReason\x12\x1d\n" +
 	"\x19CREDIT_REASON_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dCREDIT_REASON_STRIPE_PURCHASE\x10\x01\x12\x18\n" +
 	"\x14CREDIT_REASON_REWARD\x10\x02\x12\x15\n" +
 	"\x11CREDIT_REASON_TIP\x10\x03\x12\x1c\n" +
-	"\x18CREDIT_REASON_TIP_REFUND\x10\x04B\xe5\x01\n" +
+	"\x18CREDIT_REASON_TIP_REFUND\x10\x04\x12\x1b\n" +
+	"\x17CREDIT_REASON_DROP_SALE\x10\x05B\xe5\x01\n" +
 	"&com.doodlearena.proto.doodle.events.v1B\vWalletProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (

@@ -100,6 +100,7 @@ func Decode(topic string, value []byte) (Event, error) {
 			eventsv1.CreditReason_CREDIT_REASON_STRIPE_PURCHASE: "stripe_purchase",
 			eventsv1.CreditReason_CREDIT_REASON_TIP:             "tip",
 			eventsv1.CreditReason_CREDIT_REASON_TIP_REFUND:      "tip_refund",
+			eventsv1.CreditReason_CREDIT_REASON_DROP_SALE:       "drop_sale",
 		}[c.GetReason()]
 		if reason == "" {
 			reason = "unknown"
