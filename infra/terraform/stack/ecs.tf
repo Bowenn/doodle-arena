@@ -54,17 +54,19 @@ locals {
     S3_PUBLIC_ENDPOINT = ""
     DRAWINGS_BUCKET    = aws_s3_bucket.bucket["drawings"].bucket
     AI_URL             = "http://ai.doodle.internal:8080"
-    # Search (ADR 0023): Elasticsearch on the data host, as the user assets (drawings* only).
-    ELASTICSEARCH_URL      = "http://${local.data_host}:9200"
-    ELASTICSEARCH_USERNAME = "assets"
   })
   assets_secrets = {
-    DJANGO_SECRET_KEY      = local.secret_arn["django-secret-key"]
-    DB_PASSWORD            = local.secret_arn["assets-db-password"]
-    MONGO_URL              = local.secret_arn["mongo-url"]
-    REDIS_PASSWORD         = local.secret_arn["redis-assets-password"]
-    ELASTICSEARCH_PASSWORD = local.secret_arn["elasticsearch-assets-password"]
+    DJANGO_SECRET_KEY = local.secret_arn["django-secret-key"]
+    DB_PASSWORD       = local.secret_arn["assets-db-password"]
+    MONGO_URL         = local.secret_arn["mongo-url"]
+    REDIS_PASSWORD    = local.secret_arn["redis-assets-password"]
   }
+  # Search (ADR 0023): the web process reads drawings*, only the indexer writes; the other
+  # assets processes get no Elasticsearch credential, as in compose.
+  assets_web_env     = merge(local.assets_env, { ELASTICSEARCH_URL = "http://${local.data_host}:9200", ELASTICSEARCH_USERNAME = "assets" })
+  assets_web_secrets = merge(local.assets_secrets, { ELASTICSEARCH_PASSWORD = local.secret_arn["elasticsearch-assets-password"] })
+  indexer_env        = merge(local.assets_kafka_env, { ELASTICSEARCH_URL = "http://${local.data_host}:9200", ELASTICSEARCH_USERNAME = "assets-indexer" })
+  indexer_secrets    = merge(local.assets_kafka_secrets, { ELASTICSEARCH_PASSWORD = local.secret_arn["elasticsearch-indexer-password"] })
   # Kafka for assets' round consumer and outbox relay only, as in compose (ADR 0013).
   assets_kafka_env     = merge(local.assets_env, local.kafka_env, { KAFKA_USERNAME = "assets" })
   assets_kafka_secrets = merge(local.assets_secrets, { KAFKA_PASSWORD = local.secret_arn["kafka-assets-password"] })
@@ -163,7 +165,7 @@ locals {
     }
     assets = {
       image = "assets", role = "assets", ports = [8080], discover = true, health = local.py_health,
-      cpu   = 512, memory = 1024, env = local.assets_env, secrets = local.assets_secrets
+      cpu   = 512, memory = 1024, env = local.assets_web_env, secrets = local.assets_web_secrets
     }
     assets-worker = {
       image   = "assets", role = "assets", cpu = 512, memory = 1024, instance_service = "assets",
@@ -180,7 +182,7 @@ locals {
     assets-indexer = {
       image   = "assets", role = "assets", singleton = true, instance_service = "assets",
       command = ["python", "manage.py", "index_search"], health = local.indexer_live,
-      env     = local.assets_kafka_env, secrets = local.assets_kafka_secrets
+      env     = local.indexer_env, secrets = local.indexer_secrets
     }
     assets-relay = {
       image   = "assets", role = "assets", singleton = true, instance_service = "assets",

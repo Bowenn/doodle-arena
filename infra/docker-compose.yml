@@ -71,11 +71,6 @@ x-assets-env: &assets-env
   # Moderation (design doc 4.8). Not a startup dependency: while the AI service is down,
   # drawings retry and then wait in the review queue.
   AI_URL: http://ai:8080
-  # Search (ADR 0023, the opt-in profile search): the assets user may touch drawings* only.
-  # Without Elasticsearch running, search answers 503 and nothing else changes.
-  ELASTICSEARCH_URL: http://elasticsearch:9200
-  ELASTICSEARCH_USERNAME: assets
-  ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_ASSETS_PASSWORD:?}
 
 # Kafka for assets' round consumer and outbox relay only (ADR 0013): the web process, the
 # Celery worker and beat get no Kafka credential and aren't on the Kafka network, so a bug in
@@ -577,6 +572,11 @@ services:
     environment:
       <<: [*app-env, *assets-env]
       SERVICE_INSTANCE_ID: assets-1
+      # Search (ADR 0023, the opt-in profile search): the web process only reads drawings*.
+      # Without Elasticsearch running, search answers 503 and nothing else changes.
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: assets
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_ASSETS_PASSWORD:?}
       OTEL_SERVICE_NAME: assets
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     depends_on:
@@ -667,6 +667,10 @@ services:
     environment:
       <<: [*app-env, *assets-env, *assets-kafka-env]
       SERVICE_INSTANCE_ID: assets-indexer-1
+      # The only process that writes and manages drawings* (ADR 0023).
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: assets-indexer
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_INDEXER_PASSWORD:?}
       OTEL_SERVICE_NAME: assets
       OTEL_RESOURCE_ATTRIBUTES: service.instance.id=assets-indexer-1,service.version=${SERVICE_VERSION:-0.1.0},deployment.environment=local
     networks: [default, kafka, seaweedfs]
@@ -1010,7 +1014,8 @@ services:
       retries: 40
       start_period: 30s
 
-  # One-shot job: the role assets_search (drawings* only) and the user assets (ADR 0023).
+  # One-shot job: the users assets (read drawings*) and assets-indexer (write and manage
+  # drawings*), ADR 0023.
   elasticsearch-init:
     profiles: [search]
     image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
@@ -1018,6 +1023,7 @@ services:
     environment:
       ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?}
       ELASTICSEARCH_ASSETS_PASSWORD: ${ELASTICSEARCH_ASSETS_PASSWORD:?}
+      ELASTICSEARCH_INDEXER_PASSWORD: ${ELASTICSEARCH_INDEXER_PASSWORD:?}
     volumes:
       - ./elasticsearch/init.sh:/init.sh:ro
     depends_on:

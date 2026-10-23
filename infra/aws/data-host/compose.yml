@@ -232,6 +232,7 @@ services:
     environment:
       ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?}
       ELASTICSEARCH_ASSETS_PASSWORD: ${ELASTICSEARCH_ASSETS_PASSWORD:?}
+      ELASTICSEARCH_INDEXER_PASSWORD: ${ELASTICSEARCH_INDEXER_PASSWORD:?}
     volumes:
       - ./elasticsearch/init.sh:/init.sh:ro
     depends_on:
