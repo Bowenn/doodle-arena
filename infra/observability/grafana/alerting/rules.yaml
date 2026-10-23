@@ -229,6 +229,64 @@ groups:
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/tips-stuck.md
           __dashboardUid__: da-marketplace
           __panelId__: "20"
+      - uid: drop-escrow-mismatch
+        title: DropEscrowMismatch
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Drop escrow shards that don't hold exactly their paid editions (ADR 0022).
+              expr: "max(market_drops_escrow_mismatch)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: critical
+          service: marketplace
+        annotations:
+          summary: "{{ $values.A }} drop escrow shards don't hold exactly their paid editions: a buyer's coins or an author's payout went astray."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/drop-escrow-mismatch.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "24"
+      - uid: drops-unavailable
+        title: DropsUnavailable
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Drop requests refused because Redis, the drops' gate, couldn't answer (ADR 0022).
+              expr: "sum(increase(market_drops_requests_total{result=\"unavailable\"}[5m])) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: marketplace
+        annotations:
+          summary: "{{ $values.A }} drop requests in 5 minutes answered 503: the marketplace can't reach Redis, so drops are closed to buyers (everything else still works)."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/drops-unavailable.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "22"
       - uid: market-outbox-stuck
         title: MarketOutboxStuck
         condition: C

@@ -134,7 +134,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `market.purchases` | Counter | `result` = success, conflict (the listing was sold or cancelled: a lost race), insufficient_funds | marketplace |
 | `market.idempotency.replays` | Counter | `operation` = create_listing, purchase, checkout (requests answered from a stored response) | marketplace |
 | `market.stripe.webhooks` | Counter | `result` = processed (coins credited), duplicate (the event, or another event for the same session, was handled before), ignored (an unpaid or unrelated event), unknown_session (a paid session the marketplace didn't create, or for another user), invalid_signature | marketplace |
-| `market.db.lock_wait.duration` | Histogram (ms) | `operation` = ledger_post (the balance rows), purchase (the listing row, where concurrent buyers queue), tip_settlement (a round's row and its pending tips, ADR 0021) | marketplace |
+| `market.db.lock_wait.duration` | Histogram (ms) | `operation` = ledger_post (the balance rows), purchase (the listing row, where concurrent buyers queue), tip_settlement (a round's row and its pending tips, ADR 0021), drop_settlement (a drop's row and its paid editions, ADR 0022) | marketplace |
 | `market.outbox.lag` | Gauge (s) | – (age of the oldest outbox event Kafka hasn't acknowledged; 0 when drained) | marketplace |
 | `market.ledger.imbalance` | Gauge (coins) | – | marketplace |
 | `market.ledger.mismatched_accounts` | Gauge | – | marketplace |
@@ -146,6 +146,12 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `market.tips.oldest_pending` | Gauge (s) | – (age of the oldest pending tip, 0 when none. Prometheus: `market_tips_oldest_pending_seconds`) | marketplace |
 | `market.tips.escrow_mismatch` | Gauge | – (tips escrow shards whose balance isn't the sum of their pending tips: must be 0; reported by the reconciliation job) | marketplace |
 | `market.rounds.received` | Counter | `result` = settled, skipped, failed (records read from `game.rounds.v1`) | marketplace |
+| `market.drops.requests` | Counter | `result` = bought, sold_out, not_admitted, already_bought, insufficient_funds, not_open, closed, conflict (Postgres refused an edition Redis handed out), rate_limited, unavailable (ADR 0022, task 6.8) | marketplace |
+| `market.drops.joins` | Counter | – (joins of a drop's waiting room) | marketplace |
+| `market.drops.reserve.duration` | Histogram (ms) | `script` = peek, reserve, join, rate, release, paid, ... (a drop's Redis scripts) | marketplace |
+| `market.drops.settled` | Counter | – (drop editions whose coins were paid to the drawing's authors) | marketplace |
+| `market.drops.leaked_reservations` | Counter | – (reservations the sweeper gave back: their purchase never committed) | marketplace |
+| `market.drops.escrow_mismatch` | Gauge | – (drop escrow shards whose balance isn't the price of their paid editions: must be 0; reported by the reconciliation job) | marketplace |
 | `market.db.reads` | Counter | `target` = primary, replica; `reason` = no_write, caught_up (replica), behind, stale (more than max-lag, 5 s, behind the primary), replica_error, no_replica (primary). Routed reads of the read-heavy endpoints (ADR 0020) | marketplace |
 | `market.db.replica_lag` | Gauge (s) | – (how far the read replica is behind, measured on it every 15 s: 0 when it has replayed all it received, else the age of its last replayed transaction; missing while it can't be read. Prometheus: `market_db_replica_lag_seconds`) | marketplace |
 | `assets.db.reads` | Counter | `target`, `reason` as `market.db.reads` (the gallery and drawing pages) | assets |
@@ -265,6 +271,8 @@ Starting rules (tune the thresholds after the first load test):
 | ReplicaLagHigh | The read replica more than 30 s behind (`market.db.replica_lag`), or reads falling back to the primary because it can't be reached or is more than 5 s behind (`market.db.reads` / `assets.db.reads` with `reason=replica_error` or `stale`), for 5 minutes (ADR 0020). Users still read their own writes; the primary carries the reads | warning |
 | TipEscrowMismatch | `market.tips.escrow_mismatch` above 0: an escrow shard doesn't hold exactly its pending tips (ADR 0021) | critical |
 | TipsStuck | The oldest pending tip (`market.tips.oldest_pending`) older than 15 minutes, for 5 minutes: neither its round's settlement, the sweeper nor the 10-minute refund closed it | warning |
+| DropEscrowMismatch | `market.drops.escrow_mismatch` above 0: a drop escrow shard doesn't hold exactly its paid editions (ADR 0022) | critical |
+| DropsUnavailable | Drop requests answered 503 (`market.drops.requests{result="unavailable"}`) for 5 minutes: Redis, the drops' gate, can't be reached; drops fail closed, the rest of the marketplace works | warning |
 | LedgerPartitionMissing | `market.ledger.default_partition_rows` above 0: postings in a month without a partition (task 6.6), whose partition can't be created while they are there | warning |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`; task 5.2, not a Grafana rule) | critical |
 

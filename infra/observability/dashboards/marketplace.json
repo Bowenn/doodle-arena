@@ -1225,6 +1225,274 @@
         "w": 12,
         "h": 8
       }
+    },
+    {
+      "id": 105,
+      "type": "row",
+      "title": "Drops (task 6.8, ADR 0022)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Drop requests",
+      "description": "Purchase attempts and refusals: bought; sold_out, not_admitted, already_bought, not_open and closed (mostly answered by Redis before Postgres); insufficient_funds; conflict (Postgres refused an edition Redis handed out); rate_limited; unavailable (Redis down: DropsUnavailable).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(market_drops_requests_total[$__rate_interval]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 74,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Drop scripts p99",
+      "description": "How long each of a drop's Redis scripts took (peek, reserve, join, rate, ...), p99.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, script) (rate(market_drops_reserve_duration_milliseconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{script}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 74,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Drop escrow shards out of balance",
+      "description": "Drop escrow shards whose balance isn't the price of their paid editions (reconciliation job). DropEscrowMismatch fires above 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "missing",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-09
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(market_drops_escrow_mismatch)",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 82,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Leaked reservations (1 h)",
+      "description": "Reservations the sweeper gave back because their purchase never committed (the marketplace died between Redis and Postgres).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "missing",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(market_drops_leaked_reservations_total[1h])) or vector(0)",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 82,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Editions paid to authors",
+      "description": "Drop editions whose coins left escrow for the drawing's authors (the sweeper, once a drop sold out or closed).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(market_drops_settled_total[$__rate_interval]))",
+          "legendFormat": "editions"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 82,
+        "w": 12,
+        "h": 8
+      }
     }
   ]
 }
