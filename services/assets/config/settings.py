@@ -41,6 +41,9 @@ class Env(BaseSettings):
     # The assets Redis user (task 5.5), added to the broker URL; empty in tests.
     redis_username: str = ""
     redis_password: str = ""
+    # The gallery cache (ADR 0024) in the same Redis database, under assets:cache:*. Off: every
+    # read goes to Postgres, as before task 6.7b (for measuring).
+    assets_cache: bool = True
     # Kafka: assets consumes game.rounds.v1 (design doc 6.2).
     kafka_brokers: str = "kafka:9092"
     # Object storage: SeaweedFS locally, S3 in AWS. The stroke logs are the game server's bucket
@@ -225,6 +228,10 @@ DRAWINGS_BUCKET = env.drawings_bucket
 MONGO_URL = env.mongo_url
 AI_URL = env.ai_url
 ELASTICSEARCH_URL = env.elasticsearch_url
+ASSETS_CACHE = env.assets_cache
+CACHE_REDIS_URL = env.redis_url
+CACHE_REDIS_USERNAME = env.redis_username
+CACHE_REDIS_PASSWORD = env.redis_password
 ELASTICSEARCH_USERNAME = env.elasticsearch_username
 ELASTICSEARCH_PASSWORD = env.elasticsearch_password
 AI_TIMEOUT_SECONDS = env.ai_timeout_seconds

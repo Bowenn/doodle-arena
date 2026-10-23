@@ -14,3 +14,6 @@ WHITENOISE_USE_FINDERS = True
 # test container's (tests/conftest.py, stores).
 S3_ACCESS_KEY = "test-only"
 S3_SECRET_KEY = "test-only-not-a-secret"
+
+# The gallery cache needs Redis; the tests that use it turn it on with their test container's.
+ASSETS_CACHE = False
