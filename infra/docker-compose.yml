@@ -722,9 +722,9 @@ services:
 
   marketplace:
     <<: *app
-    # The JVM sizes its heap at 75% of its memory (MaxRAMPercentage in the Dockerfile). Without a
-    # limit that is 75% of the Docker VM, which every container shares; with it, 768 MB, as on
-    # ECS where the task's memory is the limit.
+    # The JVM's heap is fixed at half its memory (the Dockerfile's flags). Without a limit that is
+    # half the Docker VM, which every container shares; with it, 512 MB, as on ECS where the
+    # task's memory is the limit.
     mem_limit: 1g
     # Built from the repository root, for the generated contracts in proto/gen/java.
     build:

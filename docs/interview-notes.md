@@ -525,7 +525,15 @@ Read this before interviews, and practice with the interview drill prompt in `do
   - a drawer tipping their own round, or a tip naming the wrong room: refunded in the settlement itself;
   - each settlement's idempotency key: counted on the round's row, which only settlers lock, so tippers never wait for them.
 - **Escrow is a system account, so the database won't stop it going negative.** The reconciliation job got a fourth invariant: each shard holds exactly the sum of its pending tips. A test tampers with a tip's status and expects the alert.
-- **Load tests find what you didn't change.** The k6 run's tail (p95 344 ms) wasn't locks, whose p99 was 23 ms. It was the JVM: with a 1 GB container limit it picks Serial GC, whose stop-the-world pauses reached about 1.5 s. A separate gotcha: the gateway's per-address rate limit means one load generator can't measure a crowd through it, so k6 calls the marketplace on the stack's network and says so.
+- **Load tests find what you didn't change.** The k6 run's tail (p95 344 ms) wasn't locks, whose p99 was 23 ms. It looked like the JVM's Serial GC, picked by its 1 GB container limit; the follow-up below found one specific full collection and a connection-pool queue. A separate gotcha: the gateway's per-address rate limit means one load generator can't measure a crowd through it, so k6 calls the marketplace on the stack's network and says so.
+
+### 6.3 follow-up: the marketplace JVM's pauses
+
+- **Read the GC log before tuning the GC.** The metrics said "Serial, full collections, about 1.5 s", which pointed at heap size. The JVM's own log gave the cause: `Pause Full (CodeCache GC Threshold)`. After JDK 20 removed the code-cache sweeper, the JVM collects to unload old compiled code once the JIT has added 15% of the code cache. Serial can only do that in a full collection with class unloading, and with 98 MB of Spring and agent classes that took 1.4 s, once per JVM. One flag (`SweeperThreshold=50`) moved the threshold past what warm-up compiles, and the longest pause dropped from 1.45 s to 95 ms.
+- **The right collector depends on the CPU, not the heap.** G1 would have unloaded that code concurrently. But the ECS task has 0.5 vCPU, which the JVM sees as one processor, so G1's concurrent threads would compete with the requests for that core. Serial with a fixed heap fits: young collections every few seconds instead of every 0.6 s, and no full collection to grow the heap.
+- **Container memory isn't all heap.** Metaspace, code cache, threads and the OpenTelemetry agent take about 350 MB of the marketplace's 1 GB. The old 75% heap ceiling (768 MB) would have hit the container limit the first time the heap grew that far. So the heap is fixed at half.
+- **Fixing one cause showed the other.** With GC pauses gone the tail stayed, and it followed Postgres' time per connection checkout, not GC time. Each tip takes three checkouts (claim, posting, completion). That's 900 a second on a 10-connection pool, so any slowdown from a busy laptop fills the queue. More connections didn't help: a Postgres short of CPU doesn't go faster with more clients.
+- **Read metrics per process.** Counted with one `increase()` over the service, restarts hid full collections, because several JVMs share an instance id. Read per JVM (by `host_name`), every JVM had exactly one.
 
 ### Remote dev box (GCP)
 

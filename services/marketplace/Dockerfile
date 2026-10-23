@@ -32,4 +32,15 @@ ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 COPY --from=build /app.jar /app/app.jar
 USER app
 EXPOSE 8080
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app/app.jar"]
+# Serial GC with a fixed heap of half the container's memory (512 MB of the 1 GB in compose and
+# on ECS). Serial, because the ECS task has 0.5 vCPU, which the JVM rounds to one processor: a
+# concurrent collector's threads would share that core with the requests. Fixed, because the
+# JVM otherwise starts at 1/64 of memory and grows the heap only through full collections: under
+# load a small young generation was collected every 0.6 s and a 58 MB old generation filled up.
+# Half, because the rest of the process (metaspace, code cache, threads, the agent) takes about
+# 350 MB, so 75% would leave no room below the limit.
+# SweeperThreshold: once the JIT has added 15% of the 240 MB code cache (the default), the JVM
+# collects to unload old code, and under Serial that is a full collection with class unloading:
+# 1.4 s, once per JVM, a minute or two into the first load. At 50% warm-up never reaches it (the
+# code cache settles near 45 MB); a nearly full code cache still unloads, at 10% free.
+ENTRYPOINT ["java", "-XX:+UseSerialGC", "-XX:InitialRAMPercentage=50", "-XX:MaxRAMPercentage=50", "-XX:SweeperThreshold=50", "-jar", "/app/app.jar"]
