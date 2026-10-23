@@ -171,6 +171,64 @@ groups:
           runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/ledger-partitions.md
           __dashboardUid__: da-marketplace
           __panelId__: "15"
+      - uid: tip-escrow-mismatch
+        title: TipEscrowMismatch
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Escrow shards that don't hold exactly their pending tips (ADR 0021).
+              expr: "max(market_tips_escrow_mismatch)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 0"
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        labels:
+          severity: critical
+          service: marketplace
+        annotations:
+          summary: "{{ $values.A }} tips escrow shards don't hold exactly their pending tips: tipped coins were lost, doubled or moved outside a settlement."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/tip-escrow-mismatch.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "18"
+      - uid: tips-stuck
+        title: TipsStuck
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # Seconds the oldest pending tip has waited; the sweeper refunds at 10 minutes.
+              expr: "max(market_tips_oldest_pending_seconds) or vector(0)"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              expression: "$A > 900"
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          service: marketplace
+        annotations:
+          summary: "A tip has waited {{ $values.A }} s in escrow: neither its RoundFinished nor the sweeper's refund closed it."
+          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/tips-stuck.md
+          __dashboardUid__: da-marketplace
+          __panelId__: "20"
       - uid: market-outbox-stuck
         title: MarketOutboxStuck
         condition: C

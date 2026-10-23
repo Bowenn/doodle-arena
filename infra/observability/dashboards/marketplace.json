@@ -902,6 +902,329 @@
         "w": 6,
         "h": 4
       }
+    },
+    {
+      "id": 104,
+      "type": "row",
+      "title": "Tips (task 6.3, ADR 0021)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Tips",
+      "description": "Tip requests: accepted (coins into escrow), insufficient_funds, round_over (the round was settled more than 30 s ago).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(market_tips_total[$__rate_interval]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 53,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Tips out of escrow",
+      "description": "Tips paid to their round's drawers or refunded, by what closed them: round (its RoundFinished) or sweep (a late tip, or one whose round never finished).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result, trigger) (rate(market_tips_settled_total[$__rate_interval]))",
+          "legendFormat": "{{result}} ({{trigger}})"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 53,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Escrow shards out of balance",
+      "description": "Tips escrow shards whose balance isn't the sum of their pending tips (reconciliation job). TipEscrowMismatch fires above 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "missing",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1e-09
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(market_tips_escrow_mismatch)",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Tips in escrow",
+      "description": "Pending tips: their round hasn't finished yet.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(market_tips_pending)",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 61,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Oldest tip in escrow",
+      "description": "Age of the oldest pending tip. A round lasts under 2 minutes and the sweeper refunds after 10; TipsStuck fires above 15 minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "missing",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(market_tips_oldest_pending_seconds)",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 61,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Rounds received",
+      "description": "Records read from game.rounds.v1: settled, skipped (unreadable) or failed (breaks its contract, or refused by the database).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (result) (rate(market_rounds_received_total[$__rate_interval]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 65,
+        "w": 12,
+        "h": 8
+      }
     }
   ]
 }
