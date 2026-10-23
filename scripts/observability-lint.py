@@ -26,7 +26,7 @@ DASHBOARDS = ROOT / "infra/observability/dashboards"
 ALERTING = ROOT / "infra/observability/grafana/alerting"
 RUNBOOKS = ROOT / "docs/runbooks"
 SPEC = ROOT / "docs/observability.md"
-RUNBOOK_URL = "https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/"
+RUNBOOK_URL = "https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/"
 
 # Alerts in the spec that aren't Grafana rules: AWS Budgets / CloudWatch (task 5.2).
 NOT_GRAFANA = {"AwsBudget"}

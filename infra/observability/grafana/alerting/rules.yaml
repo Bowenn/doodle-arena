@@ -42,7 +42,7 @@ groups:
           service: marketplace
         annotations:
           summary: "The ledger doesn't balance: its entries sum to {{ $values.A }} coins, and {{ $values.B }} accounts don't match their entries."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/ledger-imbalance.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/ledger-imbalance.md
           __dashboardUid__: da-marketplace
           __panelId__: "1"
       - uid: ownership-violation
@@ -71,7 +71,7 @@ groups:
           service: marketplace
         annotations:
           summary: "{{ $values.A }} drawings have an ownership row that disagrees with their provenance."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/ownership-violation.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/ownership-violation.md
           __dashboardUid__: da-marketplace
           __panelId__: "3"
       - uid: reconciliation-stale
@@ -100,7 +100,7 @@ groups:
           service: marketplace
         annotations:
           summary: "The reconciliation job hasn't reported for 5 minutes: the ledger and ownership alerts are blind."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/reconciliation-stale.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/reconciliation-stale.md
           __dashboardUid__: da-marketplace
           __panelId__: "1"
       - uid: replica-lag-high
@@ -139,7 +139,7 @@ groups:
           service: marketplace
         annotations:
           summary: "The read replica is {{ $values.A }} s behind, can't be reached, or is too stale to read ({{ $values.B }} reads fell back in 5 minutes): reads go to the primary, which carries the replica's load."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/replica-lag.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/replica-lag.md
           __dashboardUid__: da-marketplace
           __panelId__: "14"
       - uid: ledger-partition-missing
@@ -168,7 +168,7 @@ groups:
           service: marketplace
         annotations:
           summary: "{{ $values.A }} ledger entries are in the default partition: a month's partition is missing, and it can't be created while its rows are there."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/ledger-partitions.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/ledger-partitions.md
           __dashboardUid__: da-marketplace
           __panelId__: "15"
       - uid: tip-escrow-mismatch
@@ -197,7 +197,7 @@ groups:
           service: marketplace
         annotations:
           summary: "{{ $values.A }} tips escrow shards don't hold exactly their pending tips: tipped coins were lost, doubled or moved outside a settlement."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/tip-escrow-mismatch.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/tip-escrow-mismatch.md
           __dashboardUid__: da-marketplace
           __panelId__: "18"
       - uid: tips-stuck
@@ -226,7 +226,7 @@ groups:
           service: marketplace
         annotations:
           summary: "A tip has waited {{ $values.A }} s in escrow: neither its RoundFinished nor the sweeper's refund closed it."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/tips-stuck.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/tips-stuck.md
           __dashboardUid__: da-marketplace
           __panelId__: "20"
       - uid: drop-escrow-mismatch
@@ -255,7 +255,7 @@ groups:
           service: marketplace
         annotations:
           summary: "{{ $values.A }} drop escrow shards don't hold exactly their paid editions: a buyer's coins or an author's payout went astray."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/drop-escrow-mismatch.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/drop-escrow-mismatch.md
           __dashboardUid__: da-marketplace
           __panelId__: "24"
       - uid: drops-unavailable
@@ -284,7 +284,7 @@ groups:
           service: marketplace
         annotations:
           summary: "{{ $values.A }} drop requests in 5 minutes answered 503: the marketplace can't reach Redis, so drops are closed to buyers (everything else still works)."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/drops-unavailable.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/drops-unavailable.md
           __dashboardUid__: da-marketplace
           __panelId__: "22"
       - uid: market-outbox-stuck
@@ -313,7 +313,7 @@ groups:
           service: marketplace
         annotations:
           summary: "The marketplace outbox's oldest event is {{ $values.A }} s old: sales and coin credits aren't reaching Kafka."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/outbox-stuck.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/outbox-stuck.md
           __dashboardUid__: da-marketplace
           __panelId__: "4"
       - uid: stripe-signature-failures
@@ -342,7 +342,7 @@ groups:
           service: marketplace
         annotations:
           summary: "{{ $values.A }} Stripe webhooks with an invalid signature in 10 minutes: a wrong secret or forged requests."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/stripe-signature-failures.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/stripe-signature-failures.md
           __dashboardUid__: da-marketplace
           __panelId__: "9"
   - orgId: 1
@@ -376,7 +376,7 @@ groups:
           service: auth
         annotations:
           summary: "Auth's outbox is {{ $values.A }} s behind: a credential revocation isn't reaching the notifier, so a thief's webhooks keep running."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/outbox-stuck.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/outbox-stuck.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "2"
       - uid: refresh-token-reuse
@@ -405,7 +405,7 @@ groups:
           service: auth
         annotations:
           summary: "{{ $values.A }} reused refresh tokens in 10 minutes: stolen tokens, or a client refreshing concurrently."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/refresh-token-reuse.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/refresh-token-reuse.md
           __dashboardUid__: da-overview
           __panelId__: "7"
   - orgId: 1
@@ -439,7 +439,7 @@ groups:
           service: lobby
         annotations:
           summary: "The lobby sees {{ $values.A }} healthy game servers, fewer than expected: rooms fail over and new rooms have less room."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/game-server-down.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/game-server-down.md
           __dashboardUid__: da-overview
           __panelId__: "9"
       - uid: slow-broadcasts
@@ -477,7 +477,7 @@ groups:
           service: game-server
         annotations:
           summary: "{{ $labels.lag }} lag p95 is {{ $values.A }} ms: players see strokes, guesses and pongs late."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/slow-broadcasts.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/slow-broadcasts.md
           __dashboardUid__: da-game-server
           __panelId__: "13"
       - uid: slow-relay-broadcast
@@ -512,7 +512,7 @@ groups:
           service: game-server
         annotations:
           summary: "Viewer broadcast latency p99 is {{ $values.A }} ms: live-room viewers see the drawing late."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/slow-relay-broadcast.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/slow-relay-broadcast.md
           __dashboardUid__: da-game-server
           __panelId__: "16"
       - uid: outbox-stuck
@@ -541,7 +541,7 @@ groups:
           service: game-server
         annotations:
           summary: "{{ $values.A }} finished rounds or matches have waited over 10 minutes for Kafka: rewards and drawings are late."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/outbox-stuck.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/outbox-stuck.md
           __dashboardUid__: da-game-server
           __panelId__: "10"
   - orgId: 1
@@ -575,7 +575,7 @@ groups:
           service: assets
         annotations:
           summary: "The assets outbox is {{ $values.A }} s behind: approved drawings aren't being minted."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/outbox-stuck.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/outbox-stuck.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "2"
       - uid: drawings-failing
@@ -604,7 +604,7 @@ groups:
           service: assets
         annotations:
           summary: "Drawings have kept failing for 10 minutes ({{ $values.A }} in the last 10): stroke logs missing or unreadable."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/drawings-pipeline.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/drawings-pipeline.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "7"
       - uid: jobs-backlog
@@ -639,7 +639,7 @@ groups:
           service: assets
         annotations:
           summary: "The oldest Celery job is {{ $values.A }} s old ({{ $values.B }} workers reporting): drawings are late."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/drawings-pipeline.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/drawings-pipeline.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "5"
       - uid: consumer-lag-growing
@@ -674,7 +674,7 @@ groups:
           service: kafka
         annotations:
           summary: "Consumer group {{ $labels.group }} is {{ $values.A }} messages behind and falling further back."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/consumer-lag-growing.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/consumer-lag-growing.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "1"
       - uid: webhooks-failing
@@ -703,7 +703,7 @@ groups:
           service: notifier
         annotations:
           summary: "{{ humanizePercentage $values.A.Value }} of webhook attempts fail, 50 or more in 15 minutes: our sender or network, not one developer's server."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/webhooks.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/webhooks.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "9"
       - uid: webhook-queue-stuck
@@ -732,7 +732,7 @@ groups:
           service: notifier
         annotations:
           summary: "The oldest due webhook has waited {{ $values.A }} s for a worker."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/webhooks.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/webhooks.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "10"
   - orgId: 1
@@ -765,7 +765,7 @@ groups:
           severity: warning
         annotations:
           summary: "{{ $labels.service_name }} answers {{ humanizePercentage $values.A.Value }} of requests with a server error."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/high-error-rate.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/high-error-rate.md
           __dashboardUid__: da-overview
           __panelId__: "4"
   - orgId: 1
@@ -805,7 +805,7 @@ groups:
           service: kafka
         annotations:
           summary: "Kafka has refused logins or requests every minute for 5 minutes (last minute: {{ $values.A }} failed logins, {{ $values.B }} denials): a service missing a credential or an ACL, or someone trying."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/kafka-auth-failures.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/kafka-auth-failures.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "13"
       - uid: kafka-admin-used
@@ -834,7 +834,7 @@ groups:
           service: kafka
         annotations:
           summary: "Someone used Kafka's admin super user in the last 5 minutes ({{ $values.A }} logins on the localhost ADMIN listener). It's for humans only: make sure it was you."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/kafka-admin-used.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/kafka-admin-used.md
           __dashboardUid__: da-async-pipeline
           __panelId__: "14"
   - orgId: 1
@@ -873,7 +873,7 @@ groups:
           service: analytics
         annotations:
           summary: "{{ $values.A }} {{ $labels.rule }} wash-trading loop(s) in the last 15 minutes: accounts passed a drawing round among themselves within 7 days."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/wash-trading.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/wash-trading.md
           __dashboardUid__: da-analytics
           __panelId__: "12"
       - uid: analytics-down
@@ -918,6 +918,6 @@ groups:
           service: analytics
         annotations:
           summary: "The analytics Flink job isn't running or isn't checkpointing (last checkpoint {{ $values.A }} s ago; not running: {{ $values.B }}): top guesses stop and wash trading isn't watched."
-          runbook_url: https://github.com/Bowenn/gap-project_private/blob/master/docs/runbooks/analytics-down.md
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/analytics-down.md
           __dashboardUid__: da-analytics
           __panelId__: "1"

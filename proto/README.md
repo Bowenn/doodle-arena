@@ -37,7 +37,7 @@ make test s=proto       # the same checks without regenerating
 
 | Language | Path | Package | Use it from a service |
 |---|---|---|---|
-| Go | `gen/go/` (module `github.com/Bowenn/gap-project_private/proto/gen/go`) | `.../proto/gen/go/doodle/events/v1` | `require` the module and add `replace github.com/Bowenn/gap-project_private/proto/gen/go => ../../proto/gen/go`. See `tools/eventctl/go.mod` |
+| Go | `gen/go/` (module `github.com/Bowenn/doodle-arena/proto/gen/go`) | `.../proto/gen/go/doodle/events/v1` | `require` the module and add `replace github.com/Bowenn/doodle-arena/proto/gen/go => ../../proto/gen/go`. See `tools/eventctl/go.mod` |
 | Java | `gen/java/src/main/java` (Gradle build `doodle-proto`) | `com.doodlearena.proto.doodle.events.v1` | `includeBuild("../../proto/gen/java")` in `settings.gradle.kts`, then `implementation("com.doodlearena:doodle-proto")` |
 | Python | `gen/python/doodle/` (package `doodle-proto`, with `.pyi` stubs) | `doodle.events.v1.rounds_pb2` | `uv add --editable ../../proto/gen/python` |
 

@@ -107,5 +107,5 @@ done
 cat <<'EOF'
 
 Toolchains installed. Log out and back in (for the docker group), then:
-  git clone git@github.com:Bowenn/gap-project_private.git doodle-arena && cd doodle-arena && make up
+  git clone git@github.com:Bowenn/doodle-arena.git doodle-arena && cd doodle-arena && make up
 EOF
