@@ -12,6 +12,11 @@
 #   scripts/loadtest.sh drops           a flash sale: 1,000 seeded buyers for 100 editions of one
 #                                       drop, then Postgres checked for overselling (task 6.8b,
 #                                       loadtest/drops.js; make loadtest-drops; needs make seed)
+#   scripts/loadtest.sh gallery         the gallery's pages, Market lookups and drawing pages at
+#                                       RATE a second while a drawing is approved every 2 s
+#                                       (task 6.7b, loadtest/gallery.js; make loadtest-gallery;
+#                                       CACHE=off recreates assets without its cache, ADR 0024;
+#                                       needs make seed; local only)
 #   GATEWAY=https://icanfly.click scripts/loadtest.sh
 # It mints four access tokens per room (and, for live, one per viewer VU) with auth's own
 # TokenIssuer (mint_tokens.py): the local
@@ -146,6 +151,60 @@ PY
     exit 1
   fi
   echo "no overselling: exactly $editions editions to $editions buyers, $((editions * price)) coins to the authors, the ledger at 0"
+  exit "$status"
+fi
+if [[ "$profile" == gallery ]]; then
+  if [[ "$GATEWAY" != http://localhost:8080 ]]; then
+    echo "The gallery load test runs locally: k6 calls assets on the stack's network." >&2
+    exit 2
+  fi
+  compose=(docker compose -f infra/docker-compose.yml --env-file "${ENV_FILE:-.env}")
+  psql_assets() {
+    "${compose[@]}" exec -T postgres psql -X -U assets -d assets -v ON_ERROR_STOP=1 -tAc "$1"
+  }
+  # Postgres's own count of rows read for assets, primary and replica (pg_stat_database).
+  rows_read() {
+    local sql="SELECT tup_returned + tup_fetched FROM pg_stat_database WHERE datname = 'assets'"
+    echo $(( $("${compose[@]}" exec -T postgres psql -X -U assets -d assets -tAc "$sql") \
+      + $("${compose[@]}" exec -T postgres-replica psql -X -U assets -d assets -tAc "$sql") ))
+  }
+  cache="${CACHE:-on}"
+  if [[ "$cache" != on && "$cache" != off ]]; then
+    echo "CACHE is on or off" >&2
+    exit 2
+  fi
+  # A random sample of the seeded drawings (make seed): the Market's and the drawing pages' ids.
+  ids="$(psql_assets "SELECT string_agg(id::text, ',') FROM (SELECT id FROM drawings_drawing
+    WHERE status = 'approved' ORDER BY random() LIMIT 2000) s")"
+  if [[ -z "$ids" ]]; then
+    echo "No approved drawings: run make seed first." >&2
+    exit 1
+  fi
+  echo "==> assets with ASSETS_CACHE=$cache"
+  ASSETS_CACHE="$cache" "${compose[@]}" up -d --wait assets >/dev/null
+  TOKENS="$(uv run -q --project services/auth python scripts/drills/mint_tokens.py $(seq -f 'gallery%g' 1 20))"
+  IDS="$ids" CACHE="$cache"
+  export TOKENS IDS CACHE
+  env_args=(-e TOKENS -e IDS -e CACHE)
+  for v in RATE DURATION; do
+    if [[ -n "${!v:-}" ]]; then env_args+=(-e "$v"); fi
+  done
+  duration="${DURATION:-120}"
+  echo "==> k6 gallery: ${RATE:-200} requests a second for $duration s, cache $cache, an approval every 2 s"
+  uv run -q --project services/auth --with confluent-kafka --with boto3 --with 'protobuf>=7.36.2,<8' \
+    python scripts/drills/approvals.py "$duration" 2 &
+  approvals=$!
+  before="$(rows_read)"
+  status=0
+  docker run --rm --network doodle-arena_default -v "$PWD/loadtest:/loadtest:ro" "${env_args[@]}" \
+    grafana/k6:2.3.0 run /loadtest/gallery.js || status=$?
+  after="$(rows_read)"
+  wait "$approvals" || true
+  echo "==> Postgres rows read for assets during the run (primary and replica): $((after - before))"
+  if [[ "$cache" == off ]]; then
+    echo "==> assets back with its cache"
+    ASSETS_CACHE=on "${compose[@]}" up -d --wait assets >/dev/null
+  fi
   exit "$status"
 fi
 case "$profile" in
