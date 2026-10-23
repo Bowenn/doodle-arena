@@ -84,6 +84,9 @@ jobs:
       # Flink, and both flags come out of the job (ADR 0018). Needs uv, above.
       - name: make wash-check (wash trading end to end, with real sales and a Flink restart)
         run: make wash-check
+      # Real tips through the gateway, a RoundFinished, the drawers paid out of escrow (ADR 0021).
+      - name: make tips-check (tips into escrow, settled when the round finishes)
+        run: make tips-check
       # The load test's script must keep working: two rooms for a minute, thresholds included.
       - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
         with:
