@@ -4,10 +4,10 @@
 # --profile '*': down, ps and logs also reach the opt-in services (PROFILES on make up).
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env --profile '*'
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check tips-check seed explain kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke loadtest-tips lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check tips-check drops-check seed explain kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke loadtest-tips lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | tips-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | loadtest-tips | lighthouse | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | tips-check | drops-check | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | loadtest-tips | lighthouse | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
@@ -63,6 +63,12 @@ wash-check:
 tips-check:
 	@PATH="$$HOME/.docker/bin:$$PATH" uv run --project services/auth --with confluent-kafka --with boto3 \
 		--with 'protobuf>=7.36.2,<8' python scripts/drills/tips.py
+
+# Limited drops end to end: a lottery waiting room, a race for 3 editions, the authors paid
+# (ADR 0022, task 6.8). In a worktree, set ENV_FILE and DRILL_JWT_KEY to the main checkout's.
+drops-check:
+	@PATH="$$HOME/.docker/bin:$$PATH" uv run --project services/auth --with confluent-kafka --with boto3 \
+		--with 'protobuf>=7.36.2,<8' python scripts/drills/drops.py
 
 # The broker refuses what each service must not do (ADR 0013).
 kafka-acl-check:
