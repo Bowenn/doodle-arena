@@ -99,6 +99,12 @@ public final class ReconciliationJob {
 			.setDescription("Drawings whose ownership and provenance disagree; must be 0")
 			.buildWithCallback((gauge) -> current().ifPresent((result) -> gauge.record(result.ownershipViolations())));
 		metrics.meter()
+			.gaugeBuilder("market.tips.escrow_mismatch")
+			.ofLongs()
+			.setUnit("{shard}")
+			.setDescription("Tips escrow shards whose balance isn't the sum of their pending tips; must be 0")
+			.buildWithCallback((gauge) -> current().ifPresent((result) -> gauge.record(result.escrowMismatches())));
+		metrics.meter()
 			.gaugeBuilder("market.ledger.default_partition_rows")
 			.ofLongs()
 			.setUnit("{entry}")
@@ -122,10 +128,12 @@ public final class ReconciliationJob {
 			span.setAttribute("ledger.imbalance", result.imbalance());
 			span.setAttribute("ledger.mismatched_accounts", result.mismatchedAccounts());
 			span.setAttribute("ownership.violations", result.ownershipViolations());
+			span.setAttribute("tips.escrow_mismatch", result.escrowMismatches());
 			var line = result.clean() ? log.atInfo() : log.atError();
 			line.addKeyValue("imbalance", result.imbalance())
 				.addKeyValue("mismatched_accounts", result.mismatchedAccounts())
 				.addKeyValue("ownership_violations", result.ownershipViolations())
+				.addKeyValue("escrow_mismatched_shards", result.escrowMismatchedShards())
 				.addKeyValue("duration_ms", durationMs);
 			if (!result.mismatchedAccountIds().isEmpty()) {
 				line = line.addKeyValue("mismatched_account_ids",
@@ -179,7 +187,7 @@ public final class ReconciliationJob {
 					ORDER BY a.account_id""".formatted(OPEN_FROM))
 				.query(Long.class)
 				.list();
-			return new ReconciliationResult(imbalance, mismatched, ownershipViolations(), checkedAt);
+			return new ReconciliationResult(imbalance, mismatched, ownershipViolations(), escrowMismatches(), checkedAt);
 		});
 		if (verified.imbalance() != 0 || !verified.mismatchedAccounts().isEmpty()) {
 			// A closed month's entries no longer match their stored totals: something changed
@@ -192,7 +200,7 @@ public final class ReconciliationJob {
 			TreeSet<Long> accounts = new TreeSet<>(result.mismatchedAccountIds());
 			accounts.addAll(verified.mismatchedAccounts());
 			result = new ReconciliationResult(result.imbalance() + verified.imbalance(), List.copyOf(accounts),
-					result.ownershipViolationIds(), result.checkedAt());
+					result.ownershipViolationIds(), result.escrowMismatchedShards(), result.checkedAt());
 		}
 		this.last.set(result);
 		return result;
@@ -202,6 +210,25 @@ public final class ReconciliationJob {
 	private static final String OPEN_FROM = """
 			SELECT COALESCE(CAST(max(month) + interval '1 month' AS TIMESTAMPTZ), '-infinity')
 			FROM ledger_months_closed""";
+
+	/**
+	 * Tips escrow shards (ADR 0021) that don't hold exactly their pending tips: a shard's coins
+	 * belong to its pending tips and nothing else. Escrow accounts are system accounts, so no CHECK
+	 * stops one going below zero; this does.
+	 */
+	private List<Integer> escrowMismatches() {
+		return this.db.sql("""
+				SELECT s.shard FROM (
+					SELECT CAST(substr(a.owner_id, length('tips_escrow:') + 1) AS INT) AS shard, b.balance
+					FROM accounts a JOIN balances b USING (account_id)
+					WHERE a.owner_type = 'system' AND a.owner_id LIKE 'tips\\_escrow:%') s
+				LEFT JOIN (SELECT shard, SUM(amount) AS pending FROM tips WHERE status = 'PENDING' GROUP BY shard) p
+					USING (shard)
+				WHERE s.balance <> COALESCE(p.pending, 0)
+				ORDER BY s.shard""")
+			.query(Integer.class)
+			.list();
+	}
 
 	/**
 	 * Drawings whose current owner and provenance disagree: not exactly one MINT event, a version

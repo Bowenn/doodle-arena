@@ -11,6 +11,7 @@ import org.springframework.util.backoff.ExponentialBackOff;
 
 import com.doodlearena.marketplace.reward.MatchEventsListener;
 import com.doodlearena.marketplace.telemetry.MarketMetrics;
+import com.doodlearena.marketplace.tip.RoundEventsListener;
 
 /**
  * What happens when a listener throws. The default is to retry the same record, waiting 1 s
@@ -40,6 +41,9 @@ public class KafkaConfig {
 				.log("record refused by the database; skipped");
 			if (record.topic().equals(MatchEventsListener.TOPIC)) {
 				metrics.matchReceived("failed");
+			}
+			else if (record.topic().equals(RoundEventsListener.TOPIC)) {
+				metrics.roundReceived("failed");
 			}
 			else {
 				metrics.drawingReceived("failed");
