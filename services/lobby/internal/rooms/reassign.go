@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
-	"github.com/Bowenn/gap-project_private/services/lobby/internal/registry"
+	gamev1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1"
+	"github.com/Bowenn/doodle-arena/services/lobby/internal/registry"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"

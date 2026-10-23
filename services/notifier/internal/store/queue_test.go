@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/pgtest"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/pgtest"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/store"
 )
 
 func TestOldestDueAge(t *testing.T) {

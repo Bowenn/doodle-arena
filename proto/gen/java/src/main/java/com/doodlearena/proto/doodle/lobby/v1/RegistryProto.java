@@ -78,13 +78,13 @@ public final class RegistryProto extends com.google.protobuf.GeneratedFile {
       "SE_WAITING\020\001\022\026\n\022ROOM_PHASE_PLAYING\020\0022e\n\017" +
       "RegistryService\022R\n\tHeartbeat\022!.doodle.lo" +
       "bby.v1.HeartbeatRequest\032\".doodle.lobby.v" +
-      "1.HeartbeatResponseB\340\001\n%com.doodlearena." +
-      "proto.doodle.lobby.v1B\rRegistryProtoP\001ZJ" +
-      "github.com/Bowenn/gap-project_private/pr" +
-      "oto/gen/go/doodle/lobby/v1;lobbyv1\242\002\003DLX" +
-      "\252\002\017Doodle.Lobby.V1\312\002\017Doodle\\Lobby\\V1\342\002\033D" +
-      "oodle\\Lobby\\V1\\GPBMetadata\352\002\021Doodle::Lob" +
-      "by::V1b\006proto3"
+      "1.HeartbeatResponseB\331\001\n%com.doodlearena." +
+      "proto.doodle.lobby.v1B\rRegistryProtoP\001ZC" +
+      "github.com/Bowenn/doodle-arena/proto/gen" +
+      "/go/doodle/lobby/v1;lobbyv1\242\002\003DLX\252\002\017Dood" +
+      "le.Lobby.V1\312\002\017Doodle\\Lobby\\V1\342\002\033Doodle\\L" +
+      "obby\\V1\\GPBMetadata\352\002\021Doodle::Lobby::V1b" +
+      "\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

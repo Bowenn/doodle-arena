@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/libs/go/redistest"
-	"github.com/Bowenn/gap-project_private/services/lobby/internal/leaderboard"
+	"github.com/Bowenn/doodle-arena/libs/go/redistest"
+	"github.com/Bowenn/doodle-arena/services/lobby/internal/leaderboard"
 )
 
 func TestMain(m *testing.M) { redistest.Main(m) }

@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"time"
 
-	lobbyv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/lobby/v1"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/control"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/relay"
+	lobbyv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/lobby/v1"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/control"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/relay"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"

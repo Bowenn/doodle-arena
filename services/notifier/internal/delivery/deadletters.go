@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
+	eventsv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1"
 	"github.com/google/uuid"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel"
@@ -14,8 +14,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/webhook"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/store"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/webhook"
 )
 
 // DLQTopic carries DeliveryDead (design doc 6.2).

@@ -1,4 +1,4 @@
-module github.com/Bowenn/gap-project_private/proto/gen/go
+module github.com/Bowenn/doodle-arena/proto/gen/go
 
 go 1.27
 

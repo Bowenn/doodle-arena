@@ -358,8 +358,8 @@ const file_doodle_game_v1_control_proto_rawDesc = "" +
 	"\x0frooms_remaining\x18\x01 \x01(\rR\x0eroomsRemaining2\xc3\x01\n" +
 	"\x0eControlService\x12Y\n" +
 	"\fAllocateRoom\x12#.doodle.game.v1.AllocateRoomRequest\x1a$.doodle.game.v1.AllocateRoomResponse\x12V\n" +
-	"\vDrainServer\x12\".doodle.game.v1.DrainServerRequest\x1a#.doodle.game.v1.DrainServerResponseB\xd8\x01\n" +
-	"$com.doodlearena.proto.doodle.game.v1B\fControlProtoP\x01ZHgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1;gamev1\xa2\x02\x03DGX\xaa\x02\x0eDoodle.Game.V1\xca\x02\x0eDoodle\\Game\\V1\xe2\x02\x1aDoodle\\Game\\V1\\GPBMetadata\xea\x02\x10Doodle::Game::V1b\x06proto3"
+	"\vDrainServer\x12\".doodle.game.v1.DrainServerRequest\x1a#.doodle.game.v1.DrainServerResponseB\xd1\x01\n" +
+	"$com.doodlearena.proto.doodle.game.v1B\fControlProtoP\x01ZAgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1;gamev1\xa2\x02\x03DGX\xaa\x02\x0eDoodle.Game.V1\xca\x02\x0eDoodle\\Game\\V1\xe2\x02\x1aDoodle\\Game\\V1\\GPBMetadata\xea\x02\x10Doodle::Game::V1b\x06proto3"
 
 var (
 	file_doodle_game_v1_control_proto_rawDescOnce sync.Once

@@ -67,12 +67,12 @@ public final class StrokeLogProto extends com.google.protobuf.GeneratedFile {
       "ts\022\026\n\006undone\030\006 \001(\010R\006undone\022,\n\022server_rec" +
       "eived_ms\030\007 \001(\rR\020serverReceivedMs\"6\n\005Poin" +
       "t\022\014\n\001x\030\001 \001(\rR\001x\022\014\n\001y\030\002 \001(\rR\001y\022\021\n\004t_ms\030\003 " +
-      "\001(\rR\003tMsB\332\001\n$com.doodlearena.proto.doodl" +
-      "e.game.v1B\016StrokeLogProtoP\001ZHgithub.com/" +
-      "Bowenn/gap-project_private/proto/gen/go/" +
-      "doodle/game/v1;gamev1\242\002\003DGX\252\002\016Doodle.Gam" +
-      "e.V1\312\002\016Doodle\\Game\\V1\342\002\032Doodle\\Game\\V1\\G" +
-      "PBMetadata\352\002\020Doodle::Game::V1b\006proto3"
+      "\001(\rR\003tMsB\323\001\n$com.doodlearena.proto.doodl" +
+      "e.game.v1B\016StrokeLogProtoP\001ZAgithub.com/" +
+      "Bowenn/doodle-arena/proto/gen/go/doodle/" +
+      "game/v1;gamev1\242\002\003DGX\252\002\016Doodle.Game.V1\312\002\016" +
+      "Doodle\\Game\\V1\342\002\032Doodle\\Game\\V1\\GPBMetad" +
+      "ata\352\002\020Doodle::Game::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"time"
 
-	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
+	eventsv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/webhook"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/webhook"
 )
 
 // Topics the notifier reads (design doc 6.2).

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
 )
 
 // fakeDurable keeps commits in memory, like the room store, and can be told to fail.

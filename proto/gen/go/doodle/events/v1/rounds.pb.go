@@ -256,8 +256,8 @@ const file_doodle_events_v1_rounds_proto_rawDesc = "" +
 	"\fcanvas_width\x18\t \x01(\rR\vcanvasWidth\x12#\n" +
 	"\rcanvas_height\x18\n" +
 	" \x01(\rR\fcanvasHeight\x125\n" +
-	"\bended_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\aendedAtB\xe5\x01\n" +
-	"&com.doodlearena.proto.doodle.events.v1B\vRoundsProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
+	"\bended_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\aendedAtB\xde\x01\n" +
+	"&com.doodlearena.proto.doodle.events.v1B\vRoundsProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (
 	file_doodle_events_v1_rounds_proto_rawDescOnce sync.Once

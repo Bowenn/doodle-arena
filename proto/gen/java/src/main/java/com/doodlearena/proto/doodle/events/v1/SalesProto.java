@@ -65,13 +65,13 @@ public final class SalesProto extends com.google.protobuf.GeneratedFile {
       "altyPaymentR\troyalties\022=\n\014completed_at\030\t" +
       " \001(\0132\032.google.protobuf.TimestampR\013comple" +
       "tedAt\"A\n\016RoyaltyPayment\022\027\n\007user_id\030\001 \001(\t" +
-      "R\006userId\022\026\n\006amount\030\002 \001(\003R\006amountB\344\001\n&com" +
+      "R\006userId\022\026\n\006amount\030\002 \001(\003R\006amountB\335\001\n&com" +
       ".doodlearena.proto.doodle.events.v1B\nSal" +
-      "esProtoP\001ZLgithub.com/Bowenn/gap-project" +
-      "_private/proto/gen/go/doodle/events/v1;e" +
-      "ventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodl" +
-      "e\\Events\\V1\342\002\034Doodle\\Events\\V1\\GPBMetada" +
-      "ta\352\002\022Doodle::Events::V1b\006proto3"
+      "esProtoP\001ZEgithub.com/Bowenn/doodle-aren" +
+      "a/proto/gen/go/doodle/events/v1;eventsv1" +
+      "\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Event" +
+      "s\\V1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Do" +
+      "odle::Events::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

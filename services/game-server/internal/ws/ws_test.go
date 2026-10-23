@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/ticket"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/room"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/ticket"
 	"github.com/coder/websocket"
 	"github.com/golang-jwt/jwt/v5"
 	"go.opentelemetry.io/otel/metric"

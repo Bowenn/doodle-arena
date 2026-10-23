@@ -20,7 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/room"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"

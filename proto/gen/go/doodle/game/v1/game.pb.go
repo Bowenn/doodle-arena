@@ -78,8 +78,8 @@ const file_doodle_game_v1_game_proto_rawDesc = "" +
 	"\x19doodle/game/v1/game.proto\x12\x0edoodle.game.v1*<\n" +
 	"\bGameMode\x12\x19\n" +
 	"\x15GAME_MODE_UNSPECIFIED\x10\x00\x12\x15\n" +
-	"\x11GAME_MODE_CLASSIC\x10\x01B\xd5\x01\n" +
-	"$com.doodlearena.proto.doodle.game.v1B\tGameProtoP\x01ZHgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1;gamev1\xa2\x02\x03DGX\xaa\x02\x0eDoodle.Game.V1\xca\x02\x0eDoodle\\Game\\V1\xe2\x02\x1aDoodle\\Game\\V1\\GPBMetadata\xea\x02\x10Doodle::Game::V1b\x06proto3"
+	"\x11GAME_MODE_CLASSIC\x10\x01B\xce\x01\n" +
+	"$com.doodlearena.proto.doodle.game.v1B\tGameProtoP\x01ZAgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1;gamev1\xa2\x02\x03DGX\xaa\x02\x0eDoodle.Game.V1\xca\x02\x0eDoodle\\Game\\V1\xe2\x02\x1aDoodle\\Game\\V1\\GPBMetadata\xea\x02\x10Doodle::Game::V1b\x06proto3"
 
 var (
 	file_doodle_game_v1_game_proto_rawDescOnce sync.Once

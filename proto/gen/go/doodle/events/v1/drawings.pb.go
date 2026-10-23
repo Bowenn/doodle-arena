@@ -429,8 +429,8 @@ const file_doodle_events_v1_drawings_proto_rawDesc = "" +
 	"\x0eDecisionSource\x12\x1f\n" +
 	"\x1bDECISION_SOURCE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12DECISION_SOURCE_AI\x10\x01\x12\x1d\n" +
-	"\x19DECISION_SOURCE_MODERATOR\x10\x02B\xe7\x01\n" +
-	"&com.doodlearena.proto.doodle.events.v1B\rDrawingsProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
+	"\x19DECISION_SOURCE_MODERATOR\x10\x02B\xe0\x01\n" +
+	"&com.doodlearena.proto.doodle.events.v1B\rDrawingsProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (
 	file_doodle_events_v1_drawings_proto_rawDescOnce sync.Once

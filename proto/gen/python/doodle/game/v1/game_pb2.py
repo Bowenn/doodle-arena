@@ -24,14 +24,14 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x19\x64oodle/game/v1/game.proto\x12\x0e\x64oodle.game.v1*<\n\x08GameMode\x12\x19\n\x15GAME_MODE_UNSPECIFIED\x10\x00\x12\x15\n\x11GAME_MODE_CLASSIC\x10\x01\x42\xd5\x01\n$com.doodlearena.proto.doodle.game.v1B\tGameProtoP\x01ZHgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1;gamev1\xa2\x02\x03\x44GX\xaa\x02\x0e\x44oodle.Game.V1\xca\x02\x0e\x44oodle\\Game\\V1\xe2\x02\x1a\x44oodle\\Game\\V1\\GPBMetadata\xea\x02\x10\x44oodle::Game::V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x19\x64oodle/game/v1/game.proto\x12\x0e\x64oodle.game.v1*<\n\x08GameMode\x12\x19\n\x15GAME_MODE_UNSPECIFIED\x10\x00\x12\x15\n\x11GAME_MODE_CLASSIC\x10\x01\x42\xce\x01\n$com.doodlearena.proto.doodle.game.v1B\tGameProtoP\x01ZAgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1;gamev1\xa2\x02\x03\x44GX\xaa\x02\x0e\x44oodle.Game.V1\xca\x02\x0e\x44oodle\\Game\\V1\xe2\x02\x1a\x44oodle\\Game\\V1\\GPBMetadata\xea\x02\x10\x44oodle::Game::V1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'doodle.game.v1.game_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'\n$com.doodlearena.proto.doodle.game.v1B\tGameProtoP\001ZHgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1;gamev1\242\002\003DGX\252\002\016Doodle.Game.V1\312\002\016Doodle\\Game\\V1\342\002\032Doodle\\Game\\V1\\GPBMetadata\352\002\020Doodle::Game::V1'
+  _globals['DESCRIPTOR']._serialized_options = b'\n$com.doodlearena.proto.doodle.game.v1B\tGameProtoP\001ZAgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1;gamev1\242\002\003DGX\252\002\016Doodle.Game.V1\312\002\016Doodle\\Game\\V1\342\002\032Doodle\\Game\\V1\\GPBMetadata\352\002\020Doodle::Game::V1'
   _globals['_GAMEMODE']._serialized_start=45
   _globals['_GAMEMODE']._serialized_end=105
 # @@protoc_insertion_point(module_scope)

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/libs/go/redistest"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
+	"github.com/Bowenn/doodle-arena/libs/go/redistest"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/room"
 	"github.com/redis/go-redis/v9"
 )
 

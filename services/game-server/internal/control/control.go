@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/room"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
+	gamev1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/room"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/roomstore"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"

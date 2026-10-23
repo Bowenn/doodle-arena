@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/libs/go/redistest"
+	"github.com/Bowenn/doodle-arena/libs/go/redistest"
 	"github.com/redis/go-redis/v9"
 )
 

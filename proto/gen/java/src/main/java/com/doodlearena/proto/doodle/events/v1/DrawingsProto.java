@@ -75,13 +75,13 @@ public final class DrawingsProto extends com.google.protobuf.GeneratedFile {
       "ceR\nrejectedBy\022\026\n\006reason\030\007 \001(\tR\006reason*h" +
       "\n\016DecisionSource\022\037\n\033DECISION_SOURCE_UNSP" +
       "ECIFIED\020\000\022\026\n\022DECISION_SOURCE_AI\020\001\022\035\n\031DEC" +
-      "ISION_SOURCE_MODERATOR\020\002B\347\001\n&com.doodlea" +
+      "ISION_SOURCE_MODERATOR\020\002B\340\001\n&com.doodlea" +
       "rena.proto.doodle.events.v1B\rDrawingsPro" +
-      "toP\001ZLgithub.com/Bowenn/gap-project_priv" +
-      "ate/proto/gen/go/doodle/events/v1;events" +
-      "v1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Eve" +
-      "nts\\V1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022" +
-      "Doodle::Events::V1b\006proto3"
+      "toP\001ZEgithub.com/Bowenn/doodle-arena/pro" +
+      "to/gen/go/doodle/events/v1;eventsv1\242\002\003DE" +
+      "X\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V1\342" +
+      "\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodle:" +
+      ":Events::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

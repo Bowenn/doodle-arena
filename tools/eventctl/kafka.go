@@ -4,7 +4,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/Bowenn/gap-project_private/libs/go/kafkaauth"
+	"github.com/Bowenn/doodle-arena/libs/go/kafkaauth"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 

@@ -8,7 +8,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/store"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/store"
 )
 
 // Image matches infra/docker-compose.yml.

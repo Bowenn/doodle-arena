@@ -63,13 +63,13 @@ public final class AnalyticsProto extends com.google.protobuf.GeneratedFile {
       "lume\030\t \001(\003R\006volume*k\n\rWashTradeRule\022\037\n\033W" +
       "ASH_TRADE_RULE_UNSPECIFIED\020\000\022\036\n\032WASH_TRA" +
       "DE_RULE_ROUND_TRIP\020\001\022\031\n\025WASH_TRADE_RULE_" +
-      "CYCLE\020\002B\350\001\n&com.doodlearena.proto.doodle" +
-      ".events.v1B\016AnalyticsProtoP\001ZLgithub.com" +
-      "/Bowenn/gap-project_private/proto/gen/go" +
-      "/doodle/events/v1;eventsv1\242\002\003DEX\252\002\020Doodl" +
-      "e.Events.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\" +
-      "Events\\V1\\GPBMetadata\352\002\022Doodle::Events::" +
-      "V1b\006proto3"
+      "CYCLE\020\002B\341\001\n&com.doodlearena.proto.doodle" +
+      ".events.v1B\016AnalyticsProtoP\001ZEgithub.com" +
+      "/Bowenn/doodle-arena/proto/gen/go/doodle" +
+      "/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Event" +
+      "s.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\" +
+      "V1\\GPBMetadata\352\002\022Doodle::Events::V1b\006pro" +
+      "to3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

@@ -243,8 +243,8 @@ const file_doodle_events_v1_dead_letters_proto_rawDesc = "" +
 	"last_error\x18\b \x01(\tR\tlastError\x12D\n" +
 	"\x10first_attempt_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x0efirstAttemptAt\x123\n" +
 	"\adead_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\x06deadAtB\xea\x01\n" +
-	"&com.doodlearena.proto.doodle.events.v1B\x10DeadLettersProtoP\x01ZLgithub.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x06deadAtB\xe3\x01\n" +
+	"&com.doodlearena.proto.doodle.events.v1B\x10DeadLettersProtoP\x01ZEgithub.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1;eventsv1\xa2\x02\x03DEX\xaa\x02\x10Doodle.Events.V1\xca\x02\x10Doodle\\Events\\V1\xe2\x02\x1cDoodle\\Events\\V1\\GPBMetadata\xea\x02\x12Doodle::Events::V1b\x06proto3"
 
 var (
 	file_doodle_events_v1_dead_letters_proto_rawDescOnce sync.Once

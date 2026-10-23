@@ -12,8 +12,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
-	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
+	eventsv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1"
+	gamev1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1"
 )
 
 //go:embed fixtures/*.json

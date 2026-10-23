@@ -47,12 +47,12 @@ public final class MetaProto extends com.google.protobuf.GeneratedFile {
       "ma_version\030\003 \001(\rR\rschemaVersion\022;\n\013occur" +
       "red_at\030\004 \001(\0132\032.google.protobuf.Timestamp" +
       "R\noccurredAt\022\032\n\010producer\030\005 \001(\tR\010producer" +
-      "B\343\001\n&com.doodlearena.proto.doodle.events" +
-      ".v1B\tMetaProtoP\001ZLgithub.com/Bowenn/gap-" +
-      "project_private/proto/gen/go/doodle/even" +
-      "ts/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312" +
-      "\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GP" +
-      "BMetadata\352\002\022Doodle::Events::V1b\006proto3"
+      "B\334\001\n&com.doodlearena.proto.doodle.events" +
+      ".v1B\tMetaProtoP\001ZEgithub.com/Bowenn/dood" +
+      "le-arena/proto/gen/go/doodle/events/v1;e" +
+      "ventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doodl" +
+      "e\\Events\\V1\342\002\034Doodle\\Events\\V1\\GPBMetada" +
+      "ta\352\002\022Doodle::Events::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

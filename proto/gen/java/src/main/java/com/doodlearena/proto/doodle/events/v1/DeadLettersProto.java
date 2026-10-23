@@ -61,13 +61,13 @@ public final class DeadLettersProto extends com.google.protobuf.GeneratedFile {
       "(\tR\tlastError\022D\n\020first_attempt_at\030\t \001(\0132" +
       "\032.google.protobuf.TimestampR\016firstAttemp" +
       "tAt\0223\n\007dead_at\030\n \001(\0132\032.google.protobuf.T" +
-      "imestampR\006deadAtB\352\001\n&com.doodlearena.pro" +
+      "imestampR\006deadAtB\343\001\n&com.doodlearena.pro" +
       "to.doodle.events.v1B\020DeadLettersProtoP\001Z" +
-      "Lgithub.com/Bowenn/gap-project_private/p" +
-      "roto/gen/go/doodle/events/v1;eventsv1\242\002\003" +
-      "DEX\252\002\020Doodle.Events.V1\312\002\020Doodle\\Events\\V" +
-      "1\342\002\034Doodle\\Events\\V1\\GPBMetadata\352\002\022Doodl" +
-      "e::Events::V1b\006proto3"
+      "Egithub.com/Bowenn/doodle-arena/proto/ge" +
+      "n/go/doodle/events/v1;eventsv1\242\002\003DEX\252\002\020D" +
+      "oodle.Events.V1\312\002\020Doodle\\Events\\V1\342\002\034Doo" +
+      "dle\\Events\\V1\\GPBMetadata\352\002\022Doodle::Even" +
+      "ts::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

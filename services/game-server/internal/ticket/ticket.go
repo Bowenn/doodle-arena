@@ -20,7 +20,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/roomstore"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/roomstore"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 )

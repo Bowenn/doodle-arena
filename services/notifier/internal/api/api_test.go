@@ -18,12 +18,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
-	"github.com/Bowenn/gap-project_private/libs/go/authn"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/api"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/apikeys"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/pgtest"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/secretbox"
-	"github.com/Bowenn/gap-project_private/services/notifier/internal/ssrf"
+	"github.com/Bowenn/doodle-arena/libs/go/authn"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/api"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/apikeys"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/pgtest"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/secretbox"
+	"github.com/Bowenn/doodle-arena/services/notifier/internal/ssrf"
 )
 
 // keys accepts "da_<user>_ok" (webhooks scope), "da_<user>_noscope", refuses the rest, and

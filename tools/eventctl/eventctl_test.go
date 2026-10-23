@@ -13,8 +13,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/protobuf/proto"
 
-	eventsv1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/events/v1"
-	gamev1 "github.com/Bowenn/gap-project_private/proto/gen/go/doodle/game/v1"
+	eventsv1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/events/v1"
+	gamev1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1"
 )
 
 var update = flag.Bool("update", false, "rewrite fixtures/golden/*.binpb")

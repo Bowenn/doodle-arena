@@ -60,13 +60,12 @@ public final class RoundsProto extends com.google.protobuf.GeneratedFile {
       "\n\014canvas_width\030\t \001(\rR\013canvasWidth\022#\n\rcan" +
       "vas_height\030\n \001(\rR\014canvasHeight\0225\n\010ended_" +
       "at\030\013 \001(\0132\032.google.protobuf.TimestampR\007en" +
-      "dedAtB\345\001\n&com.doodlearena.proto.doodle.e" +
-      "vents.v1B\013RoundsProtoP\001ZLgithub.com/Bowe" +
-      "nn/gap-project_private/proto/gen/go/dood" +
-      "le/events/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Eve" +
-      "nts.V1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Event" +
-      "s\\V1\\GPBMetadata\352\002\022Doodle::Events::V1b\006p" +
-      "roto3"
+      "dedAtB\336\001\n&com.doodlearena.proto.doodle.e" +
+      "vents.v1B\013RoundsProtoP\001ZEgithub.com/Bowe" +
+      "nn/doodle-arena/proto/gen/go/doodle/even" +
+      "ts/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312" +
+      "\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GP" +
+      "BMetadata\352\002\022Doodle::Events::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,

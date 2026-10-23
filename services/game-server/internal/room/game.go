@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/protocol"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/ratelimit"
-	"github.com/Bowenn/gap-project_private/services/game-server/internal/words"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/ratelimit"
+	"github.com/Bowenn/doodle-arena/services/game-server/internal/words"
 )
 
 // Phase is where a room is in its lifecycle (design doc, section 7.3).

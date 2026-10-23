@@ -55,12 +55,12 @@ public final class UsersProto extends com.google.protobuf.GeneratedFile {
       "entMetaR\004meta\022\027\n\007user_id\030\002 \001(\tR\006userId\022\026" +
       "\n\006reason\030\003 \001(\tR\006reason\0229\n\nrevoked_at\030\004 \001" +
       "(\0132\032.google.protobuf.TimestampR\trevokedA" +
-      "tB\344\001\n&com.doodlearena.proto.doodle.event" +
-      "s.v1B\nUsersProtoP\001ZLgithub.com/Bowenn/ga" +
-      "p-project_private/proto/gen/go/doodle/ev" +
-      "ents/v1;eventsv1\242\002\003DEX\252\002\020Doodle.Events.V" +
-      "1\312\002\020Doodle\\Events\\V1\342\002\034Doodle\\Events\\V1\\" +
-      "GPBMetadata\352\002\022Doodle::Events::V1b\006proto3"
+      "tB\335\001\n&com.doodlearena.proto.doodle.event" +
+      "s.v1B\nUsersProtoP\001ZEgithub.com/Bowenn/do" +
+      "odle-arena/proto/gen/go/doodle/events/v1" +
+      ";eventsv1\242\002\003DEX\252\002\020Doodle.Events.V1\312\002\020Doo" +
+      "dle\\Events\\V1\342\002\034Doodle\\Events\\V1\\GPBMeta" +
+      "data\352\002\022Doodle::Events::V1b\006proto3"
     };
     descriptor = com.google.protobuf.Descriptors.FileDescriptor
       .internalBuildGeneratedFileFrom(descriptorData,
