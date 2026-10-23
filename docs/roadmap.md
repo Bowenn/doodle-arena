@@ -184,6 +184,9 @@ Track B:
 - [ ] **6.7 Search**: Elasticsearch for drawings and listings.
 - [ ] **6.7b Gallery cache**: Redis cache-aside in assets for approved drawings and the gallery's first pages (key prefix `assets:cache:*`, TTL, stampede protection, invalidation when a moderator changes a decision), measured before and after with k6. Decided in the Stage 4 review (D43): caching belongs where reads are heavy and data rarely changes, not on wallets, whose balances must be exact.
 - [ ] **6.8 Limited drops**: N editions released at a set time, with a waiting room, atomic inventory and rate limits.
+  - ADR 0022 is decided (Bowen, 2026-10-23): an admin drop of N editions that pays the drawing's authors through escrow; a Redis gate (Lua) in front of Postgres, which stays the truth; a lottery waiting room at open; one edition per buyer and a per-user token bucket. Two PRs:
+  - [x] 6.8a: the backend (`drops`, `drop_editions`, the marketplace's Redis user, the gate scripts, settlement and repairs, DropEscrowMismatch and DropsUnavailable), the oversell tests and `make drops-check` in CI's stack job. Evidence log.
+  - [ ] 6.8b: the web pages and the flash-sale k6 run on the dev box (`make loadtest-drops`), which closes the M6 criterion.
 
 Shared:
 

@@ -542,3 +542,22 @@ Read this before interviews, and practice with the interview drill prompt in `do
 - **Guardrails first, as with AWS.** The budget tracks spend with credits excluded (by default a budget nets out credits and reads $0 for the whole trial), and an instance schedule stops the VM every night. The schedule only works once the Compute Engine service agent may stop instances, which fails silently otherwise.
 - **The same stack on a new host found two assumptions.** MongoDB 8.0 refuses kernels 6.19 to 7.0.13, so the VM runs Debian 13 (kernel 6.12) and not Ubuntu 24.04, as CI's stack job runs 22.04. And Linux exposed what Docker Desktop hid: Go's `-race` needs gcc, and the web container's `node_modules` volume leaves an empty root-owned folder on the host, which `make test` had taken for installed dependencies.
 - **Swapping one service out of a running system is a networking exercise.** To run the marketplace on the Mac against the VM's stack, the gateway must still find `marketplace:8080`: a two-line nginx stream proxy takes over the network alias and sends connections through a reverse SSH tunnel bound to Docker's bridge address. Kafka decided the rest: a broker hands clients its advertised address (`localhost:9094`), so that port on the Mac has to be the tunnel, whatever port the client first dialled.
+
+### 6.8a Limited drops: no overselling
+
+- **Keep the burst away from the truth, but never trust the gate.** A drop is many buyers racing for few editions. Redis handles the race:
+  - a read-only Lua look answers "not admitted" or "sold out" before a request claims anything in Postgres;
+  - a reservation script hands out edition numbers atomically.
+
+  Postgres still decides every sale, behind `PRIMARY KEY(drop_id, edition_no)`, `UNIQUE(drop_id, buyer_id)` and `CHECK(edition_no BETWEEN 1 AND editions)`. The test proves it by making Redis lie: every edition number is handed out three times to 300 buyers, yet exactly 20 editions sell, 20 buyers are charged, and 40 extras are refused with their coins rolled back.
+- **Fairness is a design choice, not a side effect.** First come, first served rewards bots and refreshing. The waiting room gives everyone who joins before the open a random place, then admits places at a rate that is a pure function of time, so no job runs and no clock has to tick.
+- **A classic trap showed up in the baseline.** The Postgres-only comparison first locked the drop's row and counted its sales in the same statement. Under READ COMMITTED, a statement that waited for a lock still counts with its old snapshot, so two buyers saw the same count. Taking the lock in one statement and counting in the next fixed it. That's why the real design never counts under a lock at all.
+- **Two stores, one rule: disagreement may cost an unsold edition, never an extra one.** Every failure has its path:
+  - a rollback gives the reservation back;
+  - an edition Postgres already sold is forgotten, not returned;
+  - a reservation leaked by a crash is released by the sweeper after a minute;
+  - a Redis that lost its data is restocked from Postgres;
+  - a Redis that's down makes drops answer 503 rather than guess.
+
+  A security review found one more case: a buyer Redis forgot took a new edition that was then marked theirs and lost. The fix gives it back and relearns the edition they own.
+- **The payout reuses the tips pattern** (ADR 0021): buyers' coins go to 16 escrow accounts, so no author's balance row is hot, and one posting per batch pays the authors once the drop sold out. A closed drop that didn't sell out waits a minute first, because a purchase that passed its window check just before the close may still be committing.
