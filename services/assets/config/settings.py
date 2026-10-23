@@ -67,6 +67,11 @@ class Env(BaseSettings):
     public_base_url: str = "http://localhost:8080"
     # Set in AWS, where the gateway terminates TLS. Locally everything is plain HTTP.
     secure_cookies: bool = False
+    # Search (ADR 0023): empty means no Elasticsearch, and search answers 503. The assets user
+    # may touch the indices drawings* only.
+    elasticsearch_url: str = ""
+    elasticsearch_username: str = ""
+    elasticsearch_password: str = ""
 
 
 env = Env()  # required fields (DJANGO_SECRET_KEY) come from the environment
@@ -219,6 +224,9 @@ ROUND_LOGS_BUCKET = env.round_logs_bucket
 DRAWINGS_BUCKET = env.drawings_bucket
 MONGO_URL = env.mongo_url
 AI_URL = env.ai_url
+ELASTICSEARCH_URL = env.elasticsearch_url
+ELASTICSEARCH_USERNAME = env.elasticsearch_username
+ELASTICSEARCH_PASSWORD = env.elasticsearch_password
 AI_TIMEOUT_SECONDS = env.ai_timeout_seconds
 
 AUTH_JWKS_URL = env.auth_jwks_url

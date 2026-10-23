@@ -9,6 +9,7 @@ dependencies = [
     "confluent-kafka>=2.16.0",
     "django>=6.1.2",
     "doodle-proto",
+    "elasticsearch>=9.5.1,<9.6",
     "gunicorn>=26.2.0",
     "httpx>=0.28.1",
     "opentelemetry-exporter-otlp-proto-http>=1.45.1",
