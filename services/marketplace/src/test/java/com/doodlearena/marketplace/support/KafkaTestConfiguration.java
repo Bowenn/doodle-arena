@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Bean;
 import com.doodlearena.marketplace.outbox.OutboxWriter;
 import com.doodlearena.marketplace.ownership.DrawingEventsListener;
 import com.doodlearena.marketplace.reward.MatchEventsListener;
+import com.doodlearena.marketplace.tip.RoundEventsListener;
 
 /** A real Kafka broker for listener tests, the same image as docker-compose. */
 @TestConfiguration(proxyBeanMethods = false)
@@ -31,6 +32,11 @@ public class KafkaTestConfiguration {
 	@Bean
 	NewTopic matchesTopic() {
 		return new NewTopic(MatchEventsListener.TOPIC, 1, (short) 1);
+	}
+
+	@Bean
+	NewTopic roundsTopic() {
+		return new NewTopic(RoundEventsListener.TOPIC, 1, (short) 1);
 	}
 
 	@Bean

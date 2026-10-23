@@ -132,6 +132,25 @@ class TipSettlementTests extends ApiTestSupport {
 	}
 
 	@Test
+	void aShardThatDoesntHoldItsPendingTipsIsReported() {
+		Tip tip = tip(this.fixtures.newUserWith(10), match(), 1, 10);
+		// Closed by hand without taking its coins out of escrow.
+		this.db.sql("UPDATE tips SET status = 'SETTLED', closing_tx_id = tx_id, closed_at = now() WHERE tip_id = ?")
+			.param(tip.tipId())
+			.update();
+
+		ReconciliationResult result = this.reconciliation.reconcile();
+		assertThat(result.escrowMismatchedShards()).containsExactly(TipService.shardOf(tip.tipId()));
+		assertThat(result.clean()).isFalse();
+
+		// The tests share a database: put it back.
+		this.db.sql("UPDATE tips SET status = 'PENDING', closing_tx_id = NULL, closed_at = NULL WHERE tip_id = ?")
+			.param(tip.tipId())
+			.update();
+		assertClean();
+	}
+
+	@Test
 	void twoDrawersSplitAnOddCoinAndAShareOfZeroIsLeftOut() {
 		assertThat(TipSettlement.split(21, List.of("a", "b"))).containsExactly(Map.entry("a", 11L), Map.entry("b", 10L));
 		assertThat(TipSettlement.split(1, List.of("a", "b"))).containsExactly(Map.entry("a", 1L));
