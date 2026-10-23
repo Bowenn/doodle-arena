@@ -87,6 +87,7 @@ Keep this list accurate:
   - `node scripts/drills/web-seats.mts [room_id] [--seats n]` (Node 24): extra players running the web app's own client; with no room id, a bot-only match that exits 0 when every seat agrees.
 - `make seed`: about 5 million rows in the local Postgres (marketplace and assets, as their own roles, through their triggers and constraints; about 2 minutes). Runs once: the ledger is append-only, so starting over means removing the Postgres volume. `SEED_SCALE=<n>` divides every count.
 - `make explain`: `EXPLAIN (ANALYZE, BUFFERS)` of the marketplace's and assets' queries on the seeded data (`scripts/explain/`), three runs each, the median and the plan's scans. Numbers go to `docs/performance.md`.
+- Remote dev box (GCP, docs/setup.md section 4; costs trial credit while running, so ask before starting it): `gcloud compute instances start|stop devbox`, `ssh devbox` (IAP, no public ports), `ssh -N -L 8080:localhost:8080 -L 3000:localhost:3000 devbox` for the gateway and Grafana. It runs the full stack and the end-to-end checks from `~/doodle-arena`; it pulls through a read-only deploy key, so push from the Mac first. `scripts/devbox/setup.sh` (on the VM) installs the toolchains.
 
 ## Ground rules
 
