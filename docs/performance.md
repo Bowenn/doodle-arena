@@ -175,4 +175,24 @@ Thousands of viewers tipping one drawer would all lock that drawer's balance row
 
 After the k6 run, the drawer had all 17,907 coins 1.2 s after the `RoundFinished` was sent, paid in two settlements (5,000 tips each, then the rest).
 
-The k6 tail is not lock waits but the marketplace's garbage collector. Under its 1 GB container limit the JVM picks Serial GC, whose stop-the-world collections took 1.6 s (young) and 0.98 s (full) in those five minutes, with pauses up to about 1.5 s. Every request queues behind them, so the 250 ms p95 threshold in `loadtest/tips.js` fails locally until the marketplace runs a concurrent collector or more memory.
+### The marketplace JVM under the tips load
+
+The k6 tail above isn't lock waits (p99 23 ms). It was first put down to the garbage collector. Taking it apart (2026-10-22, the same run repeated 16 times with the JVM's GC log and the connection pool's metrics) found two causes:
+
+- **One long full collection per JVM.** Every marketplace JVM stopped once for 1.0 to 1.8 s, a minute or two into its first load. The GC log names it `Pause Full (CodeCache GC Threshold)`. Since JDK 20, once the JIT has added compiled code worth 15% of the 240 MB code cache (`SweeperThreshold`), the JVM collects to unload old code. Serial GC can only do that in a full collection with class unloading. With 98 MB of metaspace (Spring plus the OpenTelemetry agent), marking 66 MB of live objects took 1.1 s of CPU. On a 0.5 vCPU ECS task that would be about 3 s of wall time.
+- **The connection pool's queue.** Each tip checks out a connection three times: the idempotency claim, the posting and the completion (ADR 0012). So 300 tips a second are 900 checkouts a second on 10 connections. While Postgres answers a checkout in 2 to 4 ms the pool is busy a fifth to a third of the time. When the shared Docker VM slows Postgres down to 7 ms or more, the pool is full and up to 191 requests wait for a connection. During runs, Postgres used 90 to 160% CPU, otel-lgtm up to 276% and Kafka up to 208%, all sharing 10 CPUs with about 40 containers and k6. Wait time follows Postgres' time per checkout. It doesn't follow GC time, which stayed under 7% of each run.
+
+The JVM's settings changed (the marketplace's Dockerfile, so compose and ECS run the same):
+
+| JVM | Collections per run | Full collections after startup | Longest pause |
+|---|---|---|---|
+| Before: Serial picked by ergonomics (1 GB is under the JVM's 1,792 MB "server" mark), heap 16 MB at start and at most 768 MB | about 166 young, 2.9 to 3.1 s in all | one per JVM, 0.95 to 1.8 s | 1.8 s |
+| `-XX:+UseSerialGC`, heap fixed at 512 MB (`InitialRAMPercentage` = `MaxRAMPercentage` = 50) | 18 to 25 young, 1.2 to 1.5 s in all | still one: 1.40 and 1.45 s (CodeCache GC Threshold) | 1.45 s |
+| The same, plus `-XX:SweeperThreshold=50` | about 28 young (p50 20 ms, p90 46 ms) | none in three runs; the three metaspace-threshold ones during startup take 40 to 68 ms | 95 ms |
+
+- **Serial, not G1.** On ECS the task has 0.5 vCPU, which the JVM rounds to one processor. G1 would unload code concurrently, but its concurrent threads would share that one core with the requests, and its remembered sets cost heap.
+- **The heap is fixed.** Without a fixed heap the JVM starts at 1/64 of memory and grows it only through full collections. Under load it collected a 23 MB young generation every 0.6 s.
+- **Half of memory, not 75%.** The rest of the process (metaspace, code cache, threads, the agent) takes about 350 MB of the 1 GB, so a 768 MB heap would leave no room below the limit.
+- **`SweeperThreshold=50`.** Warm-up never reaches 120 MB of new code: the code cache settles near 45 MB. A nearly full code cache still unloads old code, when 10% is free.
+
+Latency with the final settings (`make loadtest-tips`, 300 tips a second for a minute, 10 connections): p95 150, 499 and 362 ms and p99 0.82, 2.29 and 0.82 s, against p95 685 and 979 ms with the old settings the same evening. So the 250 ms threshold is still missed in two of three runs, and what's left is the pool's queue. Twenty connections didn't settle it either: p95 61 to 770 ms with the new settings and 539 ms to 1.62 s with the old ones. More connections don't add capacity to a Postgres starved of CPU. Fewer checkouts per tip, and the same run on AWS's separate data host (task 6.9), are what's left.
