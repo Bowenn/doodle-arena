@@ -18,6 +18,7 @@ import {
 } from '../game/roomState.ts'
 import { useRoom } from '../game/useRoom.ts'
 import { Canvas } from './Canvas.tsx'
+import { TipBox } from './TipBox.tsx'
 
 type Props = {
   roomId: string
@@ -118,6 +119,15 @@ function RoomBody({ state, send, welcomes, live, watching }: BodyProps) {
         <Scoreboard state={state} />
         {watching && <TopGuessesPanel state={state} />}
         <Feed state={state} />
+        {watching && (
+          <TipBox
+            roomId={state.roomId}
+            matchId={state.matchId}
+            roundNo={state.roundNo}
+            drawers={state.drawerIds.map((id) => nameOf(state, id)).join(' and ') || 'the drawer'}
+            open={state.phase === 'choosing' || state.phase === 'drawing'}
+          />
+        )}
         {watching ? (
           <ViewerGuessBox state={state} send={send} live={live} />
         ) : (

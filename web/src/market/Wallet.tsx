@@ -197,6 +197,12 @@ function describe(t: Transaction): string {
       return 'Coin pack'
     case 'sale':
       return t.amount < 0 ? 'Bought a drawing' : 'Drawing sale or royalty'
+    case 'tip':
+      return 'Tip to a drawer'
+    case 'tip_settlement':
+      return 'Tips for your drawing'
+    case 'tip_refund':
+      return 'Tip returned'
     default:
       return t.type
   }

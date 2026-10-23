@@ -1,11 +1,11 @@
 // Marketplace REST client (design doc, section 6.3): wallet, coin packs, listings, purchases,
-// owned drawings and ownership history. Amounts are whole coins; prices in cents only for Stripe.
+// owned drawings, ownership history and tips. Amounts are whole coins; prices in cents only for Stripe.
 
 import { call } from './api.ts'
 
 export type Wallet = { user_id: string; balance: number; updated_at: string | null }
 
-export type TransactionType = 'reward' | 'stripe_purchase' | 'sale'
+export type TransactionType = 'reward' | 'stripe_purchase' | 'sale' | 'tip' | 'tip_settlement' | 'tip_refund'
 
 /** One wallet entry: amount is signed (+ credited, - debited). */
 export type Transaction = { tx_id: string; type: TransactionType; amount: number; created_at: string }
@@ -68,6 +68,17 @@ export type OwnershipHistory = {
   events: OwnershipEvent[]
 }
 
+/** A tip in escrow until its round ends (ADR 0021). */
+export type Tip = {
+  tip_id: string
+  room_id: string
+  match_id: string
+  round_no: number
+  amount: number
+  status: 'PENDING' | 'SETTLED' | 'REFUNDED'
+  created_at: string
+}
+
 /** The largest listing price the web app offers (the server only needs a positive integer). */
 export const MAX_PRICE = 1_000_000
 
@@ -114,6 +125,16 @@ export function cancelListing(listingId: string): Promise<Listing> {
 
 export function purchase(listingId: string, key: string): Promise<Sale> {
   return call('POST', `/api/market/listings/${encodeURIComponent(listingId)}/purchase`, undefined, idem(key))
+}
+
+/** Tips the drawers of a round: paid to them when the round ends (ADR 0021). */
+export function tip(round: { roomId: string; matchId: string; roundNo: number }, amount: number, key: string): Promise<Tip> {
+  return call(
+    'POST',
+    '/api/market/tips',
+    { room_id: round.roomId, match_id: round.matchId, round_no: round.roundNo, amount },
+    idem(key),
+  )
 }
 
 export function listOwnedDrawings(cursor?: string | null): Promise<OwnedPage> {
