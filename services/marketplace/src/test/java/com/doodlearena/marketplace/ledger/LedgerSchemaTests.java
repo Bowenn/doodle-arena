@@ -1,5 +1,7 @@
 package com.doodlearena.marketplace.ledger;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -30,7 +32,12 @@ class LedgerSchemaTests {
 				+ "WHERE owner_type = 'system' ORDER BY owner_id")
 			.query(String.class)
 			.list();
-		assertThat(names).containsExactly("rewards_issuance", "stripe_clearing");
+		// The two sources of coins (V1) and the 16 tips escrow shards (V10, ADR 0021).
+		List<String> expected = new ArrayList<>(List.of("rewards_issuance", "stripe_clearing"));
+		for (int shard = 0; shard < AccountRef.TIPS_ESCROW_SHARDS; shard++) {
+			expected.add(AccountRef.tipsEscrow(shard).ownerId());
+		}
+		assertThat(names).containsExactlyInAnyOrderElementsOf(expected);
 	}
 
 	@Test
