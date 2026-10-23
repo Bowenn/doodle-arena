@@ -24,7 +24,8 @@ The reconciliation job found money that doesn't add up: the ledger's entries don
    ```
 
    The latest `ledger_transactions` touching the account (`type`, `idempotency_key`, `created_at`) show which flow (reward, Stripe, sale) wrote last.
-4. What changed recently: a deploy of marketplace, or someone running SQL by hand. The ledger tables refuse updates and deletes, and a transaction that doesn't sum to zero can't commit, so a mismatch almost always means `balances` was written outside `LedgerService`.
+4. Did `make seed` run on this database before 2026-10-23's fix? If the log also says "closed ledger month changed", every seeded account is mismatched, and LedgerPartitionMissing fires, follow `docs/runbooks/ledger-partitions.md` (Check 4, Fix 1 and 2): the seed wrote into months the job had already closed, and nothing else is wrong.
+5. What changed recently: a deploy of marketplace, or someone running SQL by hand. The ledger tables refuse updates and deletes, and a transaction that doesn't sum to zero can't commit, so a mismatch almost always means `balances` was written outside `LedgerService`.
 
 ## Fix
 

@@ -1,11 +1,13 @@
--- One month of the marketplace's seed (make seed, task 6.6), as the marketplace role, in ONE
--- transaction: that month's rewards, mints, sales and new listings, and the balances they move.
+-- One month of the marketplace's seed (make seed, task 6.6), as the marketplace role: that
+-- month's rewards, mints, sales and new listings, and the balances they move. scripts/seed.sh
+-- runs all twelve months in ONE transaction (marketplace-begin.sql to marketplace-commit.sql),
+-- so the reconciliation job never sees half a year: it closes past months while the seed runs,
+-- and a month it closed before the seed's rows in it were visible would keep wrong totals.
 -- Every rule the service and Postgres enforce holds at the commit: each ledger transaction has
 -- two or more entries summing to zero (the deferred trigger checks), balances equal their
--- entries, no user goes below zero, and every drawing's ownership, provenance and listings agree,
--- so the reconciliation job reads 0 between months too. Expects psql variable :month (0..11).
-\set ON_ERROR_STOP on
-BEGIN;
+-- entries, no user goes below zero, and every drawing's ownership, provenance and listings agree.
+-- Expects psql variable :month (0..11).
+\echo '  marketplace: month' :month
 SET LOCAL seed.month = :'month';
 
 -- Every seed user's account in month 0, with a balance of 0 (no entries yet).
@@ -17,13 +19,13 @@ SELECT a.account_id, 'user' FROM accounts a
 WHERE current_setting('seed.month')::int = 0 AND a.owner_type = 'user' AND a.owner_id LIKE 'seed-u-%'
   AND NOT EXISTS (SELECT 1 FROM balances b WHERE b.account_id = a.account_id);
 
-CREATE TEMP TABLE acct ON COMMIT DROP AS
+CREATE TEMP TABLE acct AS
 SELECT owner_id, account_id FROM accounts WHERE owner_type = 'user' AND owner_id LIKE 'seed-u-%';
 CREATE UNIQUE INDEX ON acct (owner_id);
-CREATE TEMP TABLE batch_entries (tx_id uuid, account_id bigint, amount bigint, created_at timestamptz) ON COMMIT DROP;
+CREATE TEMP TABLE batch_entries (tx_id uuid, account_id bigint, amount bigint, created_at timestamptz);
 
 -- Rewards: the welcome rewards in month 0, the rest spread over the year.
-CREATE TEMP TABLE rewards ON COMMIT DROP AS
+CREATE TEMP TABLE rewards AS
 SELECT r, pg_temp.user_id(r) AS user_id,
        CASE WHEN r < pg_temp.n_users() THEN 100 ELSE 30 END AS amount,
        pg_temp.ts(current_setting('seed.month')::int, r) AS t
@@ -39,7 +41,7 @@ UNION ALL
 SELECT r.tx_id, a.account_id, r.amount, r.t FROM rewards r JOIN acct a ON a.owner_id = r.user_id;
 
 -- Mints: drawings whose mint month is this one, each with its author as first owner.
-CREATE TEMP TABLE mints ON COMMIT DROP AS
+CREATE TEMP TABLE mints AS
 SELECT d, pg_temp.drawing_id(d) AS drawing_id, pg_temp.author(d) AS author,
        pg_temp.ts(pg_temp.mint_month(d), d) AS t
 FROM generate_series(0, pg_temp.n_drawings() - 1) d
@@ -59,7 +61,7 @@ FROM mints WHERE d >= pg_temp.n_sold() AND d < pg_temp.n_sold() + pg_temp.n_list
 -- Sales: sold drawings change hands 3 and 6 months after their mint. Sale k of drawing d goes
 -- from its owner to buyer(d, k); the price is 5..20 coins, and the author gets a 10% royalty
 -- when they are neither the seller nor the buyer (design doc, section 8).
-CREATE TEMP TABLE sales ON COMMIT DROP AS
+CREATE TEMP TABLE sales AS
 SELECT d, k, pg_temp.drawing_id(d) AS drawing_id, pg_temp.author(d) AS author,
        pg_temp.ts(pg_temp.mint_month(d) + 3 * k, d) AS t, 5 + (d * k) % 16 AS price
 FROM generate_series(0, pg_temp.n_sold() - 1) d, generate_series(1, 2) k
@@ -96,4 +98,4 @@ UPDATE balances b SET balance = b.balance + e.delta, updated_at = now()
 FROM (SELECT account_id, SUM(amount) AS delta FROM batch_entries GROUP BY account_id) e
 WHERE b.account_id = e.account_id;
 
-COMMIT;
+DROP TABLE acct, batch_entries, rewards, mints, sales;

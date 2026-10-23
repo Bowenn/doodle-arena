@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # make seed (task 6.6): about 5 million rows in the local stack's Postgres, for query tuning
 # (make explain) and the read replica. Each database is seeded as its own service's role, through
-# the same triggers and constraints the services meet, in twelve monthly transactions: the ledger
-# balances, balances match their entries, ownership matches its provenance, so the reconciliation
-# job reads 0 throughout. Users are seed-u-<n>, drawings come from rounds seed-m-<n>.
+# the same triggers and constraints the services meet: the ledger balances, balances match their
+# entries, ownership matches its provenance. The marketplace's year is backdated, so it gets its
+# ledger partitions first, and it commits as ONE transaction, with the closed-month totals it
+# changes, so the reconciliation job reads 0 throughout (scripts/seed/marketplace-*.sql). Users
+# are seed-u-<n>, drawings come from rounds seed-m-<n>.
 #
 # It runs once: the ledger is append-only (a trigger refuses DELETE), so seeded money can't be
 # taken out again. To start over, remove the Postgres volume (make down, then
@@ -25,7 +27,8 @@ else
 fi
 options="-c seed.base_ms=\${base_ms:-0} -c seed.scale=${SEED_SCALE:-1}"
 
-psql_as() { # role db file... : psql over the container's local socket, as the service's role
+psql_as() { # role db [file...] : psql over the container's local socket, as the service's role
+  # (the files, or stdin without any)
   local role="$1" db="$2"
   shift 2
   cat "$@" | "${pg[@]}" -e PGOPTIONS="$options" "$target" \
@@ -47,10 +50,15 @@ fi
 base_ms=$(( ($(date +%s) - 367 * 86400) * 1000 ))
 options="-c seed.base_ms=$base_ms -c seed.scale=${SEED_SCALE:-1}"
 start=$SECONDS
-for month in $(seq 0 11); do
-  psql_as marketplace marketplace scripts/seed/common.sql scripts/seed/marketplace-month.sql
-  echo "  marketplace: month $month seeded ($((SECONDS - start)) s)"
-done
+{
+  cat scripts/seed/common.sql scripts/seed/marketplace-begin.sql
+  for month in $(seq 0 11); do
+    echo "\\set month $month"
+    cat scripts/seed/marketplace-month.sql
+  done
+  cat scripts/seed/marketplace-commit.sql
+} | psql_as marketplace marketplace
+echo "  marketplace: ledger year committed ($((SECONDS - start)) s)"
 month=0 psql_as marketplace marketplace scripts/seed/common.sql scripts/seed/marketplace-outbox.sql
 echo "  marketplace: outbox seeded ($((SECONDS - start)) s)"
 psql_as assets assets scripts/seed/common.sql scripts/seed/assets.sql
