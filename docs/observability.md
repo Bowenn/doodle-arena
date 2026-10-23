@@ -159,6 +159,9 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `assets.search.duration` | Histogram (ms) | – (one search: Elasticsearch plus hydration from Postgres) | assets |
 | `assets.search.indexed` | Counter | `event` = approved, rejected, listing_created, listing_closed, unknown; `result` = indexed, deleted, stale (a newer version was already there), absent, skipped | assets (indexer) |
 | `assets.search.index_lag` | Histogram (s) | – (an event's time until its drawing's document was written; Prometheus: `assets_search_index_lag_seconds`) | assets (indexer) |
+| `assets.cache.requests` | Counter | `cache` = drawing, gallery; `result` = hit, miss, error, off (`ASSETS_CACHE=off`), skipped (for 5 s after a Redis error) (ADR 0024, task 6.7b) | assets |
+| `assets.cache.lock_waits` | Counter | `result` = filled (another request filled the page while this one waited), timed_out (it read Postgres after 200 ms) | assets |
+| `assets.cache.invalidations` | Counter | `cache` = gallery (the generation bumped after an approval), drawing (an entry deleted) | assets |
 | `market.matches.received` | Counter | `result` = paid, duplicate (the match was paid before: a redelivery), ineligible (fewer than two players), skipped (undecodable, or an unset or unknown event), failed (an event that breaks its contract, or a record Postgres refuses as data) | marketplace |
 | `market.drawings.received` | Counter | `result` = minted, duplicate (the drawing was minted before: a redelivery), rejected (a `DrawingRejected`, nothing to do), skipped (undecodable, or an unset or unknown event), failed (an event that breaks its contract, or a record Postgres refuses as data) | marketplace |
 | `notifier.deliveries` | Counter | `result` = success, retry (failed, will try again), dead (failed for the last time) | notifier |
@@ -279,6 +282,7 @@ Starting rules (tune the thresholds after the first load test):
 | DropsUnavailable | Drop requests answered 503 (`market.drops.requests{result="unavailable"}`) for 5 minutes: Redis, the drops' gate, can't be reached; drops fail closed, the rest of the marketplace works | warning |
 | SearchIndexLagging | Search documents written more than 60 s after their events (p95 of `assets.search.index_lag`), for 10 minutes (ADR 0023) | warning |
 | SearchUnavailable | Searches answered 503 (`assets.search.requests{result="unavailable"}`) for 5 minutes: Elasticsearch can't be reached; the gallery and market still list without search | warning |
+| AssetsCacheDegraded | More than half of the gallery cache's lookups met a Redis error or were skipped after one (`assets.cache.requests{result=~"error|skipped"}`), for 10 minutes: Postgres answers every gallery read (ADR 0024) | warning |
 | LedgerPartitionMissing | `market.ledger.default_partition_rows` above 0: postings in a month without a partition (task 6.6), whose partition can't be created while they are there | warning |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`; task 5.2, not a Grafana rule) | critical |
 

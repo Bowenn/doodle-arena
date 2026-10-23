@@ -31,7 +31,8 @@ tracer = trace.get_tracer(__name__)
 meter = metrics.get_meter(__name__)
 requests = meter.create_counter(
     "assets.cache.requests",
-    description="Cache lookups by cache (drawing, gallery) and result (hit, miss, bypass, error)",
+    description="Cache lookups by cache (drawing, gallery) and result (hit, miss, error; off: "
+    "ASSETS_CACHE=off; skipped: after a Redis error)",
 )
 lock_waits = meter.create_counter(
     "assets.cache.lock_waits",
@@ -68,14 +69,16 @@ _skip_until = 0.0
 
 
 class Unavailable(Exception):
-    """The cache is off, or Redis failed recently: read Postgres."""
+    """The cache is off, or Redis failed recently ("off" or "skipped"): read Postgres."""
 
 
 def _redis() -> redis.Redis:
     """The client for the configured Redis, built on first use (after gunicorn forks)."""
     global _client, _client_url
-    if not settings.ASSETS_CACHE or time.monotonic() < _skip_until:
-        raise Unavailable
+    if not settings.ASSETS_CACHE:
+        raise Unavailable("off")
+    if time.monotonic() < _skip_until:
+        raise Unavailable("skipped")
     url = settings.CACHE_REDIS_URL
     with _lock:
         if _client is None or _client_url != url:
@@ -123,8 +126,8 @@ def get_drawings(ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, dict[str, Any]]:
         return {}
     try:
         r = _redis()
-    except Unavailable:
-        requests.add(len(ids), {"cache": "drawing", "result": "bypass"})
+    except Unavailable as e:
+        requests.add(len(ids), {"cache": "drawing", "result": str(e)})
         return {}
     with tracer.start_as_current_span("cache.get", attributes={"cache.name": "drawing"}) as span:
         try:
@@ -202,8 +205,8 @@ def gallery_page(
     fills the first PAGES pages at once. A missing later page isn't filled here."""
     try:
         r = _redis()
-    except Unavailable:
-        requests.add(1, {"cache": "gallery", "result": "bypass"})
+    except Unavailable as e:
+        requests.add(1, {"cache": "gallery", "result": str(e)})
         return None
     with tracer.start_as_current_span("cache.get", attributes={"cache.name": "gallery"}) as span:
         try:
