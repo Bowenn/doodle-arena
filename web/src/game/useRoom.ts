@@ -1,6 +1,7 @@
 // React binding for a room: the connection lives outside React, the state in a reducer.
 
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { strokeWire } from '../config.ts'
 import { joinRoom, watchRoom } from '../lobby.ts'
 import { recordWsRtt } from '../rum.ts'
 import { RoomConnection, type ConnectionStatus } from './connection.ts'
@@ -34,7 +35,8 @@ export function useRoom(roomId: string, { watch = false }: { watch?: boolean } =
           recordWsRtt(ms)
         },
       },
-      { join: watch ? watchRoom : joinRoom },
+      // Viewers' relays speak JSON only (ADR 0025): binary stroke frames are for players.
+      { join: watch ? watchRoom : joinRoom, wire: watch ? 'json' : strokeWire() },
     )
     conn.current = c
     c.start()

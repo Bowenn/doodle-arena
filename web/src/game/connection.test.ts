@@ -7,7 +7,11 @@ import {
   RoomConnection,
   type ConnectionStatus,
 } from './connection.ts'
-import { PING_INTERVAL_MS, type RoomEvent, type Welcome } from './protocol.ts'
+import { PING_INTERVAL_MS, type Point, type RoomEvent, type Welcome } from './protocol.ts'
+import { STROKES_SUBPROTOCOL, encodeStrokeBatch } from './strokeCodec.ts'
+import fixtures from './testdata/stroke-frames.json'
+
+const bytes = (h: string) => Uint8Array.from(h.match(/../g) ?? [], (x) => parseInt(x, 16))
 
 class FakeSocket {
   static readonly CONNECTING = 0
@@ -17,20 +21,25 @@ class FakeSocket {
   static all: FakeSocket[] = []
 
   readonly url: string
+  readonly protocols: string[] | undefined
+  /** The subprotocol the server agreed to; '' when none. */
+  protocol = ''
+  binaryType = 'blob'
   readyState = FakeSocket.CONNECTING
   sent: unknown[] = []
   closedWith: number | null = null
   onopen: (() => void) | null = null
-  onmessage: ((ev: { data: string }) => void) | null = null
+  onmessage: ((ev: { data: string | ArrayBuffer }) => void) | null = null
   onclose: ((ev: { code: number }) => void) | null = null
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string[]) {
     this.url = url
+    this.protocols = protocols
     FakeSocket.all.push(this)
   }
 
-  send(data: string) {
-    this.sent.push(JSON.parse(data))
+  send(data: string | Uint8Array) {
+    this.sent.push(typeof data === 'string' ? JSON.parse(data) : data)
   }
 
   close(code: number) {
@@ -46,6 +55,10 @@ class FakeSocket {
 
   receive(msg: unknown) {
     this.onmessage?.({ data: JSON.stringify(msg) })
+  }
+
+  receiveBinary(b: Uint8Array) {
+    this.onmessage?.({ data: b.slice().buffer })
   }
 
   drop(code: number) {
@@ -423,5 +436,65 @@ describe('RoomConnection', () => {
     await connected()
     expect(conn.send({ type: 'guess', data: { text: 'x' } })).toBe(true)
     expect(last().sent.at(-1)).toEqual({ type: 'guess', data: { text: 'x' } })
+  })
+
+  describe('binary stroke frames (ADR 0025)', () => {
+    const stroke = { stroke_id: 's1', points: [[1, 2, 0]] as Point[], color: '#000000', width: 1, done: false }
+
+    function withWire(wire: 'json' | 'pb') {
+      conn.close()
+      conn = new RoomConnection(
+        'r1',
+        { welcome: (w) => welcomes.push(w), event: (e) => events.push(e), private: () => {}, status: () => {} },
+        { join, wsBase: 'ws://gw', WebSocket: FakeSocket as unknown as typeof WebSocket, wire },
+      )
+    }
+
+    it('asks for the subprotocol and sends strokes as binary once the server agrees', async () => {
+      withWire('pb')
+      await connected()
+      expect(last().protocols).toEqual([STROKES_SUBPROTOCOL])
+      expect(last().binaryType).toBe('arraybuffer')
+
+      last().protocol = STROKES_SUBPROTOCOL
+      conn.send({ type: 'stroke_batch', data: stroke })
+      conn.send({ type: 'guess', data: { text: 'cat' } })
+      const [, batch, guess] = last().sent
+      expect(batch).toEqual(encodeStrokeBatch(stroke))
+      expect(guess).toEqual({ type: 'guess', data: { text: 'cat' } })
+    })
+
+    it('keeps strokes JSON when the server declines the subprotocol', async () => {
+      withWire('pb')
+      await connected()
+      conn.send({ type: 'stroke_batch', data: stroke })
+      expect(last().sent[1]).toEqual({ type: 'stroke_batch', data: stroke })
+    })
+
+    it('asks for nothing with the JSON wire', async () => {
+      withWire('json')
+      await connected()
+      expect(last().protocols).toBeUndefined()
+    })
+
+    it('delivers a binary stroke event like its JSON form', async () => {
+      withWire('pb')
+      await connected(fixtures.event.seq - 1) // the event is the next one
+      last().receiveBinary(bytes(fixtures.event.hex))
+      expect(events).toEqual([
+        {
+          seq: fixtures.event.seq,
+          type: 'stroke_batch',
+          data: {
+            user_id: fixtures.event.user_id,
+            stroke_id: fixtures.event.stroke_id,
+            points: fixtures.event.points,
+            color: fixtures.event.color,
+            width: fixtures.event.width,
+            done: fixtures.event.done,
+          },
+        },
+      ])
+    })
   })
 })

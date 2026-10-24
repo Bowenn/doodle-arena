@@ -20,6 +20,7 @@ import {
   type ServerMessage,
   type Welcome,
 } from './protocol.ts'
+import { STROKES_SUBPROTOCOL, decodeStrokeEvent, encodeStrokeBatch } from './strokeCodec.ts'
 
 export type ConnectionStatus =
   | { kind: 'connecting' }
@@ -42,6 +43,8 @@ type Deps = {
   WebSocket?: typeof WebSocket
   random?: () => number
   now?: () => number
+  /** 'pb' asks for binary stroke frames (ADR 0025); the default is JSON only. */
+  wire?: 'json' | 'pb'
 }
 
 export const BACKOFF_BASE_MS = 500
@@ -70,6 +73,7 @@ export class RoomConnection {
   private readonly WS: typeof WebSocket
   private readonly random: () => number
   private readonly now: () => number
+  private readonly wire: 'json' | 'pb'
 
   private ws: WebSocket | null = null
   /** Bumped for every attempt; callbacks from an older attempt are ignored. */
@@ -93,6 +97,7 @@ export class RoomConnection {
     this.WS = deps.WebSocket ?? WebSocket
     this.random = deps.random ?? Math.random
     this.now = deps.now ?? (() => Math.round(performance.now()))
+    this.wire = deps.wire ?? 'json'
   }
 
   start() {
@@ -103,7 +108,12 @@ export class RoomConnection {
   /** Sends a message if the socket is open. Returns false when it couldn't. */
   send(msg: ClientMessage): boolean {
     if (!this.ws || this.ws.readyState !== this.WS.OPEN) return false
-    this.ws.send(JSON.stringify(msg))
+    // Binary only if the server agreed to the subprotocol; otherwise the JSON form.
+    if (msg.type === 'stroke_batch' && this.ws.protocol === STROKES_SUBPROTOCOL) {
+      this.ws.send(encodeStrokeBatch(msg.data))
+    } else {
+      this.ws.send(JSON.stringify(msg))
+    }
     return true
   }
 
@@ -134,7 +144,9 @@ export class RoomConnection {
     }
     if (gen !== this.generation) return
 
-    const ws = new this.WS(this.wsBase + ticket.ws_url)
+    const url = this.wsBase + ticket.ws_url
+    const ws = this.wire === 'pb' ? new this.WS(url, [STROKES_SUBPROTOCOL]) : new this.WS(url)
+    ws.binaryType = 'arraybuffer'
     this.ws = ws
     this.expectWithin(HANDSHAKE_TIMEOUT_MS)
     ws.onopen = () => {
@@ -142,7 +154,14 @@ export class RoomConnection {
       ws.send(JSON.stringify({ type: 'hello', data: { ticket: ticket.ticket, last_seq: this.lastSeq } }))
     }
     ws.onmessage = (ev: MessageEvent) => {
-      if (gen !== this.generation || typeof ev.data !== 'string') return
+      if (gen !== this.generation) return
+      if (ev.data instanceof ArrayBuffer) {
+        // A binary frame is a stroke_batch event (ADR 0025): the same event as its JSON form.
+        const event = decodeStrokeEvent(new Uint8Array(ev.data))
+        if (event) this.handle({ type: 'event', data: event })
+        return
+      }
+      if (typeof ev.data !== 'string') return
       let msg: ServerMessage
       try {
         msg = JSON.parse(ev.data) as ServerMessage
