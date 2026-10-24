@@ -99,6 +99,8 @@ Every service sets `OTEL_SEMCONV_STABILITY_OPT_IN=http`, so the Go, Java and Pyt
 
 Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes. Prometheus stores one time series per combination of attribute values, so thousands of rooms would create thousands of series. IDs belong in logs and traces.
 
+A counter of rare events adds 0 for each of its attribute combinations when it is created, so its series exist before the first event. Otherwise a burst's first export is the series' first sample, and `increase()` and `rate()` need a sample before the change: in task 6.9's AWS drain, 47 rooms moved and the dashboards showed `lobby.reassignments{reason="drain",result="moved"}` and `game.room.takeovers` at 0. `lobby.reassignments`, `game.room.takeovers` and `game.outbox.requeued` start at 0; a series that appears later still reads as no change for its first sample (the alert rules handle that below, "New counters count in full").
+
 | Metric | Type | Attributes | Service |
 |---|---|---|---|
 | `game.ws.connections` | UpDownCounter | – | game-server |

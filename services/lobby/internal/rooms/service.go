@@ -150,6 +150,14 @@ func NewService(store *Store, servers Servers, alloc Allocator, tickets TicketSi
 	if err != nil {
 		return nil, fmt.Errorf("lobby.reassignments: %w", err)
 	}
+	// Moves are rare, so every series starts at 0: otherwise a burst's first export is the
+	// series' first sample, which increase() and rate() read as no change (task 6.9's drain).
+	for _, result := range []string{"moved", "ended", "failed"} {
+		for _, reason := range []string{"failover", "drain"} {
+			reassigns.Add(context.Background(), 0, metric.WithAttributes(
+				attribute.String("result", result), attribute.String("reason", reason)))
+		}
+	}
 	watches, err := otel.Meter("lobby").Int64Counter("lobby.watches",
 		metric.WithDescription("Viewer tickets asked for, by result: success, not_live, no_relays or error"),
 		metric.WithUnit("{request}"))
