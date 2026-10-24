@@ -18,10 +18,15 @@
 # gateway's /otlp/v1/traces), with the same distrust:
 #   - only spans named "error" or "fetch <METHOD> <route>" (a route of /api/ paths with ids
 #     already replaced by {id}), and only the attributes the web app sets;
-#   - the resource and scope reset as for metrics; no events or links;
+#   - the resource and scope reset as for metrics; no events;
 #   - error messages cut to 200 characters (the web app does too);
-#   - then tail sampling (every error kept, 10% of the rest) on the way to Tempo. Browser spans
-#     are their own traces: the web app sends no traceparent to the API.
+#   - the client's identity fields are not trusted: the trace id is replaced by a hash of it, so
+#     a browser span can never join a backend trace (whose ids a client may know, since the
+#     gateway continues a request's traceparent); parent, trace state and status message are
+#     cleared; the kind is fixed; the status is decided here (an error span, a failed fetch, a
+#     5xx), not by the client;
+#   - then a sampler of its own: every error kept, 10% of the rest. No latency policy: a
+#     browser chooses its spans' timestamps.
 receivers:
   otlp/browser:
     protocols:
@@ -79,6 +84,9 @@ processors:
     traces:
       span:
         - not (name == "error" or IsMatch(name, "^fetch (GET|POST|PUT|PATCH|DELETE) (/api/[A-Za-z0-9/{}._-]{1,200}|failed)$"))
+      # Every event (the fetch instrumentation's timings carry nothing the dashboards use).
+      spanevent:
+        - true
   transform/browser-traces:
     error_mode: ignore
     trace_statements:
@@ -95,15 +103,34 @@ processors:
           - delete_matching_keys(scope.attributes, ".*")
       - context: span
         statements:
+          # The client's trace id, re-keyed: spans of one browser trace stay together, and no
+          # client can choose an id that lands in a backend trace.
+          - set(trace_id.string, Substring(SHA256(Concat(["browser:", trace_id.string], "")), 0, 32))
+          - set(parent_span_id.string, "")
+          - set(trace_state, "")
+          - set(status.message, "")
+          - set(kind, SPAN_KIND_INTERNAL) where name == "error"
+          - set(kind, SPAN_KIND_CLIENT) where name != "error"
+          - set(status.code, STATUS_CODE_UNSET)
+          - set(status.code, STATUS_CODE_ERROR) where name == "error" or IsMatch(name, " failed$")
+          - set(status.code, STATUS_CODE_ERROR) where attributes["http.response.status_code"] != nil and Int(attributes["http.response.status_code"]) >= 500
           - keep_keys(attributes, ["http.request.method", "http.route", "http.response.status_code", "exception.type", "exception.message", "page"])
           - set(attributes["exception.message"], Substring(attributes["exception.message"], 0, 200)) where attributes["exception.message"] != nil and Len(attributes["exception.message"]) > 200
           - set(attributes["exception.type"], Substring(attributes["exception.type"], 0, 64)) where attributes["exception.type"] != nil and Len(attributes["exception.type"]) > 64
           - set(attributes["page"], "other") where attributes["page"] != nil and not IsMatch(attributes["page"], "^(lobby|room|gallery|market|my-drawings|wallet|developer|moderate|leaderboard)$")
-      # The fetch instrumentation's timing events carry only a name and a time, but nothing else
-      # from a browser is kept: no events, no links.
-      - context: spanevent
-        statements:
-          - delete_matching_keys(attributes, ".*")
+  # The browser's own sampler: errors (as decided above) and 10% of the rest.
+  tail_sampling/browser:
+    decision_wait: 10s
+    num_traces: 10000
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: the-rest
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
   # Three vitals times ten pages plus the round trip is 31 streams; anything past the cap is dropped, not tracked.
   delta_to_cumulative:
     max_stale: 10m
@@ -117,5 +144,5 @@ service:
       exporters: [otlp_http/metrics]
     traces/browser:
       receivers: [otlp/browser]
-      processors: [memory_limiter, filter/browser-traces, transform/browser-traces, tail_sampling, batch]
+      processors: [memory_limiter, filter/browser-traces, transform/browser-traces, tail_sampling/browser, batch]
       exporters: [otlp_http/traces]
