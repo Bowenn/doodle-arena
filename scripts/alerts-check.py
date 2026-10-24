@@ -8,6 +8,9 @@ Rules evaluate once a minute, so it waits up to TIMEOUT seconds (default 150) fo
 evaluation. Standard library only.
 """
 
+# Annotations stay text: macOS ships Python 3.9, which can't evaluate `str | None`.
+from __future__ import annotations
+
 import base64
 import json
 import os
