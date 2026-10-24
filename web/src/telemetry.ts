@@ -1,4 +1,5 @@
-// The OpenTelemetry side of real-user monitoring (rum.ts loads this after the page has loaded).
+// The OpenTelemetry side of real-user monitoring (rum.ts loads this after the page has loaded):
+// these metrics, and the errors and fetch spans of tracing.ts.
 //
 // Metrics (docs/observability.md, section 3):
 //   web.vitals.lcp   Histogram (ms)  Largest Contentful Paint, attribute page
@@ -22,6 +23,7 @@ import {
 } from '@opentelemetry/sdk-metrics'
 import { onCLS, onINP, onLCP, type Metric } from 'web-vitals'
 import { attach, pageName } from './rum.ts'
+import { startTracing } from './tracing.ts'
 
 // Bucket bounds around Google's thresholds (good / poor): LCP 2.5 s / 4 s, INP 200 / 500 ms,
 // CLS 0.1 / 0.25.
@@ -77,4 +79,6 @@ export function start(): void {
   }
   document.addEventListener('visibilitychange', flush)
   window.addEventListener('pagehide', () => void meterProvider.forceFlush().catch(() => {}))
+  // Errors and fetch spans (task 6.9).
+  startTracing(() => pageName(window.location.pathname))
 }

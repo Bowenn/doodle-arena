@@ -13,6 +13,15 @@
 #     (each of these could otherwise mint new series).
 # Browsers send deltas (each page load is its own short-lived process); deltatocumulative adds
 # every browser's deltas into one cumulative series per metric and page, as Prometheus expects.
+#
+# Since task 6.9 the same receiver takes the web app's spans (web/src/tracing.ts, through the
+# gateway's /otlp/v1/traces), with the same distrust:
+#   - only spans named "error" or "fetch <METHOD> <route>" (a route of /api/ paths with ids
+#     already replaced by {id}), and only the attributes the web app sets;
+#   - the resource and scope reset as for metrics; no events or links;
+#   - error messages cut to 200 characters (the web app does too);
+#   - then tail sampling (every error kept, 10% of the rest) on the way to Tempo. Browser spans
+#     are their own traces: the web app sends no traceparent to the API.
 receivers:
   otlp/browser:
     protocols:
@@ -65,6 +74,36 @@ processors:
           # The vitals carry a page; the round trip is always a room's, so it carries none.
           - delete_key(datapoint.attributes, "page") where metric.name == "web.ws.rtt"
           - set(datapoint.attributes["page"], "other") where metric.name != "web.ws.rtt" and not IsMatch(datapoint.attributes["page"], "^(lobby|room|gallery|market|my-drawings|wallet|developer|moderate|leaderboard)$")
+  filter/browser-traces:
+    error_mode: ignore
+    traces:
+      span:
+        - not (name == "error" or IsMatch(name, "^fetch (GET|POST|PUT|PATCH|DELETE) (/api/[A-Za-z0-9/{}._-]{1,200}|failed)$"))
+  transform/browser-traces:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["deployment.environment"])
+          - set(attributes["deployment.environment"], "unknown") where not IsMatch(attributes["deployment.environment"], "^(local|aws)$")
+          - set(attributes["service.name"], "web")
+          - set(attributes["service.instance.id"], "browser")
+      - context: scope
+        statements:
+          - set(scope.name, "web")
+          - set(scope.version, "")
+          - delete_matching_keys(scope.attributes, ".*")
+      - context: span
+        statements:
+          - keep_keys(attributes, ["http.request.method", "http.route", "http.response.status_code", "exception.type", "exception.message", "page"])
+          - set(attributes["exception.message"], Substring(attributes["exception.message"], 0, 200)) where attributes["exception.message"] != nil and Len(attributes["exception.message"]) > 200
+          - set(attributes["exception.type"], Substring(attributes["exception.type"], 0, 64)) where attributes["exception.type"] != nil and Len(attributes["exception.type"]) > 64
+          - set(attributes["page"], "other") where attributes["page"] != nil and not IsMatch(attributes["page"], "^(lobby|room|gallery|market|my-drawings|wallet|developer|moderate|leaderboard)$")
+      # The fetch instrumentation's timing events carry only a name and a time, but nothing else
+      # from a browser is kept: no events, no links.
+      - context: spanevent
+        statements:
+          - delete_matching_keys(attributes, ".*")
   # Three vitals times ten pages plus the round trip is 31 streams; anything past the cap is dropped, not tracked.
   delta_to_cumulative:
     max_stale: 10m
@@ -76,3 +115,7 @@ service:
       receivers: [otlp/browser]
       processors: [memory_limiter, filter/browser, transform/browser, delta_to_cumulative, batch]
       exporters: [otlp_http/metrics]
+    traces/browser:
+      receivers: [otlp/browser]
+      processors: [memory_limiter, filter/browser-traces, transform/browser-traces, tail_sampling, batch]
+      exporters: [otlp_http/traces]
