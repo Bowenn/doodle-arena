@@ -7,7 +7,7 @@ Protobuf definitions for everything that crosses a service boundary: Kafka event
 | Path | What |
 |---|---|
 | `doodle/events/v1/` | Kafka events: `EventMeta` (`meta.proto`) and one file per topic, each with that topic's wrapper message |
-| `doodle/game/v1/` | `ControlService` (lobby → game server), `GameMode`, and `StrokeLog`, the claim-check object in the `round-logs` bucket |
+| `doodle/game/v1/` | `ControlService` (lobby → game server), `GameMode`, `StrokeLog`, the claim-check object in the `round-logs` bucket, and `StrokeFrame`, the binary stroke frames of WebSocket sockets that negotiated `doodle.strokes.pb` (ADR 0025) |
 | `doodle/lobby/v1/` | `RegistryService` (game server → lobby heartbeats) |
 | `buf.yaml` | Lint (`STANDARD` plus `COMMENTS`) and breaking-change (`FILE`) rules |
 | `buf.gen.yaml` | Pinned remote plugins and where their output goes |

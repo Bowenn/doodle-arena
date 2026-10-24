@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package doodle.game.v1;
+
+// StrokeFrame is one binary WebSocket frame on a socket that negotiated the subprotocol
+// "doodle.strokes.pb" (ADR 0025, task 6.4). Only stroke batches travel as binary frames; every
+// other message on that socket stays JSON text (design doc 6.4). It is not a Kafka event and is
+// never stored: the room's event log keeps the JSON form.
+message StrokeFrame {
+  // Which way the frame goes.
+  oneof frame {
+    // Client to server: a drawer's batch, the binary form of the JSON stroke_batch.
+    StrokeBatchIn batch = 1;
+    // Server to client: a room's stroke_batch event, the binary form of event{seq, type, data}.
+    StrokeBatchEvent event = 2;
+  }
+}
+
+// StrokeBatchIn is a drawer's batch of points. Produced by clients (the web app, k6), consumed by
+// the game server, which checks it exactly like the JSON form:
+// 1 to 512 points, coordinates 0 to 10000, t_ms up to 600000, width 1 to 200, color #rrggbb.
+message StrokeBatchIn {
+  // The client's id for the stroke, shared by every batch of it.
+  string stroke_id = 1;
+  // The points as flat triples x, y, t_ms (normalized coordinates; milliseconds since the
+  // stroke began), packed varints.
+  repeated uint32 points = 2;
+  // The stroke's color, "#rrggbb".
+  string color = 3;
+  // The stroke's width in normalized units.
+  uint32 width = 4;
+  // True on the stroke's last batch.
+  bool done = 5;
+}
+
+// StrokeBatchEvent is a room's stroke_batch event as players receive it. Produced by the room's
+// owning game server, consumed by players' clients; relays and viewers keep the JSON form.
+message StrokeBatchEvent {
+  // The event's sequence number in the room's log.
+  int64 seq = 1;
+  // The drawer who drew it.
+  string user_id = 2;
+  // The stroke's id.
+  string stroke_id = 3;
+  // The points as flat triples x, y, t_ms, as in StrokeBatchIn.
+  repeated uint32 points = 4;
+  // The stroke's color, "#rrggbb".
+  string color = 5;
+  // The stroke's width in normalized units.
+  uint32 width = 6;
+  // True on the stroke's last batch.
+  bool done = 7;
+}
