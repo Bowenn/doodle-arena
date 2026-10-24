@@ -40,9 +40,8 @@ locals {
     [for c in ["assets", "assets-indexer"] : [9200, c]],
     # Kafka: its clients only (ADR 0013). The assets web process and worker have no Kafka user.
     [for c in ["lobby", "game-server-1", "game-server-2", "relay-1", "relay-2", "notifier", "auth-relay", "marketplace", "assets-consumer", "assets-relay", "analytics-jobmanager", "analytics-taskmanager"] : [9092, c]],
-    # Telemetry: OTLP/HTTP from every service, OTLP/gRPC from the gateway's module.
-    [for c in keys(local.services) : [4318, c]],
-    [[4317, "gateway"], [4317, "analytics-jobmanager"], [4317, "analytics-taskmanager"]], # Flink's reporter speaks gRPC
+    # Telemetry (OTLP, 4317-4318) is one rule for the whole VPC below, not one per service: with
+    # every service's own rule the group passed AWS's 60 inbound rules (task 6.9).
     # Browser telemetry, through the gateway only (task 5.4).
     [[4319, "gateway"]],
   )
@@ -66,6 +65,19 @@ resource "aws_vpc_security_group_ingress_rule" "gateway_from_alb" {
   to_port                      = 80
   ip_protocol                  = "tcp"
   description                  = "from the load balancer"
+}
+
+# Every task sends telemetry to the collector on the data host (OTLP/gRPC and OTLP/HTTP). It
+# guards no data, so one rule for the VPC's addresses replaces a rule per service, which kept the
+# data host's group under AWS's limit of 60 inbound rules (task 6.9). The stores' ports stay
+# named per caller, and so does the browser receiver (4319, the gateway only).
+resource "aws_vpc_security_group_ingress_rule" "data_host_telemetry" {
+  security_group_id = aws_security_group.data_host.id
+  cidr_ipv4         = aws_vpc.main.cidr_block
+  from_port         = 4317
+  to_port           = 4318
+  ip_protocol       = "tcp"
+  description       = "telemetry (OTLP) from any task in the VPC"
 }
 
 resource "aws_vpc_security_group_ingress_rule" "data_host" {
