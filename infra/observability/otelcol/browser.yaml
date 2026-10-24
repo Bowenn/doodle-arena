@@ -106,7 +106,7 @@ processors:
           # The client's trace id, re-keyed: spans of one browser trace stay together, and no
           # client can choose an id that lands in a backend trace.
           - set(trace_id.string, Substring(SHA256(Concat(["browser:", trace_id.string], "")), 0, 32))
-          - set(parent_span_id.string, "")
+          - set(parent_span_id, SpanID(0x0000000000000000))
           - set(trace_state, "")
           - set(status.message, "")
           - set(kind, SPAN_KIND_INTERNAL) where name == "error"
