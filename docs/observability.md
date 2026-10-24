@@ -251,6 +251,7 @@ Principles:
 - Alert on what players feel and on broken invariants, not on every possible cause.
 - Every alert links to a runbook in `docs/runbooks/` (use `docs/runbooks/TEMPLATE.md`).
 - Grafana alerting sends alerts to a Discord channel. `critical` means fix now; `warning` means look today.
+- The SLOs and their burn-rate alerts are in section 8.
 
 Starting rules (tune the thresholds after the first load test):
 
@@ -286,6 +287,10 @@ Starting rules (tune the thresholds after the first load test):
 | SearchIndexLagging | Search documents written more than 60 s after their events (p95 of `assets.search.index_lag`), for 10 minutes (ADR 0023) | warning |
 | SearchUnavailable | Searches answered 503 (`assets.search.requests{result="unavailable"}`) for 5 minutes: Elasticsearch can't be reached; the gallery and market still list without search | warning |
 | AssetsCacheDegraded | More than half of the gallery cache's lookups met a Redis error or were skipped after one (`assets.cache.requests{result=~"error|skipped"}`), for 10 minutes: Postgres answers every gallery read (ADR 0024) | warning |
+| SLOAvailabilityFastBurn | API requests failing with a 5xx at 14.4 times the 30-day budget (0.5%) over both 1 h and 5 min, with more than 6 requests a minute (task 6.9): the month's budget would be gone in about two days | critical |
+| SLOAvailabilitySlowBurn | The same at 6 times the budget over both 6 h and 30 min: about five days | warning |
+| SLOLatencyFastBurn | API requests slower than 500 ms at 14.4 times the 30-day budget (1%) over both 1 h and 5 min | critical |
+| SLOLatencySlowBurn | The same at 6 times the budget over both 6 h and 30 min | warning |
 | LedgerPartitionMissing | `market.ledger.default_partition_rows` above 0: postings in a month without a partition (task 6.6), whose partition can't be created while they are there | warning |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`; task 5.2, not a Grafana rule) | critical |
 
@@ -328,3 +333,18 @@ Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.dupli
 - Stages 2–4: a task isn't done until its metrics from section 3 exist.
 - Stage 5: dashboards, alert rules, runbooks and the Discord contact point (task 5.1), the AWS budget alarm (task 5.2), browser telemetry and Lighthouse (task 5.4).
 - Stage 6: SLOs, tail sampling, deploy markers. The kill test doubles as a fire drill: the right alert must fire, and its runbook must fix the problem.
+
+## 8. SLOs
+
+Task 6.9. They are on the SLO dashboard (`da-slo`).
+
+| SLO | SLI | Objective (30 days) | Alerts |
+|---|---|---|---|
+| API availability | API requests (the services' own `http.server.request.duration` on `/api` routes; health checks and game sockets aside) answered without a 5xx | 99.5% | SLOAvailabilityFastBurn, SLOAvailabilitySlowBurn |
+| API latency | The same requests answered within 500 ms | 99% | SLOLatencyFastBurn, SLOLatencySlowBurn |
+| Live broadcast | Relay broadcasts (`relay.broadcast.latency`, one per viewer per event) within 250 ms of the owner's commit | 99% | SlowRelayBroadcast |
+
+- **Burn-rate alerts** follow the Google SRE workbook's multi-window, multi-burn-rate pattern. Fast burn (critical) is 14.4 times the budget's rate over both 1 h and 5 min, which spends 2% of the month in an hour. Slow burn (warning) is 6 times over both 6 h and 30 min.
+- **The short window** makes an alert stop soon after the problem does.
+- **The traffic floor:** more than 6 requests a minute, so one 500 on an idle stack isn't an outage.
+- **Retention:** budgets cover what Prometheus keeps: locally, since the stack started.

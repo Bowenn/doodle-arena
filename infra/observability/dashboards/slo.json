@@ -1,0 +1,569 @@
+{
+  "uid": "da-slo",
+  "title": "Doodle Arena: SLOs",
+  "description": "The three SLOs (task 6.9, docs/observability.md section 5): API availability, API latency and live broadcast, with 30-day error budgets and burn rates. Budgets cover what Prometheus keeps: locally, since the stack started.",
+  "tags": [
+    "doodle-arena"
+  ],
+  "editable": false,
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "graphTooltip": 1,
+  "links": [
+    {
+      "title": "Dashboards",
+      "type": "dashboards",
+      "tags": [
+        "doodle-arena"
+      ],
+      "asDropdown": true
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "API availability: 99.5% of API requests without a 5xx, 30 days",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Availability, 30 days",
+      "description": "Share of API requests (the services' own /api routes) answered without a 5xx over the last 30 days, or since the stack started.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.995
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "1 - sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30d]))",
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 6
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Error budget left, 30 days",
+      "description": "1 minus the share of the 30-day budget (0.5% of requests) already spent. Below 0: the SLO is missed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "1 - (sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30d]))) / 0.005",
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 6
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Availability burn rate",
+      "description": "How many times faster than the budget allows errors are spent, per window. SLOAvailabilityFastBurn: 14.4 over both 1 h and 5 min; SLOAvailabilitySlowBurn: 6 over both 6 h and 30 min.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m])) / 0.005",
+          "legendFormat": "5m"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m])) / 0.005",
+          "legendFormat": "30m"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[1h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h])) / 0.005",
+          "legendFormat": "1h"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[6h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h])) / 0.005",
+          "legendFormat": "6h"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 12,
+        "h": 6
+      }
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "API latency: 99% of API requests under 500 ms, 30 days",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Under 500 ms, 30 days",
+      "description": "Share of API requests answered within 500 ms over the last 30 days.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30d]))",
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 6,
+        "h": 6
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Latency budget left, 30 days",
+      "description": "1 minus the share of the 30-day budget (1% of requests slower than 500 ms) already spent.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "1 - (1 - sum(increase(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30d]))) / 0.01",
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 8,
+        "w": 6,
+        "h": 6
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latency burn rate",
+      "description": "How many times faster than the budget allows slow requests are spent, per window. SLOLatencyFastBurn: 14.4 over 1 h and 5 min; SLOLatencySlowBurn: 6 over 6 h and 30 min.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[5m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))) / 0.01",
+          "legendFormat": "5m"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m]))) / 0.01",
+          "legendFormat": "30m"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[1h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h]))) / 0.01",
+          "legendFormat": "1h"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[6h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h]))) / 0.01",
+          "legendFormat": "6h"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 6
+      }
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Live broadcast: 99% of viewer broadcasts under 250 ms (ADR 0017)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Broadcasts under 250 ms, 30 days",
+      "description": "Share of relay broadcasts (one per viewer per event) written within 250 ms of the owner's commit. SlowRelayBroadcast covers this SLO.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(relay_broadcast_latency_milliseconds_bucket{le=\"250\"}[30d])) / sum(increase(relay_broadcast_latency_milliseconds_count[30d]))",
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 6,
+        "h": 6
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Broadcasts under 250 ms",
+      "description": "The same share over 5 minutes, while viewers watch.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(relay_broadcast_latency_milliseconds_bucket{le=\"250\"}[5m])) / sum(rate(relay_broadcast_latency_milliseconds_count[5m]))",
+          "legendFormat": "5m"
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 15,
+        "w": 18,
+        "h": 6
+      }
+    }
+  ]
+}

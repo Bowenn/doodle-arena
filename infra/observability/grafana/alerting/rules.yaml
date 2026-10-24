@@ -1015,3 +1015,191 @@ groups:
           runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/analytics-down.md
           __dashboardUid__: da-analytics
           __panelId__: "1"
+  # SLOs (task 6.9, docs/observability.md section 5): multi-window, multi-burn-rate alerts on the
+  # API's availability (99.5% not 5xx) and latency (99% under 500 ms) over 30 days. The SLI is the
+  # services' own HTTP server metrics on /api routes (health checks and game sockets aside).
+  - orgId: 1
+    name: slo
+    folder: Doodle Arena
+    interval: 1m
+    rules:
+      - uid: slo-availability-fast-burn
+        title: SLOAvailabilityFastBurn
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 3600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[1h]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h]))"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[5m]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              instant: true
+          - refId: T
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: T
+              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              # Burning the 30-day budget 14.4x too fast over both windows, with enough
+              # traffic (more than 6 requests a minute) for a ratio to mean something.
+              expression: "$A > 0.0720 && $B > 0.0720 && $T > 0.1"
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+          slo: availability
+        annotations:
+          summary: "API availability is burning its 30-day error budget 14.4x too fast: {{ humanizePercentage $values.A.Value }} of API requests failed with a 5xx over the last hour. At this rate the month's budget is gone in about two days."
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/slo-fast-burn.md
+          __dashboardUid__: da-slo
+          __panelId__: "3"
+      - uid: slo-availability-slow-burn
+        title: SLOAvailabilitySlowBurn
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 21600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[6h]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h]))"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30m]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m]))"
+              instant: true
+          - refId: T
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: T
+              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              # Burning the 30-day budget 6x too fast over both windows, with enough
+              # traffic (more than 6 requests a minute) for a ratio to mean something.
+              expression: "$A > 0.0300 && $B > 0.0300 && $T > 0.1"
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        labels:
+          severity: warning
+          service: api
+          slo: availability
+        annotations:
+          summary: "API availability is burning its 30-day error budget 6x too fast: {{ humanizePercentage $values.A.Value }} of API requests failed with a 5xx over the last 6 hours."
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/slo-slow-burn.md
+          __dashboardUid__: da-slo
+          __panelId__: "3"
+      - uid: slo-latency-fast-burn
+        title: SLOLatencyFastBurn
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 3600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[1h])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h]))"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[5m])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              instant: true
+          - refId: T
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: T
+              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              # Burning the 30-day budget 14.4x too fast over both windows, with enough
+              # traffic (more than 6 requests a minute) for a ratio to mean something.
+              expression: "$A > 0.1440 && $B > 0.1440 && $T > 0.1"
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+          slo: latency
+        annotations:
+          summary: "API latency is burning its 30-day budget 14.4x too fast: {{ humanizePercentage $values.A.Value }} of API requests took longer than 500 ms over the last hour."
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/slo-fast-burn.md
+          __dashboardUid__: da-slo
+          __panelId__: "6"
+      - uid: slo-latency-slow-burn
+        title: SLOLatencySlowBurn
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: {from: 21600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[6h])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h]))"
+              instant: true
+          - refId: B
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: B
+              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30m])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m]))"
+              instant: true
+          - refId: T
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: T
+              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: math
+              # Burning the 30-day budget 6x too fast over both windows, with enough
+              # traffic (more than 6 requests a minute) for a ratio to mean something.
+              expression: "$A > 0.0600 && $B > 0.0600 && $T > 0.1"
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        labels:
+          severity: warning
+          service: api
+          slo: latency
+        annotations:
+          summary: "API latency is burning its 30-day budget 6x too fast: {{ humanizePercentage $values.A.Value }} of API requests took longer than 500 ms over the last 6 hours."
+          runbook_url: https://github.com/Bowenn/doodle-arena/blob/master/docs/runbooks/slo-slow-burn.md
+          __dashboardUid__: da-slo
+          __panelId__: "6"
