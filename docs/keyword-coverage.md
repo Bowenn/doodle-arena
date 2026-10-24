@@ -73,7 +73,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Deployment / release monitoring metrics, logs | Version-tagged telemetry, deploy markers, reconnect watch during deploys | 5, 6 |
 | OpenTelemetry, Prometheus & Grafana | The telemetry pipeline | 1, 5 |
 | Amazon CloudWatch | AWS resource metrics and logs; billing alarm; backup and restore metrics and logs | 5, 6 |
-| Monitoring, Observability, Telemetry | `docs/observability.md` | 1, 5 |
+| Monitoring, Observability, Telemetry | `docs/observability.md`; SLOs with multi-window burn-rate alerts, tail sampling in the collector, deploy markers, browser errors and fetch spans behind a hardened public receiver, and a timed fire drill that found a real blind spot (task 6.9) | 1, 5, 6 |
 | Alerting | Grafana alerting to Discord; invariant alerts | 5 |
 | Logging | JSON logs with trace IDs into Loki | 1 |
 | Automated testing / Testing | Unit, integration (Testcontainers), concurrency, load and fault-injection tests | All |

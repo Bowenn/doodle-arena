@@ -767,6 +767,14 @@ In CAP terms, the marketplace chooses consistency during a network partition: it
 
 See `docs/observability.md` for the pipeline, the log format, metric names, tracing rules, dashboards and alerts.
 
+Since task 6.9 (D62):
+
+- **SLOs:** three, with multi-window burn-rate alerts (observability.md section 8): API availability 99.5%, API latency 99% under 500 ms, live broadcast 99% under 250 ms.
+- **Tail sampling in the collector:** errors, slow traces, money traces and synthetic checks are kept, health checks dropped, 10% of the rest.
+- **Deploy markers** from `make up` and `aws-up`.
+- **The browser's errors and fetch spans:** their own traces, with re-keyed ids and no trace context sent to the API.
+- **A fire drill** (`docs/fire-drill.md`) that breaks a game server and Elasticsearch, and times the alert and the runbook's fix.
+
 ## 13. Deployment
 
 Local:
@@ -794,12 +802,17 @@ CI (GitHub Actions, `.github/workflows/`):
 AWS (Stage 5):
 
 - ADR 0003, Option B: ECS on Fargate (Graviton) for the services, one EC2 data host for Postgres, Redis, MongoDB, Kafka and otel-lgtm, an ALB with an ACM certificate on a Route 53 domain, private subnets with one NAT gateway, secrets in SSM Parameter Store. Created and destroyed per session (task 5.2).
+- **Since task 6.9 the AWS stack matches the local one:**
+  - the relays (two, 1 vCPU each, with a high open-file limit for viewer sockets);
+  - Flink's JobManager and TaskManager, checkpointing to an `analytics-checkpoints` bucket through `s3a://` with the task role (locally `s3p://` with SeaweedFS's keys);
+  - game servers at 1 vCPU.
+  - **The data host's security group** names every caller on the stores' ports, but takes telemetry (OTLP) from the whole VPC with one rule, which keeps it under AWS's 60 inbound rules.
 - Fixed parts: S3 for both buckets, CloudWatch for AWS resource metrics and logs, a billing alarm, Terraform in `infra/terraform/`, and secrets in SSM Parameter Store or Secrets Manager.
 
 Releases:
 
 - Rolling deploys. A game server drains on SIGTERM (or `DrainServer`): it stops accepting new rooms, the lobby moves its rooms to the other servers, and it exits when none are left (section 7.5).
-- Every signal carries `service.version`, so dashboards can compare versions during a rollout. CI adds a deploy marker in Grafana.
+- Every signal carries `service.version`, so dashboards can compare versions during a rollout. `make up` and `aws-up` post a deploy marker in Grafana (task 6.9); nothing deploys from CI.
 
 ## 14. Decision log
 
@@ -867,6 +880,7 @@ Releases:
 | D59 | Search (ADR 0023, task 6.7): self-hosted Elasticsearch 9 (security on, a read user for the web process and a write user for the indexer); one indexer reading `assets.drawings.v1`, `market.listings.v1` and `market.sales.v1` that keeps a projection of active listings in assets' Postgres and writes each drawing's whole document with an external version; an alias with rebuilds from Postgres; hits read back from Postgres; the marketplace's admin republish as the backfill | Building every document from assets' own tables makes the order of three topics irrelevant and a rebuild needs nothing outside assets; external versions make retries and a concurrent rebuild safe; Kafka keeps 7 days, so replaying topics can't rebuild; dual writes from the request path could leave Elasticsearch and Postgres disagreeing; a managed search service was more cost than this project needs |
 | D60 | Gallery cache (ADR 0024, task 6.7b): cache-aside in assets' Redis under `assets:cache:*`; approved drawings by their fields for 10 minutes (URLs signed per response); the gallery's first three pages for 60 seconds under a generation bumped after each approval commits, filled from the primary by one request holding a lock while others wait up to 200 ms; fail open with a 5-second skip; no takedown action | A decision is final, so approved drawings never go stale; the generation closes the cache-aside race that deleting keys leaves open, and needs no `SCAN`; single-flight turns each approval's miss into one query; Postgres stays the only truth, so Redis failing only slows the gallery |
 | D61 | Stroke wire format and batching (ADR 0025, task 6.4): batches stay at 50 ms and JSON by default; a socket may ask for the subprotocol `doodle.strokes.pb` to send and receive stroke batches as `doodle.game.v1.StrokeFrame`, encoded once per format per event, while the event log, welcome, replays, relays and viewers stay JSON | Measured with each game server at one CPU: protobuf cut stroke bytes by about 70% but not server CPU (the log stays JSON, so strokes are encoded twice), and 33 ms batches bought 17 ms of ink delay for 38% more CPU and 45% more Redis commands; the opt-in keeps the bandwidth saving available without making two codecs everyone's dependency |
+| D62 | Final measurements (task 6.9): three SLOs with multi-window burn-rate alerts computed in the alert queries; tail sampling in otel-lgtm's collector; deploy markers posted by `make up` and `aws-up`; the browser's spans as their own traces (ids re-keyed, no traceparent to the API, status decided by the collector); relays and Flink in AWS; a fire drill that times alert and runbook; `lobby.servers.healthy` by role | Burn rates say how fast the month's budget goes, which a 5xx-rate threshold doesn't. The collector can keep whole traces by outcome, which a head sampler can't know. Deploys come from a laptop, not CI. A public telemetry endpoint must not be a way into backend traces. The drill found relays hiding a dead game server from GameServerDown |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.
 

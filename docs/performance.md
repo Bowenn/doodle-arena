@@ -22,6 +22,7 @@ Stroke fan-out is the time from a drawer's stroke batch until each other player 
 | Local, first run | fan-out p95 4.8 ms | 9.6 ms | 125 ms | The laptop (k6 and every container on 10 cores) |
 | AWS, first run | fan-out p50 17 ms, p95 24 ms; ping p50 9 ms | p50 22 ms, p95 450 ms; ping p95 94 ms | p95 at the 10 s cap; ping p95 9 s | A game server's 0.25 vCPU: 99 to 100% from about 25 rooms |
 | AWS, after the follow-ups (#48 to #52) | p95 24 ms | p95 726 ms | seconds | Still the game servers' CPU, at about 40 rooms each |
+| AWS, game servers at 1 vCPU, k6 on the GCP dev box (task 6.9, 2026-10-24) | | | fan-out p50 15 ms, p95 39 ms, p99 87 ms; ping p95 23 ms; input lag p95 7.3 ms, send lag p95 0.5 ms; 509 rounds, 1 room error | None reached: the 80-room ramp's top |
 
 What the follow-ups changed and found:
 
@@ -30,7 +31,7 @@ What the follow-ups changed and found:
 - otel-lgtm under the ramp, locally: before #51, the Docker VM OOM-killed Tempo five times (up to 3.4 GiB each), because the game servers started a root trace for every room commit, so for every stroke. After #51 (no such traces, a memory limit in the collector, a stricter healthcheck), spans peaked at 234/s (about 2,000/s before) and Tempo used at most 383 MiB, with no OOM kill. In AWS, with the same guards on the data host (#52), otel-lgtm used 2 of 8 GB and never restarted, and the gateway's CPU peak dropped from 79% to 24%.
 - Locally, with the game servers capped at 0.25 CPU like AWS, input lag p95 was under 1 ms up to 21 rooms and 0.9 to 2.4 s at 40.
 
-The capacity, in one line: a game server at 0.25 vCPU holds about 20 to 40 four-player rooms of this traffic. The next step is a larger task size or more servers (Stage 6), not code.
+The capacity, in one line: a game server at 0.25 vCPU holds about 20 to 40 four-player rooms of this traffic. At 1 vCPU (task 6.9), two servers hold the full 80-room ramp with stroke fan-out p95 39 ms, which is no change to code, only the task size. Measured locally at one CPU each with 50 ms batches, the ceiling is about 80 rooms with fan-out p95 under 250 ms (section 12).
 
 ## 2. Failover under load
 
@@ -46,6 +47,7 @@ The capacity, in one line: a game server at 0.25 vCPU holds about 20 to 40 four-
 | Local, `stop` with the drain, 80 rooms, 0.25 CPU | 41 rooms within 17.5 s | disconnected for 5.3 to 7.4 s (12.9 s for a capped kill) | met, for the disconnection |
 | AWS, `stop` with the drain (5.5c), 80 rooms | 41 rooms in 2 passes within 6.8 s of the SIGTERM (which ECS sent about 18 s after `stop-task`) | disconnected for 0.5 to 2.0 s (16 to 17.5 s before the drain) | met |
 | AWS, rolling redeploy (Stage 5 review), 80 rooms, both game servers in one phase with the gateway and lobby | game-server-1: 31 of 41 rooms moved before its 40 s drain limit, 10 failed over; game-server-2: 41 rooms in 5.1 s | 269 room errors, resume p95 55.7 s: every player reconnected through the new gateway at once, and creates got 502s while the lobby was replaced | missed |
+| AWS, `stop` under the 80-room load, game servers at 1 vCPU (task 6.9, M6) | the drill's room moved to game-server-2; the lobby logged 47 rooms reassigned and a drain started and finished | the drill's players 16.1 s after `stop-task` (ECS's SIGTERM delay), disconnected for 0.1 to 0.2 s, no gap or duplicate; the load test's 164 reconnects resumed with p50 10.6 s, p95 20 s (likely behind the gateway's 20 r/s for the dev box's one address) | met |
 | AWS, rolling redeploy, 80 rooms, the other services first, then one game server at a time | game-server-1: 47 rooms in 6.0 s; game-server-2: 74 rooms in 16.4 s; no drain hit its limit | the game-server phases: 30 room errors (429s from the retries, matches short of players); the gateway and lobby phase before them: 161 creates got 502 or 503 | met for the drains; see the note below |
 
 ECS delivered SIGTERM about 18 s after `stop-task`, so the drill's own clock (32.6 s from the call) includes that delay. The lobby notices a dead server 6 to 7 s after its last heartbeat.
@@ -77,6 +79,8 @@ Lighthouse 12.6.1 (`@lhci/cli` 0.15.1), mobile emulation with simulated throttli
 | 2026-10-20 | Local production image | `/gallery` | 0.99 | 1.66 s | 0 | 0 ms | 1.43 s | 1.00 |
 | 2026-10-20 | AWS (https://icanfly.click) | `/` | 1.00 | 1.21 s | 0 | 0 ms | 1.21 s | 1.00 |
 | 2026-10-20 | AWS (https://icanfly.click) | `/gallery` | 1.00 | 1.21 s | 0 | 0 ms | 1.21 s | 1.00 |
+| 2026-10-24 | AWS, with the browser's traces (task 6.9) | `/` and `/gallery` | 1.00 | 1.35 s | 0 | 0 ms | – | – |
+| 2026-10-24 | Local production image, with the browser's traces | `/` and `/gallery` | 0.99 | 1.81 s | 0 | – | – | – |
 
 The local run serves the image AWS runs, alone, so its API calls fail: it measures the bundle, caching and compression, not the API. AWS scores a little better than local, probably because the ALB speaks HTTP/2 (the local image HTTP/1.1), which Lighthouse's simulation rewards; the server answered in 13 ms. Lighthouse has no session, so on AWS both paths show the signed-out screen (the app checks `/api/auth/refresh`, gets 401 and renders the sign-in button): these numbers are the first visit's, not a signed-in gallery full of drawings. On the wire on AWS: main bundle 86 KB (gzip), telemetry chunk 24 KB, CSS 1.9 KB, all over h2.
 
@@ -106,6 +110,8 @@ On AWS (2026-10-20, the signed-out screen; Prometheus on the data host):
 | 2026-10-20, task 5.4 (209 resources: one more security-group rule) | 515 s | 357 s | 18 minutes |
 | 2026-10-20, task 5.5a (230 resources: Kafka's passwords and TLS) | 515 s | 317 s | 18 minutes |
 | 2026-10-20, task 5.5c (238 resources: Redis's passwords) | 530 s | 325 s | 30 minutes (with the load test) |
+| 2026-10-24, task 6.9 session 1 (305 resources: relays, Flink, their rules; a first try stopped at the data host's 60-rule limit) | 392 s (completing the stopped try) | 378 s, with the first backup | about an hour (load test, failover, the 5,000-viewer room, fire drills) |
+| 2026-10-24, task 6.9 session 2 (283 resources) | 600 s, with a 185 s restore | 302 s after a forced backup failure that destroyed nothing (102 s) | 18 minutes |
 
 Cost (Cost Explorer, 2026-10-20): about $0.30 to $0.80 per stack-hour, mostly the NAT gateway, then ECS, the ALB and EC2. Credits covered all of it so far; the domain ($15 plus tax) was the only charge. Cost Explorer lags up to a day, so the latest sessions may show more later.
 
@@ -116,7 +122,7 @@ What `aws-down` adds before the destroy and `aws-up` before the migrations (ADR 
 | Where | Data | Dump (on the host) | Restore (load and count check) |
 |---|---|---|---|
 | Local, `make backup-check`, 2026-10-21 | 4 Postgres databases, 81,607 rows, 5.6 MB of dumps; MongoDB 6,978 replays, 2.5 GB in the collection, a 683 MB gzipped archive (load tests) | Postgres 0.5 to 1.0 s each; MongoDB 172 s | 42 s for all five |
-| AWS | Not measured yet: the first AWS session with task 6.10 records the backup's and the restore's time here | | |
+| AWS, 2026-10-24 (task 6.9) | 4 Postgres databases (625 KB of dumps), MongoDB's replays (an 83 MB archive), 1,000 drawings (46 MB) | 57 s for every dump with its checksum check; the drawings copied in 12–13 s | 185 s for all five, every table's rows and every collection's documents matched; the whole `aws-up` 600 s |
 
 MongoDB is most of it, and it grows with every match (a replay averages 360 KB). A full read for the dump pulls the whole collection through WiredTiger's cache, which is why MongoDB's cache is capped at 1 GB on both stacks (without the cap, the local `mongod` grew to 2.6 GB and was OOM-killed).
 
@@ -139,7 +145,13 @@ What limits it here, in the order it was found:
 - **The load generator.** k6 needs 2 to 5 cores for 2,500 viewers and shares them with the stack, so past 2,000 viewers the relays' p99 depends on that contention. Near 3,000 viewers k6 itself falls behind: 120,000 messages a second outrun its JavaScript event loops, and its backlog grows until the OOM killer stops it (2.4 to 2.9 GB). Exporting k6's per-message samples over OTLP doubled its CPU, so the live test keeps them in k6's summary.
 - **The relays** use under two cores each at 2,500 viewers, about 21,000 writes a second each. Most of their time is the per-viewer write: one goroutine wake-up and one syscall per viewer per event. Coalescing events per viewer is the obvious next step and belongs with task 6.4's batching experiments.
 
-The 5,000-viewer number is measured in AWS (task 6.9), with k6 on a machine of its own and the relays on Fargate.
+In AWS (task 6.9, 2026-10-24): 5,000 viewers on one live room, from k6 on the GCP dev box (outside AWS, through the load balancer, connected at 9 a second), with two relays at 1 vCPU on Fargate:
+
+| Viewers | Relays' p50 / p95 / p99 | Stream lag p99 | Relays' CPU | k6 |
+|---|---|---|---|---|
+| 5,000 (2,494 and 2,506 per relay) | 62 / 197 / **240 ms** (target 250: met) | 95 ms | 43–45% of a vCPU each, 52% at most (CloudWatch) | saturated: 96,000 messages a second, 28 GB in 14 minutes; viewer fan-out p95 6.5 s, 1,065 drops |
+
+The relays measure until each write returns, and a viewer that reads late makes that write return late, so with k6 behind the p99 is pessimistic. The relays themselves had half their CPU spare.
 
 
 ## 7. Data scale (task 6.6)

@@ -43,17 +43,29 @@ otel-lgtm runs without a container memory limit, so when the Docker VM runs out 
 
 Flink's reporter sends counters as deltas (the change since its last report), which Prometheus drops. The services' metrics pipeline turns them into cumulative sums with the collector's `delta_to_cumulative` processor (`memory-limiter.yaml`); every other service's metrics are cumulative already and pass through unchanged. The reporter sets no resource attributes beyond `service.name` and `service.version`, so the same pipeline adds `deployment.environment` to the analytics series that lack it, from otel-lgtm's `DEPLOYMENT_ENVIRONMENT` (local or aws). Flink names a metric after its scope, so the job's counters reach Prometheus as `flink_taskmanager_job_task_operator_..._analytics_*`; `make lint s=observability` checks them under their `analytics.*` names.
 
-Health checks and the Vite dev-server assets are not traced, except in marketplace: the Java agent has no simple path exclusion, so its container health check produces a small trace every few seconds until tail sampling arrives (Stage 6). Browser telemetry is below. `make telemetry-check` proves the pipeline end to end: a request with a known trace id must show up in Tempo (gateway and auth spans) and in Loki (an auth log line with that `trace_id`), and every service must export metrics. CI runs it in `stack.yml`.
+Health checks and the Vite dev-server assets are not traced, except in marketplace: the Java agent has no simple path exclusion, so its container health check produces a small trace every few seconds, which tail sampling drops (section 4). Browser telemetry is below. `make telemetry-check` proves the pipeline end to end: a request with a known trace id must show up in Tempo (gateway and auth spans) and in Loki (an auth log line with that `trace_id`), every service must export metrics, and tail sampling must have dropped health-check traces. Its trace id starts with `5ca1ab1e`, which tail sampling always keeps. CI runs it in `stack.yml`. `make lint s=observability` also validates the collector overlays (`scripts/otelcol-validate.sh`, the contrib collector over a stand-in for otel-lgtm's own config in `otelcol/testdata/`): an invalid overlay stops otel-lgtm's collector, and with it every signal.
 
 ### Browser telemetry (task 5.4)
 
-The web app reports real users' Core Web Vitals and the room's WebSocket round trip as OpenTelemetry metrics. Errors and fetch spans are Stage 6.
+The web app reports real users' Core Web Vitals and the room's WebSocket round trip as OpenTelemetry metrics, and, since task 6.9, its uncaught errors and API calls as spans.
 
 - `web/src/rum.ts` loads with the app and is tiny. It names the page (`lobby`, `room`, `gallery`, `market`, `my-drawings`, `wallet`, `developer`, `moderate`, `leaderboard`, else `other`: a route, never an id) and queues up to 50 round trips. After the page's load event it imports `web/src/telemetry.ts`: the OpenTelemetry metrics SDK and `web-vitals`, 28 KB gzipped, so measuring the page doesn't slow its first paint.
 - Each page load is a short-lived process, so it exports **deltas**, every 60 s and when the page is hidden (`visibilitychange`, `pagehide`; the exporter uses `sendBeacon`, which outlives the page). The vitals are final only then.
 - The browser posts to `/otlp/v1/metrics` on the gateway: POST only, 64 KB at most, 2 requests a second per address with a burst of 10, no access log or span. The gateway forwards it to a receiver of its own on the collector (`otlp/browser`, port 4319; locally `otel-lgtm:4319`, in AWS `data.doodle.internal:4319`, open only to the gateway's security group), so nothing a browser sends reaches the services' pipelines.
 - Anyone can post to a public endpoint, so the browser pipeline (`infra/observability/otelcol/browser.yaml`, merged over otel-lgtm's config like `memory-limiter.yaml`) keeps exactly what the web app sends: the four metric names, histograms only, the web app's own bucket bounds; resource attributes reduced to `service.name=web`, one `service.instance.id=browser` and `deployment.environment` (`local`, `aws`, else `unknown`); one scope; fixed units; no exemplars; and on each vital's point only `page`, from the list above or else `other` (`web.ws.rtt` has no attributes). A metric or point that breaks a rule is dropped, a value outside a list is replaced, so a client can't create new series.
 - `delta_to_cumulative` then adds every browser's deltas into one cumulative series per metric and page, as Prometheus expects (at most 100 streams; one that's idle for 10 minutes is forgotten).
+- **Errors and fetch spans** (task 6.9, `web/src/tracing.ts`, loaded with the metrics, 40 KB gzipped for both):
+  - one span per API call, named `fetch <METHOD> <route>`: the path with ids replaced by `{id}` and no query string, with the method and status;
+  - an `error` span for each uncaught error or unhandled rejection (the type and a message cut to 200 characters, the page).
+  - They post to `/otlp/v1/traces` with the same gateway limits as the metrics, to the same receiver.
+  - **No trace context crosses to the API:** no propagator is installed, so the browser's spans are traces of their own. Anyone can post to the endpoint, so a client must never choose the backend's trace ids or sampling.
+  - **The collector's `traces/browser` pipeline** keeps only those span names and attributes, resets the resource and scope as for metrics and drops events. It also replaces a client's identity fields, so a forged span can't join a backend trace:
+    - the trace id becomes a hash of the client's;
+    - the parent, trace state and status message are cleared;
+    - the kind is fixed;
+    - the status is decided here: an `error` span, a failed fetch or a 5xx.
+  - It has a sampler of its own: every error, then 10%. There's no latency rule, since a browser picks its own timestamps.
+  - Links can't be removed with OTTL in this collector version; they are harmless once ids are re-keyed.
 - Lighthouse is the lab-side check: `make lighthouse` (`scripts/lighthouse.sh`, `web/lighthouserc.json`), against the production image locally or the AWS stack with `GATEWAY`. It isn't a CI gate; its numbers are in `docs/performance.md`.
 
 ## 2. Logging
@@ -242,7 +254,13 @@ The gateway (Nginx) exports traces but no metrics, so the overview shows the ser
 - Sampling:
   - Keep every trace for purchases, Stripe webhooks and rewards.
   - Sample game traffic. Trace rounds and room lifecycle events, not individual strokes. A room commits every step (each stroke and guess) to Redis from its actor, outside any trace, so the game server's default sampler (`internal/telemetry/sampler.go`) drops a Redis client span that has no parent; Redis calls inside a trace (a join's ticket redeem, a takeover's reads) are still traced. The lobby uses the same sampler: its registry expiry and the reassigner's scan read Redis outside any trace every few seconds, and most of its traces were a single Redis `get`. Traced, those commits were one trace per stroke, about 97% of all spans at 80 rooms, and Tempo ran the Docker VM out of memory. Neither service's Redis spans carry `db.statement`: a commit's arguments are the room's events and snapshot, a redeem's the join ticket.
-  - Stage 6: tail sampling in the collector keeps every trace that errored or was slow.
+  - **Tail sampling** (task 6.9, `infra/observability/otelcol/tail-sampling.yaml`): the collector waits 10 s for a trace's spans, then decides once for the whole trace. Its policies:
+    - drop health checks;
+    - keep every trace with an error, every trace slower than 500 ms, and every trace with a money span (`market.purchase`, `market.stripe.webhook`, `market.reward`, tips, drops, checkout);
+    - keep synthetic checks (trace ids starting `5ca1ab1e`);
+    - keep 10% of the rest.
+  - The SDKs' head samplers still decide first, so the collector only ever removes.
+  - The collector's own `otelcol_processor_tail_sampling_*` counters show each policy's decisions. Measured on the dev box: about 11% of traces kept.
 
 ## 5. Alerting
 
@@ -323,7 +341,7 @@ Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.dupli
 ## 6. Release monitoring
 
 - `service.version` on every signal lets dashboards compare the old and new versions during a rollout.
-- CI adds a deploy marker (a Grafana annotation) for every release.
+- Every deploy draws a marker on every dashboard (task 6.9): a Grafana annotation tagged `deploy` with the version. `make up` posts one locally (`scripts/deploy-marker.sh`, the commit, `-dirty` for local changes), and `aws-up` posts one in AWS from the data host, where Grafana listens. It's not posted from CI, because nothing deploys from CI.
 - During a rolling deploy of game servers, watch `game.reconnects`. A spike means connections aren't being drained properly.
 - Automatic rollback is a later improvement.
 
@@ -332,7 +350,7 @@ Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.dupli
 - Stage 1: the stack runs, every service exports traces, metrics and logs over OTLP, and logs carry `trace_id` and `span_id` (task 1.5).
 - Stages 2–4: a task isn't done until its metrics from section 3 exist.
 - Stage 5: dashboards, alert rules, runbooks and the Discord contact point (task 5.1), the AWS budget alarm (task 5.2), browser telemetry and Lighthouse (task 5.4).
-- Stage 6: SLOs, tail sampling, deploy markers. The kill test doubles as a fire drill: the right alert must fire, and its runbook must fix the problem.
+- Stage 6 (task 6.9): SLOs (section 8), tail sampling (section 4), deploy markers (section 6), the browser's errors and fetch spans, and the fire drill (`docs/fire-drill.md`): the right alert must fire, and its runbook must fix the problem.
 
 ## 8. SLOs
 
