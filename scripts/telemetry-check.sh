@@ -78,7 +78,7 @@ print(" ".join(sorted(r["metric"].get("service_name", "") for r in data["data"][
 # every few seconds).
 dropped_health_checks() {
   curl -s --max-time 5 -G "$(proxy prometheus)/api/v1/query" --data-urlencode \
-    'query=sum(otelcol_processor_tail_sampling_count_traces_sampled{policy="health-checks", sampled="false"})' |
+    'query=sum(otelcol_processor_tail_sampling_count_traces_sampled_total{policy="health-checks", decision="dropped"})' |
     python3 -c '
 import json, sys
 try:
@@ -123,7 +123,7 @@ report "$logs_ok" "Loki has auth log lines with trace_id $trace_id" \
 report "$metrics_ok" "Prometheus: all ${#SERVICES[@]} services export metrics; HTTP metrics present" \
   "Prometheus: missing target_info for: ${missing[*]:-none}; HTTP metrics from: ${http:-none}"
 report "$sampling_ok" "Tail sampling drops health-check traces (and kept the checked trace)" \
-  "Tail sampling: no health-check trace dropped yet (otelcol_processor_tail_sampling_count_traces_sampled)"
+  "Tail sampling: no health-check trace dropped yet (otelcol_processor_tail_sampling_count_traces_sampled_total, decision dropped)"
 
 if ((logs_ok == 0)); then
   # Diagnostics: is Loki answering, and does it have any auth lines at all?
