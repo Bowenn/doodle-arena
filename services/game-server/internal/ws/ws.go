@@ -67,6 +67,7 @@ type Handler struct {
 	connections metric.Int64UpDownCounter
 	slow        metric.Int64Counter
 	sendLag     metric.Float64Histogram
+	frames      *frameCounters
 	tracer      trace.Tracer
 
 	base   context.Context
@@ -101,8 +102,50 @@ func NewHandler(cfg Config) (*Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	frames, err := newFrameCounters(cfg.Meter)
+	if err != nil {
+		return nil, err
+	}
 	base, cancel := context.WithCancel(context.Background())
-	return &Handler{cfg: cfg, connections: conns, slow: slow, sendLag: sendLag, tracer: otel.Tracer("game-server"), base: base, cancel: cancel}, nil
+	return &Handler{cfg: cfg, connections: conns, slow: slow, sendLag: sendLag, frames: frames,
+		tracer: otel.Tracer("game-server"), base: base, cancel: cancel}, nil
+}
+
+// frameCounters count a player socket's frames and bytes by direction (in, out), format (json,
+// pb) and type (stroke, other): task 6.4's throughput, per format (ADR 0025).
+type frameCounters struct {
+	frames metric.Int64Counter
+	bytes  metric.Int64Counter
+}
+
+func newFrameCounters(m metric.Meter) (*frameCounters, error) {
+	frames, err := m.Int64Counter("game.ws.frames",
+		metric.WithDescription("WebSocket frames on player sockets, by direction, format and type"), metric.WithUnit("{frame}"))
+	if err != nil {
+		return nil, err
+	}
+	bytes, err := m.Int64Counter("game.ws.bytes",
+		metric.WithDescription("WebSocket payload bytes on player sockets, by direction, format and type"), metric.WithUnit("By"))
+	if err != nil {
+		return nil, err
+	}
+	return &frameCounters{frames: frames, bytes: bytes}, nil
+}
+
+func (f *frameCounters) add(direction string, binary, stroke bool, n int) {
+	if f == nil {
+		return
+	}
+	format, typ := "json", "other"
+	if binary {
+		format = "pb"
+	}
+	if stroke {
+		typ = "stroke"
+	}
+	attrs := metric.WithAttributes(attribute.String("direction", direction), attribute.String("format", format), attribute.String("type", typ))
+	f.frames.Add(context.Background(), 1, attrs)
+	f.bytes.Add(context.Background(), int64(n), attrs)
 }
 
 // Shutdown stops accepting work and waits for every socket to finish (rooms close theirs
@@ -145,6 +188,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// reject every browser; the allowed origins are configured instead.
 		OriginPatterns:  h.cfg.Origins,
 		CompressionMode: websocket.CompressionDisabled,
+		// A client that asks for it sends and gets stroke batches as binary frames (ADR 0025).
+		Subprotocols: []string{protocol.StrokesSubprotocol},
 	})
 	if err != nil {
 		return // Accept has written the HTTP error (for example 403 for a foreign origin)
@@ -216,6 +261,9 @@ func (h *Handler) hello(ctx context.Context, c *websocket.Conn, roomID string, l
 	}, func(lag time.Duration, _ time.Time) {
 		h.sendLag.Record(context.Background(), float64(lag)/float64(time.Millisecond))
 	})
+	// Set before the room can send anything; the writer reads them after a queued message.
+	pc.binary = c.Subprotocol() == protocol.StrokesSubprotocol
+	pc.frames = h.frames
 	switch err := rm.Join(ctx, pc, t.Name, hello.LastSeq); {
 	case errors.Is(err, room.ErrRoomFull):
 		pc.closeWith(protocol.CloseRoomFull, "room is full")
@@ -267,7 +315,8 @@ func (h *Handler) readLoop(ctx context.Context, c *websocket.Conn, pc *Conn, rm 
 		if err != nil {
 			return // closed by the client, by us, idle, or too big (1009)
 		}
-		if typ != websocket.MessageText {
+		binary := typ == websocket.MessageBinary
+		if binary && !pc.binary {
 			pc.closeWith(closeUnsupported, "text messages only")
 			return
 		}
@@ -276,7 +325,14 @@ func (h *Handler) readLoop(ctx context.Context, c *websocket.Conn, pc *Conn, rm 
 			pc.closeWith(closePolicy, "too many messages")
 			return
 		}
-		msg, err := protocol.DecodeClient(data)
+		var msg protocol.ClientMsg
+		if binary {
+			msg, err = protocol.DecodeStrokeFrame(data)
+		} else {
+			msg, err = protocol.DecodeClient(data)
+		}
+		_, stroke := msg.(protocol.StrokeBatch)
+		h.frames.add("in", binary, stroke, len(data))
 		if err != nil {
 			pc.Send(protocol.Marshal("error", protocol.ErrorData{Code: "bad_request", Message: err.Error()}))
 			continue
@@ -308,6 +364,8 @@ type Conn struct {
 	code       websocket.StatusCode
 	reason     string
 	writerDone chan struct{}
+	binary     bool           // negotiated protocol.StrokesSubprotocol (ADR 0025)
+	frames     *frameCounters // nil: not counted (relays' viewer sockets)
 }
 
 // outMsg is a queued message, when it was queued and, for a relay, when its event was
@@ -316,6 +374,8 @@ type outMsg struct {
 	b      []byte
 	queued time.Time
 	origin time.Time
+	binary bool // a binary frame (a stroke batch on a socket that negotiated it)
+	stroke bool
 }
 
 // NewConn starts a socket's writer. onSlow runs when the socket is closed for a full queue,
@@ -337,9 +397,25 @@ func (pc *Conn) Send(b []byte) { pc.SendAt(b, time.Time{}) }
 // SendAt queues like Send a message whose event was committed at origin: a relay measures its
 // broadcast latency from there (ADR 0017).
 func (pc *Conn) SendAt(b []byte, origin time.Time) {
+	pc.queue(outMsg{b: b, queued: time.Now(), origin: origin})
+}
+
+// BinaryStrokes implements room.StrokeConn.
+func (pc *Conn) BinaryStrokes() bool { return pc.binary }
+
+// SendStroke implements room.StrokeConn: the binary frame if this socket negotiated it.
+func (pc *Conn) SendStroke(json, bin []byte) {
+	if pc.binary && bin != nil {
+		pc.queue(outMsg{b: bin, queued: time.Now(), binary: true, stroke: true})
+		return
+	}
+	pc.queue(outMsg{b: json, queued: time.Now(), stroke: true})
+}
+
+func (pc *Conn) queue(m outMsg) {
 	select {
 	case <-pc.ctx.Done():
-	case pc.out <- outMsg{b: b, queued: time.Now(), origin: origin}:
+	case pc.out <- m:
 	default:
 		pc.slowClose()
 	}
@@ -393,7 +469,11 @@ func (pc *Conn) writer() {
 			// Not derived from pc.ctx: if a write's context is cancelled, the library drops
 			// the connection without a close frame, and the client would never see the code.
 			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-			err := pc.ws.Write(ctx, websocket.MessageText, m.b)
+			typ := websocket.MessageText
+			if m.binary {
+				typ = websocket.MessageBinary
+			}
+			err := pc.ws.Write(ctx, typ, m.b)
 			cancel()
 			switch {
 			case errors.Is(err, context.DeadlineExceeded):
@@ -404,6 +484,7 @@ func (pc *Conn) writer() {
 				// The wait in the queue (writers not scheduled, or behind a slow write) plus
 				// the write itself.
 				pc.onSent(time.Since(m.queued), m.origin)
+				pc.frames.add("out", m.binary, m.stroke, len(m.b))
 			}
 		case <-pc.ctx.Done():
 			// After a shutdown the base context ends first: the code stays "going away".

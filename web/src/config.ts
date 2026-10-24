@@ -17,3 +17,15 @@ export function strokeBatchMs(search: string = window.location.search): number {
   }
   return DEFAULT_STROKE_BATCH_MS
 }
+
+/** The stroke wire format (ADR 0025): 'pb' asks the game server for binary stroke frames
+ * (subprotocol doodle.strokes.pb); 'json' keeps every message JSON. VITE_STROKE_WIRE sets the
+ * default for a deployment; ?wire=pb or ?wire=json in the page URL overrides it. */
+export function strokeWire(search: string = window.location.search): 'json' | 'pb' {
+  const fromUrl = new URLSearchParams(search).get('wire')
+  const fromEnv = import.meta.env.VITE_STROKE_WIRE as string | undefined
+  for (const raw of [fromUrl, fromEnv]) {
+    if (raw === 'json' || raw === 'pb') return raw
+  }
+  return 'json'
+}

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	gamev1 "github.com/Bowenn/doodle-arena/proto/gen/go/doodle/game/v1"
 	"github.com/Bowenn/doodle-arena/services/game-server/internal/protocol"
 	"github.com/Bowenn/doodle-arena/services/game-server/internal/room"
 	"github.com/Bowenn/doodle-arena/services/game-server/internal/ticket"
@@ -24,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	"google.golang.org/protobuf/proto"
 )
 
 type roomTable map[string]*room.Room
@@ -545,4 +547,44 @@ func BenchmarkSendLagRecord(b *testing.B) {
 			h.sendLag.Record(context.Background(), float64(time.Since(queued))/float64(time.Millisecond))
 		}
 	})
+}
+
+func TestTheStrokesSubprotocolAllowsBinaryStrokeFramesOnly(t *testing.T) {
+	e := newEnv(t, 8, time.Second)
+	c := e.dial("/ws/gs-1/rooms/r1", &websocket.DialOptions{Subprotocols: []string{protocol.StrokesSubprotocol}})
+	if got := c.Subprotocol(); got != protocol.StrokesSubprotocol {
+		t.Fatalf("subprotocol = %q", got)
+	}
+	write(t, c, "hello", map[string]any{"ticket": e.sign("u1", "r1", "j1")})
+	next(t, c, "welcome")
+
+	// A binary frame that isn't a stroke batch is a bad request, like bad JSON, not a close.
+	if err := c.Write(t.Context(), websocket.MessageBinary, []byte{1, 2, 3}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(next(t, c, "error")); !strings.Contains(got, "bad_request") {
+		t.Fatalf("garbage frame: %s", got)
+	}
+	// A valid one reaches the room, which refuses it outside a round, as it would the JSON form.
+	b := protocol.EncodeStrokeEvent(1, "u1", protocol.StrokeBatch{}) // an event frame: clients may not send it
+	if err := c.Write(t.Context(), websocket.MessageBinary, b); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(next(t, c, "error")); !strings.Contains(got, "bad_request") {
+		t.Fatalf("event frame from a client: %s", got)
+	}
+	in, err := proto.Marshal(&gamev1.StrokeFrame{Frame: &gamev1.StrokeFrame_Batch{Batch: &gamev1.StrokeBatchIn{
+		StrokeId: "s1", Points: []uint32{1, 2, 0}, Color: "#000000", Width: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Write(t.Context(), websocket.MessageBinary, in); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(next(t, c, "error")); !strings.Contains(got, "not_your_turn") {
+		t.Fatalf("stroke outside a round: %s", got)
+	}
+	// Text still works on the same socket.
+	write(t, c, "ping", map[string]any{"t": 7})
+	next(t, c, "pong")
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { strokeBatchMs } from '../config.ts'
+import { strokeBatchMs, strokeWire } from '../config.ts'
 import type { StrokeBatch } from './protocol.ts'
 import { newStrokeId, normalize, StrokeBatcher } from './strokes.ts'
 
@@ -110,5 +110,14 @@ describe('strokeBatchMs', () => {
     expect(strokeBatchMs('?batch_ms=1')).toBe(10)
     expect(strokeBatchMs('?batch_ms=99999')).toBe(1000)
     expect(strokeBatchMs('?batch_ms=abc')).toBe(50)
+  })
+})
+
+describe('strokeWire', () => {
+  it('defaults to JSON and accepts ?wire=pb or ?wire=json', () => {
+    expect(strokeWire('')).toBe('json')
+    expect(strokeWire('?wire=pb')).toBe('pb')
+    expect(strokeWire('?wire=json')).toBe('json')
+    expect(strokeWire('?wire=xml')).toBe('json')
   })
 })

@@ -98,6 +98,9 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `game.reconnects` | Counter | `result` = resumed (missed events replayed), snapshot (a full `welcome`), failed (a join with `last_seq` that the room refused or never reached, for example a full room or one that just stopped) | game-server |
 | `game.room.takeovers` | Counter | – (rooms this server restored from another owner's state) | game-server |
 | `game.ws.slow_client_disconnects` | Counter | – | game-server |
+| `game.ws.frames` | Counter | `direction` = in, out; `format` = json, pb (binary stroke frames on sockets that negotiated `doodle.strokes.pb`, ADR 0025); `type` = stroke, other (player sockets only, not relays' viewers; task 6.4) | game-server |
+| `game.ws.bytes` | Counter (By) | The same attributes: payload bytes | game-server |
+| `game.encode.duration` | Histogram (µs) | `format` = json, pb (marshalling one stroke_batch event; the binary form only when a socket in the room takes it) | game-server |
 | `game.events.published` | Counter | `topic`, `result` = success, failed (retried until the 2-minute deadline), dropped (queue full, or shutting down). A failed or dropped event stays in its room's outbox and is queued again | game-server |
 | `game.outbox.pending` | Gauge | – (outbox entries older than a minute in this server's rooms: finished rounds and matches not yet in Kafka; ADR 0009) | game-server |
 | `game.outbox.requeued` | Counter | `reason` = takeover (left by the previous owner), stale (this server's, failed or dropped) | game-server |

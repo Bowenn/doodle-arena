@@ -7,14 +7,24 @@ import exec from 'k6/execution'
 import { WebSocket } from 'k6/websockets'
 import { setInterval, setTimeout, clearInterval, clearTimeout } from 'k6/timers'
 import { Counter, Trend } from 'k6/metrics'
+import { STROKES_SUBPROTOCOL, decodeStrokeEvent, encodeStrokeBatch } from './strokeCodec.js'
 
 export const GATEWAY = __ENV.GATEWAY || 'http://localhost:8080'
 export const WS_BASE = GATEWAY.replace(/^http/, 'ws')
 export const PLAYERS = 4
 // A dropped socket retries for about as long as the web app does.
 const RESUME_GIVE_UP_MS = 60000
+// Task 6.4 (ADR 0025): how often drawers send a batch, how many points a second they draw (a
+// steady pointer, so a shorter interval sends smaller batches, not more ink), and the wire
+// format: json, or pb for binary stroke frames (subprotocol doodle.strokes.pb).
+const BATCH_MS = Number(__ENV.BATCH_MS || 50)
+const POINTS_PER_SECOND = Number(__ENV.POINTS_PER_SECOND || 160)
+const WIRE = __ENV.WIRE === 'pb' ? 'pb' : 'json'
 
 const strokeFanout = new Trend('stroke_fanout', true)
+const inkDelay = new Trend('ink_delay', true)
+const bytesSent = new Counter('ws_bytes_sent')
+const bytesReceived = new Counter('ws_bytes_received')
 const guessResult = new Trend('guess_result', true)
 const wsRtt = new Trend('ws_rtt', true)
 const joinTime = new Trend('join', true)
@@ -39,7 +49,21 @@ export function api(method, path, token, body) {
   })
 }
 
-export const send = (s, type, data) => s.ws && s.ws.readyState === 1 && s.ws.send(JSON.stringify({ type, data }))
+export const send = (s, type, data) => {
+  if (!s.ws || s.ws.readyState !== 1) return false
+  const stroke = type === 'stroke_batch'
+  if (stroke && WIRE === 'pb') {
+    // The game server always accepts the subprotocol it was asked for.
+    const frame = encodeStrokeBatch(data)
+    bytesSent.add(frame.byteLength, { kind: 'stroke' })
+    s.ws.send(frame)
+    return true
+  }
+  const text = JSON.stringify({ type, data })
+  bytesSent.add(text.length, { kind: stroke ? 'stroke' : 'other' })
+  s.ws.send(text)
+  return true
+}
 
 /** Plays room (the lobby's create response) with four players ({id, token}, the host first)
  * for seconds, then closes every socket. */
@@ -78,15 +102,16 @@ export function playRoom(room, players, seconds) {
   }
 
   function startDrawing(roundNo) {
-    // Both drawers send a stroke batch every 50 ms until the round ends. Each round gets its own
+    // Both drawers send a stroke batch every BATCH_MS until the round ends. Each round gets its own
     // token, so a drawing loop from an earlier round (round numbers repeat every match, and a
     // takeover can replay a round's start) stops instead of drawing twice as fast.
     const token = ++state.drawToken
     for (const s of sockets.filter((x) => state.drawers.includes(x.player.id))) {
       let points = 0
+      let owed = 0 // points drawn since the last batch, at POINTS_PER_SECOND
       let strokeStarted = 0
       let strokeId = ''
-      const id = every(50, () => {
+      const id = every(BATCH_MS, () => {
         if (state.drawToken !== token || state.round !== roundNo || state.closing) return clearInterval(id)
         const now = Date.now()
         if (points === 0) {
@@ -95,9 +120,15 @@ export function playRoom(room, players, seconds) {
           strokeId = `t${now}_${exec.vu.idInTest}_${strokeSeq}`
           strokeStarted = now
         }
+        owed += (POINTS_PER_SECOND * BATCH_MS) / 1000
+        const n = Math.floor(owed)
+        if (n < 1) return
+        owed -= n
+        // The points were drawn evenly over the last interval; t_ms is each one's own time.
         const batch = []
-        for (let i = 0; i < 8; i++) {
-          batch.push([Math.floor(Math.random() * 10000), Math.floor(Math.random() * 10000), now - strokeStarted])
+        for (let i = 0; i < n; i++) {
+          const t = Math.max(0, now - strokeStarted - Math.round(((n - 1 - i) * BATCH_MS) / n))
+          batch.push([Math.floor(Math.random() * 10000), Math.floor(Math.random() * 10000), t])
         }
         points += batch.length
         const done = points >= 160
@@ -131,7 +162,10 @@ export function playRoom(room, players, seconds) {
       const m = /^t(\d+)_/.exec(ev.data.stroke_id)
       if (m) {
         const pts = ev.data.points
-        strokeFanout.add(Date.now() - (Number(m[1]) + pts[pts.length - 1][2]))
+        const start = Number(m[1])
+        strokeFanout.add(Date.now() - (start + pts[pts.length - 1][2]))
+        // The batch's oldest point: how long ink waited, including its wait in the batch.
+        inkDelay.add(Date.now() - (start + pts[0][2]))
       }
     }
     if (ev.type === 'correct_guess' && ev.data.user_id === s.player.id) s.guessedRound = state.round
@@ -215,14 +249,23 @@ export function playRoom(room, players, seconds) {
 
   function open(s, ticket) {
     const opened = Date.now()
-    const ws = new WebSocket(WS_BASE + ticket.ws_url)
+    const ws = WIRE === 'pb' ? new WebSocket(WS_BASE + ticket.ws_url, [STROKES_SUBPROTOCOL]) : new WebSocket(WS_BASE + ticket.ws_url)
+    ws.binaryType = 'arraybuffer'
     s.ws = ws
     // On a resume the server replays the missed events, then sends resumed (or a fresh welcome).
     s.replaying = s.connectedOnce
     ws.onopen = () => send(s, 'hello', { ticket: ticket.ticket, last_seq: s.lastSeq })
     ws.onmessage = (e) => {
       if (s.ws !== ws) return
+      if (typeof e.data !== 'string') {
+        // A binary frame is a stroke_batch event (ADR 0025).
+        bytesReceived.add(e.data.byteLength, { kind: 'stroke' })
+        const ev = decodeStrokeEvent(e.data)
+        if (ev) onEvent(s, ev)
+        return
+      }
       const msg = JSON.parse(e.data)
+      bytesReceived.add(e.data.length, { kind: msg.type === 'event' && msg.data.type === 'stroke_batch' ? 'stroke' : 'other' })
       if (msg.type === 'welcome' || msg.type === 'resumed') {
         if (msg.type === 'welcome') {
           welcomeTime.add(Date.now() - opened)
