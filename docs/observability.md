@@ -43,17 +43,29 @@ otel-lgtm runs without a container memory limit, so when the Docker VM runs out 
 
 Flink's reporter sends counters as deltas (the change since its last report), which Prometheus drops. The services' metrics pipeline turns them into cumulative sums with the collector's `delta_to_cumulative` processor (`memory-limiter.yaml`); every other service's metrics are cumulative already and pass through unchanged. The reporter sets no resource attributes beyond `service.name` and `service.version`, so the same pipeline adds `deployment.environment` to the analytics series that lack it, from otel-lgtm's `DEPLOYMENT_ENVIRONMENT` (local or aws). Flink names a metric after its scope, so the job's counters reach Prometheus as `flink_taskmanager_job_task_operator_..._analytics_*`; `make lint s=observability` checks them under their `analytics.*` names.
 
-Health checks and the Vite dev-server assets are not traced, except in marketplace: the Java agent has no simple path exclusion, so its container health check produces a small trace every few seconds until tail sampling arrives (Stage 6). Browser telemetry is below. `make telemetry-check` proves the pipeline end to end: a request with a known trace id must show up in Tempo (gateway and auth spans) and in Loki (an auth log line with that `trace_id`), and every service must export metrics. CI runs it in `stack.yml`.
+Health checks and the Vite dev-server assets are not traced, except in marketplace: the Java agent has no simple path exclusion, so its container health check produces a small trace every few seconds, which tail sampling drops (section 4). Browser telemetry is below. `make telemetry-check` proves the pipeline end to end: a request with a known trace id must show up in Tempo (gateway and auth spans) and in Loki (an auth log line with that `trace_id`), every service must export metrics, and tail sampling must have dropped health-check traces. Its trace id starts with `5ca1ab1e`, which tail sampling always keeps. CI runs it in `stack.yml`. `make lint s=observability` also validates the collector overlays (`scripts/otelcol-validate.sh`, the contrib collector over a stand-in for otel-lgtm's own config in `otelcol/testdata/`): an invalid overlay stops otel-lgtm's collector, and with it every signal.
 
 ### Browser telemetry (task 5.4)
 
-The web app reports real users' Core Web Vitals and the room's WebSocket round trip as OpenTelemetry metrics. Errors and fetch spans are Stage 6.
+The web app reports real users' Core Web Vitals and the room's WebSocket round trip as OpenTelemetry metrics, and, since task 6.9, its uncaught errors and API calls as spans.
 
 - `web/src/rum.ts` loads with the app and is tiny. It names the page (`lobby`, `room`, `gallery`, `market`, `my-drawings`, `wallet`, `developer`, `moderate`, `leaderboard`, else `other`: a route, never an id) and queues up to 50 round trips. After the page's load event it imports `web/src/telemetry.ts`: the OpenTelemetry metrics SDK and `web-vitals`, 28 KB gzipped, so measuring the page doesn't slow its first paint.
 - Each page load is a short-lived process, so it exports **deltas**, every 60 s and when the page is hidden (`visibilitychange`, `pagehide`; the exporter uses `sendBeacon`, which outlives the page). The vitals are final only then.
 - The browser posts to `/otlp/v1/metrics` on the gateway: POST only, 64 KB at most, 2 requests a second per address with a burst of 10, no access log or span. The gateway forwards it to a receiver of its own on the collector (`otlp/browser`, port 4319; locally `otel-lgtm:4319`, in AWS `data.doodle.internal:4319`, open only to the gateway's security group), so nothing a browser sends reaches the services' pipelines.
 - Anyone can post to a public endpoint, so the browser pipeline (`infra/observability/otelcol/browser.yaml`, merged over otel-lgtm's config like `memory-limiter.yaml`) keeps exactly what the web app sends: the four metric names, histograms only, the web app's own bucket bounds; resource attributes reduced to `service.name=web`, one `service.instance.id=browser` and `deployment.environment` (`local`, `aws`, else `unknown`); one scope; fixed units; no exemplars; and on each vital's point only `page`, from the list above or else `other` (`web.ws.rtt` has no attributes). A metric or point that breaks a rule is dropped, a value outside a list is replaced, so a client can't create new series.
 - `delta_to_cumulative` then adds every browser's deltas into one cumulative series per metric and page, as Prometheus expects (at most 100 streams; one that's idle for 10 minutes is forgotten).
+- **Errors and fetch spans** (task 6.9, `web/src/tracing.ts`, loaded with the metrics, 40 KB gzipped for both):
+  - one span per API call, named `fetch <METHOD> <route>`: the path with ids replaced by `{id}` and no query string, with the method and status;
+  - an `error` span for each uncaught error or unhandled rejection (the type and a message cut to 200 characters, the page).
+  - They post to `/otlp/v1/traces` with the same gateway limits as the metrics, to the same receiver.
+  - **No trace context crosses to the API:** no propagator is installed, so the browser's spans are traces of their own. Anyone can post to the endpoint, so a client must never choose the backend's trace ids or sampling.
+  - **The collector's `traces/browser` pipeline** keeps only those span names and attributes, resets the resource and scope as for metrics and drops events. It also replaces a client's identity fields, so a forged span can't join a backend trace:
+    - the trace id becomes a hash of the client's;
+    - the parent, trace state and status message are cleared;
+    - the kind is fixed;
+    - the status is decided here: an `error` span, a failed fetch or a 5xx.
+  - It has a sampler of its own: every error, then 10%. There's no latency rule, since a browser picks its own timestamps.
+  - Links can't be removed with OTTL in this collector version; they are harmless once ids are re-keyed.
 - Lighthouse is the lab-side check: `make lighthouse` (`scripts/lighthouse.sh`, `web/lighthouserc.json`), against the production image locally or the AWS stack with `GATEWAY`. It isn't a CI gate; its numbers are in `docs/performance.md`.
 
 ## 2. Logging
@@ -122,7 +134,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `lobby.allocations` | Counter | `result` = success, no_servers, exhausted (every tried server full or draining), error | lobby |
 | `lobby.watches` | Counter | `result` = success, not_live (no such room, or it isn't live), no_relays, error (viewer tickets, ADR 0017) | lobby |
 | `lobby.reassignments` | Counter | `result` = moved, ended (the game server answered NOT_FOUND), failed (retried on the next pass); `reason` = failover (the server's heartbeats stopped, or it no longer reports the room), drain (the server is shutting down and drains, task 5.5) | lobby |
-| `lobby.servers.healthy` | Gauge | – (game servers whose heartbeat arrived in the last 6 s, draining ones included) | lobby |
+| `lobby.servers.healthy` | Gauge | `role` = game, relay (servers whose heartbeat arrived in the last 6 s, draining ones included; relays register too, task 6.9) | lobby |
 | `lobby.leaderboard.matches` | Counter | `result` = applied, duplicate (the match was counted before: a redelivery), skipped (an unset or unknown `oneof` case, or a malformed message) | lobby |
 | `assets.pipeline.duration` | Histogram (ms) | `step` = fetch, render, upload, moderate | assets |
 | `assets.jobs.oldest_age` | Gauge (s) | `queue` | assets (pool process 0 of each worker; from a `sent_at` header on every task message, 0 when the queue is empty; a missing series means no worker is running) |
@@ -242,7 +254,13 @@ The gateway (Nginx) exports traces but no metrics, so the overview shows the ser
 - Sampling:
   - Keep every trace for purchases, Stripe webhooks and rewards.
   - Sample game traffic. Trace rounds and room lifecycle events, not individual strokes. A room commits every step (each stroke and guess) to Redis from its actor, outside any trace, so the game server's default sampler (`internal/telemetry/sampler.go`) drops a Redis client span that has no parent; Redis calls inside a trace (a join's ticket redeem, a takeover's reads) are still traced. The lobby uses the same sampler: its registry expiry and the reassigner's scan read Redis outside any trace every few seconds, and most of its traces were a single Redis `get`. Traced, those commits were one trace per stroke, about 97% of all spans at 80 rooms, and Tempo ran the Docker VM out of memory. Neither service's Redis spans carry `db.statement`: a commit's arguments are the room's events and snapshot, a redeem's the join ticket.
-  - Stage 6: tail sampling in the collector keeps every trace that errored or was slow.
+  - **Tail sampling** (task 6.9, `infra/observability/otelcol/tail-sampling.yaml`): the collector waits 10 s for a trace's spans, then decides once for the whole trace. Its policies:
+    - drop health checks;
+    - keep every trace with an error, every trace slower than 500 ms, and every trace with a money span (`market.purchase`, `market.stripe.webhook`, `market.reward`, tips, drops, checkout);
+    - keep synthetic checks (trace ids starting `5ca1ab1e`);
+    - keep 10% of the rest.
+  - The SDKs' head samplers still decide first, so the collector only ever removes.
+  - The collector's own `otelcol_processor_tail_sampling_*` counters show each policy's decisions. Measured on the dev box: about 11% of traces kept.
 
 ## 5. Alerting
 
@@ -251,6 +269,7 @@ Principles:
 - Alert on what players feel and on broken invariants, not on every possible cause.
 - Every alert links to a runbook in `docs/runbooks/` (use `docs/runbooks/TEMPLATE.md`).
 - Grafana alerting sends alerts to a Discord channel. `critical` means fix now; `warning` means look today.
+- The SLOs and their burn-rate alerts are in section 8.
 
 Starting rules (tune the thresholds after the first load test):
 
@@ -273,7 +292,7 @@ Starting rules (tune the thresholds after the first load test):
 | WebhookQueueStuck | `notifier.queue.oldest_age` above 300 s for 5 minutes (workers stopped or Postgres slow) | warning |
 | StripeSignatureFailures | More than 5 invalid signatures in 10 minutes (a wrong secret or forged requests) | warning |
 | RefreshTokenReuse | More than 3 `auth.refreshes{result=reuse_detected}` in 10 minutes (stolen tokens, or a client that refreshes concurrently) | warning |
-| GameServerDown | `lobby.servers.healthy` below the expected count (2, the local stack's game servers) for 1 minute | critical |
+| GameServerDown | `lobby.servers.healthy{role="game"}` below the expected count (2, the stack's game servers) for 1 minute | critical |
 | KafkaAuthFailures | Every minute for 5 minutes: failed Kafka logins (`kafka.broker.authentication.failures`) or logged ACL denials (the broker's `is Denied` lines in Loki) above 0 (a service missing a credential or a grant, or someone probing; a one-off like CI's `make kafka-acl-check` doesn't last 5 minutes) | warning |
 | KafkaAdminUsed | Any login on the broker's ADMIN listener in 5 minutes (`kafka.broker.authentication.successes{listener=ADMIN}`): `admin`, the super user for humans, used from inside the broker container | warning |
 | WashTradingFlagged | Any `analytics.wash_trades.flagged` in 15 minutes, one alert per `rule` (ADR 0018): accounts passed a drawing round among themselves within 7 days. A signal for a human, not a verdict; each flag's accounts are in the analytics logs and on `analytics.flags.v1` | warning |
@@ -286,6 +305,10 @@ Starting rules (tune the thresholds after the first load test):
 | SearchIndexLagging | Search documents written more than 60 s after their events (p95 of `assets.search.index_lag`), for 10 minutes (ADR 0023) | warning |
 | SearchUnavailable | Searches answered 503 (`assets.search.requests{result="unavailable"}`) for 5 minutes: Elasticsearch can't be reached; the gallery and market still list without search | warning |
 | AssetsCacheDegraded | More than half of the gallery cache's lookups met a Redis error or were skipped after one (`assets.cache.requests{result=~"error|skipped"}`), for 10 minutes: Postgres answers every gallery read (ADR 0024) | warning |
+| SLOAvailabilityFastBurn | API requests failing with a 5xx at 14.4 times the 30-day budget (0.5%) over both 1 h and 5 min, with more than 6 requests a minute (task 6.9): the month's budget would be gone in about two days | critical |
+| SLOAvailabilitySlowBurn | The same at 6 times the budget over both 6 h and 30 min: about five days | warning |
+| SLOLatencyFastBurn | API requests slower than 500 ms at 14.4 times the 30-day budget (1%) over both 1 h and 5 min | critical |
+| SLOLatencySlowBurn | The same at 6 times the budget over both 6 h and 30 min | warning |
 | LedgerPartitionMissing | `market.ledger.default_partition_rows` above 0: postings in a month without a partition (task 6.6), whose partition can't be created while they are there | warning |
 | AwsBudget | Spending above the budget (AWS Budgets, or a CloudWatch billing alarm; billing metrics live in `us-east-1`; task 5.2, not a Grafana rule) | critical |
 
@@ -318,7 +341,7 @@ Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.dupli
 ## 6. Release monitoring
 
 - `service.version` on every signal lets dashboards compare the old and new versions during a rollout.
-- CI adds a deploy marker (a Grafana annotation) for every release.
+- Every deploy draws a marker on every dashboard (task 6.9): a Grafana annotation tagged `deploy` with the version. `make up` posts one locally (`scripts/deploy-marker.sh`, the commit, `-dirty` for local changes), and `aws-up` posts one in AWS from the data host, where Grafana listens. It's not posted from CI, because nothing deploys from CI.
 - During a rolling deploy of game servers, watch `game.reconnects`. A spike means connections aren't being drained properly.
 - Automatic rollback is a later improvement.
 
@@ -327,4 +350,19 @@ Minting a drawing is a `market.mint` span (`drawing.id`, `match.id`, `mint.dupli
 - Stage 1: the stack runs, every service exports traces, metrics and logs over OTLP, and logs carry `trace_id` and `span_id` (task 1.5).
 - Stages 2–4: a task isn't done until its metrics from section 3 exist.
 - Stage 5: dashboards, alert rules, runbooks and the Discord contact point (task 5.1), the AWS budget alarm (task 5.2), browser telemetry and Lighthouse (task 5.4).
-- Stage 6: SLOs, tail sampling, deploy markers. The kill test doubles as a fire drill: the right alert must fire, and its runbook must fix the problem.
+- Stage 6 (task 6.9): SLOs (section 8), tail sampling (section 4), deploy markers (section 6), the browser's errors and fetch spans, and the fire drill (`docs/fire-drill.md`): the right alert must fire, and its runbook must fix the problem.
+
+## 8. SLOs
+
+Task 6.9. They are on the SLO dashboard (`da-slo`).
+
+| SLO | SLI | Objective (30 days) | Alerts |
+|---|---|---|---|
+| API availability | API requests (the services' own `http.server.request.duration` on `/api` routes; health checks and game sockets aside) answered without a 5xx | 99.5% | SLOAvailabilityFastBurn, SLOAvailabilitySlowBurn |
+| API latency | The same requests answered within 500 ms | 99% | SLOLatencyFastBurn, SLOLatencySlowBurn |
+| Live broadcast | Relay broadcasts (`relay.broadcast.latency`, one per viewer per event) within 250 ms of the owner's commit | 99% | SlowRelayBroadcast |
+
+- **Burn-rate alerts** follow the Google SRE workbook's multi-window, multi-burn-rate pattern. Fast burn (critical) is 14.4 times the budget's rate over both 1 h and 5 min, which spends 2% of the month in an hour. Slow burn (warning) is 6 times over both 6 h and 30 min.
+- **The short window** makes an alert stop soon after the problem does.
+- **The traffic floor:** more than 6 requests a minute, so one 500 on an idle stack isn't an outage.
+- **Retention:** budgets cover what Prometheus keeps: locally, since the stack started.

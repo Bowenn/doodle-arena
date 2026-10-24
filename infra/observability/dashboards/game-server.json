@@ -38,6 +38,23 @@
         "iconColor": "rgba(0, 211, 255, 1)",
         "name": "Annotations & Alerts",
         "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "iconColor": "rgba(255, 152, 48, 1)",
+        "name": "Deploys",
+        "target": {
+          "type": "tags",
+          "tags": [
+            "deploy"
+          ],
+          "matchAny": false,
+          "limit": 100
+        }
       }
     ]
   },
@@ -520,7 +537,7 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Healthy game servers (lobby's view)",
+      "title": "Healthy game servers and relays (lobby's view)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -555,8 +572,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(lobby_servers_healthy)",
-          "legendFormat": "healthy"
+          "expr": "max by (role) (lobby_servers_healthy)",
+          "legendFormat": "{{role}}"
         }
       ],
       "gridPos": {

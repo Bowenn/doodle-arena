@@ -89,8 +89,7 @@ if [[ -n "$running_tag" && -n "$running_tag_1" && ( "$running_tag" != "$IMAGE_TA
     -var "$(held game-server-1="$running_tag_1" game-server-2="$running_tag")" -auto-approve
   others=()
   while IFS= read -r s; do [[ "$s" == game-server-* ]] || others+=("$s"); done < <(terraform -chdir="$TF/stack" output -json services | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)))')
-  aws ecs wait services-stable --cluster "$cluster" --services "${others[@]:0:10}"
-  ((${#others[@]} > 10)) && aws ecs wait services-stable --cluster "$cluster" --services "${others[@]:10}"
+  wait_stable "${others[@]}"
   echo "    then game-server-1, which drains into game-server-2"
   terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true \
     -var "$(held game-server-2="$running_tag")" -auto-approve
@@ -98,16 +97,14 @@ if [[ -n "$running_tag" && -n "$running_tag_1" && ( "$running_tag" != "$IMAGE_TA
   echo "    then game-server-2, which drains into the new game-server-1"
 fi
 terraform -chdir="$TF/stack" apply "${TF_STACK_VARS[@]}" -var running=true -auto-approve
-# services-stable takes at most 10 services per call.
 services=()
 while IFS= read -r s; do services+=("$s"); done < <(terraform -chdir="$TF/stack" output -json services | python3 -c 'import json,sys; print("\n".join(json.load(sys.stdin)))')
-aws ecs wait services-stable --cluster "$cluster" --services "${services[@]:0:10}"
-aws ecs wait services-stable --cluster "$cluster" --services "${services[@]:10}"
+wait_stable "${services[@]}"
 # ECS calls a service stable while a container is still in its health check's start period (the
 # marketplace's JVM takes about a minute): wait until every service answers through the gateway.
 url="$(tf_output url)"
 for target in healthz healthz/auth healthz/lobby healthz/game-server-1 healthz/game-server-2 healthz/assets \
-  healthz/ai healthz/marketplace healthz/notifier healthz/web; do
+  healthz/ai healthz/marketplace healthz/notifier healthz/web healthz/relay-1 healthz/relay-2; do
   until [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url/$target")" == 200 ]]; do
     if ((SECONDS - start > 1800)); then
       echo "$url/$target still isn't healthy; see CloudWatch Logs, /doodle-arena/ecs" >&2
@@ -116,5 +113,10 @@ for target in healthz healthz/auth healthz/lobby healthz/game-server-1 healthz/g
     sleep 5
   done
 done
+# A deploy marker on every dashboard (task 6.9), posted on the data host, where Grafana listens.
+host_run 60 "cd /opt/doodle && GRAFANA_PASSWORD=\$(grep '^GRAFANA_ADMIN_PASSWORD=' .env | cut -d= -f2-) && \
+  curl -s -o /dev/null -w '%{http_code}' -u \"admin:\$GRAFANA_PASSWORD\" -X POST -H 'Content-Type: application/json' \
+  -d '{\"tags\": [\"deploy\", \"aws\"], \"text\": \"Deployed $IMAGE_TAG (aws)\"}' http://127.0.0.1:3000/api/annotations" >/dev/null ||
+  echo "Deploy marker not posted (the stack is up)" >&2
 echo "Up in $((SECONDS - start)) s: $url"
 echo "Check it: DOMAIN=$DOMAIN make aws-check. Tear it down after the session: DOMAIN=$DOMAIN make aws-down"

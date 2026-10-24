@@ -338,9 +338,10 @@ services:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: analytics-jobmanager
         parallelism.default: 1
-        # Checkpoints every 30 s to analytics' own bucket (ADR 0018), through the S3 plugin.
+        # Checkpoints every 30 s to analytics' own bucket (ADR 0018), through the Presto S3 plugin
+        # (s3p://, with SeaweedFS's keys; AWS uses s3a:// and the task role, task 6.9).
         execution.checkpointing.interval: 30s
-        execution.checkpointing.dir: s3://analytics-checkpoints/checkpoints
+        execution.checkpointing.dir: s3p://analytics-checkpoints/checkpoints
         state.backend.type: hashmap
         s3.endpoint: http://seaweedfs:8333
         s3.path.style.access: true
@@ -389,7 +390,7 @@ services:
         parallelism.default: 1
         # Checkpoints every 30 s to analytics' own bucket (ADR 0018), through the S3 plugin.
         execution.checkpointing.interval: 30s
-        execution.checkpointing.dir: s3://analytics-checkpoints/checkpoints
+        execution.checkpointing.dir: s3p://analytics-checkpoints/checkpoints
         state.backend.type: hashmap
         s3.endpoint: http://seaweedfs:8333
         s3.path.style.access: true
@@ -1174,7 +1175,7 @@ services:
       DEPLOYMENT_ENVIRONMENT: local
       DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:-http://webhook-receiver:9000/hooks/alerts}
       # The collector's memory limit, merged over the image's config (the file says why).
-      OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml --config=file:/etc/doodle-arena/otelcol-browser.yaml
+      OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml --config=file:/etc/doodle-arena/otelcol-tail-sampling.yaml --config=file:/etc/doodle-arena/otelcol-browser.yaml
     # The image's own check (every backend ready, Loki included), run more often than its 30 s
     # default: every service waits for it, so records never queue up behind a starting Loki.
     # After startup the image's check skips a backend that refuses connections, so a Tempo or
@@ -1198,6 +1199,7 @@ services:
       - ./observability/grafana/alerting/policies.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-policies.yaml:ro
       - ./observability/grafana/alerting/rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-rules.yaml:ro
       - ./observability/otelcol/memory-limiter.yaml:/etc/doodle-arena/otelcol-memory-limiter.yaml:ro
+      - ./observability/otelcol/tail-sampling.yaml:/etc/doodle-arena/otelcol-tail-sampling.yaml:ro
       - ./observability/otelcol/browser.yaml:/etc/doodle-arena/otelcol-browser.yaml:ro
     ports:
       - "127.0.0.1:3000:3000"

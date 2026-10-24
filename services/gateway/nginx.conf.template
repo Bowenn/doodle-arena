@@ -237,6 +237,22 @@ http {
             proxy_pass http://$upstream/v1/metrics;
         }
 
+        # The browser's errors and fetch spans (task 6.9): the same limits as its metrics, to the
+        # same receiver, whose traces pipeline keeps only the web app's span names and attributes.
+        location = /otlp/v1/traces {
+            otel_trace off;
+            otel_trace_context ignore;
+            access_log off;
+            limit_except POST {
+                deny all;
+            }
+            client_max_body_size 64k;
+            limit_req zone=telemetry burst=10 nodelay;
+            include /etc/nginx/proxy_common.conf;
+            set $upstream ${SERVICE_OTLP_BROWSER};
+            proxy_pass http://$upstream/v1/traces;
+        }
+
         # Game WebSockets. Not traced here: a span would last as long as the game. The game
         # server traces the handshake (game.ws.connect) itself.
         location ~ ^/ws/(?<ws_server>[a-z0-9-]+)/rooms/[a-z0-9]+$ {

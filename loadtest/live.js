@@ -32,6 +32,8 @@ import { api, GATEWAY, PLAYERS, playRoom, WS_BASE } from './lib/room.js'
 // Four players, then the viewers' tokens: one per viewer VU (a relay keys viewers by socket, so
 // one user may watch many times, and a short list fits in the environment).
 const TOKENS = JSON.parse(__ENV.TOKENS || '[]')
+// Or TOKENS_0, TOKENS_1, ...: one environment string may not exceed 128 KB on Linux.
+for (let i = 0; __ENV[`TOKENS_${i}`]; i++) TOKENS.push(...JSON.parse(__ENV[`TOKENS_${i}`]))
 const SMOKE = __ENV.PROFILE === 'live-smoke'
 // 2,000 by default: on one laptop k6 shares the CPU with the stack (it needs 2 to 5 cores), and
 // past 2,000 viewers the relays' p99 depends on that contention (49 to 990 ms at 2,500 over four

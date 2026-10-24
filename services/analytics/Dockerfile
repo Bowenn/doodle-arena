@@ -18,8 +18,12 @@ RUN --mount=type=cache,id=gradle-analytics,target=/root/.gradle ./gradlew --no-d
 
 FROM flink:2.2.1-java21
 # Checkpoints go to S3 (SeaweedFS locally): Flink loads its S3 filesystems as plugins.
-RUN mkdir -p /opt/flink/plugins/s3-fs-presto \
-    && cp /opt/flink/opt/flink-s3-fs-presto-2.2.1.jar /opt/flink/plugins/s3-fs-presto/
+# Two of them, chosen by scheme: s3p:// (Presto) with SeaweedFS's keys locally, s3a:// (Hadoop) in
+# AWS, whose default credential chain includes the ECS task role's container credentials
+# (Presto's falls back to EC2's instance profile, which Fargate tasks don't have). Task 6.9.
+RUN mkdir -p /opt/flink/plugins/s3-fs-presto /opt/flink/plugins/s3-fs-hadoop \
+    && cp /opt/flink/opt/flink-s3-fs-presto-2.2.1.jar /opt/flink/plugins/s3-fs-presto/ \
+    && cp /opt/flink/opt/flink-s3-fs-hadoop-2.2.1.jar /opt/flink/plugins/s3-fs-hadoop/
 # The OpenTelemetry Java agent, as in the marketplace and the broker (rule: .claude/rules/java.md):
 # the Kafka clients' spans, the JVM's metrics and the logs over OTLP. Flink's own metrics go out
 # through its OpenTelemetry metric reporter (FLINK_PROPERTIES). Pinned by Maven Central's sha256.

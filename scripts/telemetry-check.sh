@@ -5,6 +5,8 @@
 #   Tempo       the trace exists, with spans from the gateway and auth
 #   Loki        auth logged a line carrying that trace_id
 #   Prometheus  every service exports metrics (target_info), and HTTP server metrics exist
+#   Sampling    the collector's tail sampling dropped health-check traces (task 6.9); the checked
+#               trace itself is marked so it is always kept
 # Run it after `make up`. Export is batched, so it polls for up to TIMEOUT seconds.
 set -uo pipefail
 
@@ -17,7 +19,8 @@ SERVICES=(lobby game-server notifier auth ai assets marketplace)
 # Retried on 429, because right after `make smoke` the gateway's auth rate limit is still
 # draining; each attempt gets a fresh trace id, so the checked trace holds only the real request.
 for _ in $(seq 10); do
-  trace_id="$(openssl rand -hex 16)"
+  # 5ca1ab1e: tail sampling keeps synthetic checks (infra/observability/otelcol/tail-sampling.yaml).
+  trace_id="5ca1ab1e$(openssl rand -hex 12)"
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST -H "Origin: $GATEWAY" \
     -H "traceparent: 00-${trace_id}-$(openssl rand -hex 8)-01" "$GATEWAY/api/auth/refresh")"
   [[ "$code" != 429 ]] && break
@@ -71,8 +74,22 @@ except ValueError:
 print(" ".join(sorted(r["metric"].get("service_name", "") for r in data["data"]["result"])))'
 }
 
+# Traces the tail sampler's health-check policy dropped (the services' healthchecks make some
+# every few seconds).
+dropped_health_checks() {
+  curl -s --max-time 5 -G "$(proxy prometheus)/api/v1/query" --data-urlencode \
+    'query=sum(otelcol_processor_tail_sampling_count_traces_sampled_total{policy="health-checks", decision="dropped"})' |
+    python3 -c '
+import json, sys
+try:
+    r = json.load(sys.stdin)["data"]["result"]
+except (ValueError, KeyError):
+    r = []
+print(int(float(r[0]["value"][1])) if r else 0)'
+}
+
 deadline=$((SECONDS + TIMEOUT))
-trace_ok=0; logs_ok=0; metrics_ok=0
+trace_ok=0; logs_ok=0; metrics_ok=0; sampling_ok=0
 while ((SECONDS < deadline)); do
   if ((trace_ok == 0)); then
     services="$(trace_services)"
@@ -88,7 +105,10 @@ while ((SECONDS < deadline)); do
     http=" $(prom_label_values 'group by (service_name) (http_server_request_duration_seconds_count)') "
     [[ ${#missing[@]} -eq 0 && "$http" == *" auth "* ]] && metrics_ok=1
   fi
-  ((trace_ok && logs_ok && metrics_ok)) && break
+  if ((sampling_ok == 0)); then
+    [[ "$(dropped_health_checks)" -gt 0 ]] && sampling_ok=1
+  fi
+  ((trace_ok && logs_ok && metrics_ok && sampling_ok)) && break
   sleep 3
 done
 
@@ -102,6 +122,8 @@ report "$logs_ok" "Loki has auth log lines with trace_id $trace_id" \
   "Loki: no auth log line with trace_id $trace_id"
 report "$metrics_ok" "Prometheus: all ${#SERVICES[@]} services export metrics; HTTP metrics present" \
   "Prometheus: missing target_info for: ${missing[*]:-none}; HTTP metrics from: ${http:-none}"
+report "$sampling_ok" "Tail sampling drops health-check traces (and kept the checked trace)" \
+  "Tail sampling: no health-check trace dropped yet (otelcol_processor_tail_sampling_count_traces_sampled_total, decision dropped)"
 
 if ((logs_ok == 0)); then
   # Diagnostics: is Loki answering, and does it have any auth lines at all?

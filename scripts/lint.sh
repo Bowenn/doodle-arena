@@ -25,7 +25,7 @@ run_one() {
     secrets) go run github.com/zricethezav/gitleaks/v8@v8.28.0 git --redact --no-banner . ;;
     web) (cd "$dir" && { [[ -d node_modules ]] || npm ci; } && npm run lint) ;;
     # Dashboards, alert rules and runbooks against each other and docs/observability.md.
-    observability) uv run --no-project --with pyyaml==6.0.3 python scripts/observability-lint.py ;;
+    observability) uv run --no-project --with pyyaml==6.0.3 python scripts/observability-lint.py && ./scripts/otelcol-validate.sh ;;
     # Formatting, both roots and the module validated offline (no AWS access), then tflint. A
     # data directory of its own, so a root initialised against its S3 backend (scripts/aws/)
     # doesn't make the check need credentials.

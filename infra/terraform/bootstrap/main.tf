@@ -9,7 +9,7 @@ data "aws_caller_identity" "current" {}
 locals {
   account_id = data.aws_caller_identity.current.account_id
   # One repository per image the stack runs (webhook-receiver is local only).
-  images = ["lobby", "game-server", "notifier", "auth", "ai", "assets", "marketplace", "gateway", "web"]
+  images = ["lobby", "game-server", "notifier", "auth", "ai", "assets", "marketplace", "gateway", "web", "analytics"]
 }
 
 # ---------------------------------------------------------------- Terraform state

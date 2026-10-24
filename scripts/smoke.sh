@@ -7,8 +7,8 @@ GATEWAY="${GATEWAY:-http://localhost:8080}"
 if [[ -d "$HOME/.docker/bin" ]]; then
   export PATH="$HOME/.docker/bin:$PATH"
 fi
-# The relays (ADR 0017) run locally when make up had PROFILES=live; the AWS stack gets them in
-# task 6.9 (scripts/aws/check.sh sets SMOKE_RELAYS to nothing until then).
+# The relays (ADR 0017) run locally when make up had PROFILES=live, and always in AWS
+# (scripts/aws/check.sh names them).
 if [[ -z "${SMOKE_RELAYS+set}" ]]; then
   SMOKE_RELAYS=""
   for r in relay-1 relay-2; do

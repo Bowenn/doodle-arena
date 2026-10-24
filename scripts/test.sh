@@ -34,8 +34,9 @@ run_one() {
     # backup-check and, live, make aws-check.
     terraform) python3 -m unittest discover -s scripts/aws -p 'test_*.py' ;;
     # Not just node_modules: on Linux, the web container's node_modules volume leaves an empty
-    # root-owned folder on the host.
-    web) (cd "$dir" && { [[ -x node_modules/.bin/vitest ]] || npm ci; } && npm test) ;;
+    # root-owned folder on the host. A lockfile newer than the installed tree (a pulled
+    # dependency change) installs again too.
+    web) (cd "$dir" && { [[ -x node_modules/.bin/vitest && node_modules/.package-lock.json -nt package-lock.json ]] || npm ci; } && npm test) ;;
   esac
 }
 

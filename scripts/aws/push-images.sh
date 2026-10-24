@@ -21,11 +21,12 @@ build_of() {
     lobby | game-server | notifier | auth | assets | marketplace) echo ". services/$1/Dockerfile" ;;
     ai | gateway) echo "services/$1 services/$1/Dockerfile" ;;
     web) echo "web web/Dockerfile" ;;
+    analytics) echo ". services/analytics/Dockerfile" ;;
     *) echo "unknown image $1" >&2; return 1 ;;
   esac
 }
 images=("$@")
-[[ ${#images[@]} -gt 0 ]] || images=(lobby game-server notifier auth ai assets marketplace gateway web)
+[[ ${#images[@]} -gt 0 ]] || images=(lobby game-server notifier auth ai assets marketplace gateway web analytics)
 
 for image in "${images[@]}"; do
   read -r context dockerfile <<<"$(build_of "$image")"

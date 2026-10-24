@@ -128,6 +128,10 @@ DOMAIN=icanfly.click make aws-down
 - **aws-up** on a fresh stack restores the newest backup that has a manifest, before the migrations: `BACKUP_ID=<id>` picks another (`aws s3 ls --profile doodle-arena s3://doodle-arena-backups-<account>/backups/`), `RESTORE=none` starts empty. It refuses a backup with a migration the deployed code (`IMAGE_TAG`) doesn't have, and fails if any table's rows differ from the manifest's after the load. The runbook is `docs/runbooks/aws-backup.md`.
 - **What comes back:** accounts, drawings, wallets, ownership, listings, purchases and webhook endpoints. Signing keys still rotate every session, so everyone signs in again. Rooms, tickets and the weekly leaderboard (Redis), the Kafka topics and the search index start empty. Fill search after `aws-up`: `POST /api/market/listings/republish` with an admin token and an `Idempotency-Key` (every active listing), then `reindex_search` in the `assets-indexer` task (ECS Exec), which indexes every approved drawing (ADR 0023).
 - **Where it shows:** CloudWatch metrics in the namespace `DoodleArena/Backups` and log lines in `/doodle-arena/backups` (docs/observability.md), and the Backups row of the service overview in AWS's Grafana.
+- **Load tests against AWS run from the dev box** (task 6.9: outside AWS like real players, with cores for k6):
+  - Mint the players' tokens on the Mac with the stack's key, and pipe them to the dev box over `gcloud compute ssh`'s stdin. `scripts/loadtest.sh` then mints nothing, so the signing key never leaves the Mac (CLAUDE.md, gotchas).
+  - The dev box has no AWS credentials, by design.
+  - Measured in task 6.9: 80 rooms, the 5,000-viewer live room, and the fire drill (`docs/fire-drill.md`).
 - **Restores download through presigned URLs** that `aws-up` signs with your SSO session (valid one hour): the data host's role may only put objects in the backup bucket. The URLs are part of the SSM Run Command, so they stay in the command history (`aws ssm list-commands`) until they expire.
 
 ### Discord (task 5.1)

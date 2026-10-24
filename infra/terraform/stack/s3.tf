@@ -9,7 +9,9 @@ locals {
   buckets = {
     round-logs = "doodle-arena-round-logs-${local.account_id}"
     drawings   = "doodle-arena-drawings-${local.account_id}"
-    config     = "doodle-arena-config-${local.account_id}" # the data host's compose bundle
+    # Flink's checkpoints (ADR 0018, task 6.9). A session's job state only: it ends with the stack.
+    analytics-checkpoints = "doodle-arena-analytics-checkpoints-${local.account_id}"
+    config                = "doodle-arena-config-${local.account_id}" # the data host's compose bundle
   }
 }
 

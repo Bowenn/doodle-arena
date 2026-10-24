@@ -35,6 +35,8 @@ Restore:
 
 After a restore, search starts empty: the indexer only sees new events. Republish the listings and rebuild the index as `docs/setup.md` (Backups) says.
 
+To rehearse a failed backup without a real fault: `FAIL_BACKUP_AT=dump DOMAIN=icanfly.click make aws-down` stops just before the dump with BACKUP FAILED. The stack stays up with its services at 0 (task 6.9). Then run `aws-down` again for real; it removes the incomplete backup.
+
 ## Afterwards
 
 - Add the failure and its cause to the evidence log in docs/roadmap.md.

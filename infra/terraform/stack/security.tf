@@ -8,7 +8,7 @@ locals {
   # [callee, port, caller]: the services' own ports.
   service_rules = concat(
     # The gateway routes every public path and checks /healthz/<service> (make smoke).
-    [for svc in ["auth", "lobby", "game-server-1", "game-server-2", "assets", "ai", "marketplace", "notifier", "web"] :
+    [for svc in ["auth", "lobby", "game-server-1", "game-server-2", "relay-1", "relay-2", "assets", "ai", "marketplace", "notifier", "web"] :
     [svc, 8080, "gateway"]],
     # Access tokens are checked against auth's JWKS (ADR 0001).
     [for caller in ["lobby", "notifier", "assets", "marketplace"] : ["auth", 8080, caller]],
@@ -19,6 +19,13 @@ locals {
       ["lobby", 9090, "game-server-2"],
       ["game-server-1", 9090, "lobby"], # room allocation and moves (ADR 0006)
       ["game-server-2", 9090, "lobby"],
+      ["lobby", 9090, "relay-1"], # relays register and report viewers (ADR 0017)
+      ["lobby", 9090, "relay-2"],
+      # Flink (ADR 0018): the TaskManager registers with the JobManager and fetches the job's
+      # jar; the JobManager deploys tasks to it.
+      ["analytics-jobmanager", 6123, "analytics-taskmanager"],
+      ["analytics-jobmanager", 6124, "analytics-taskmanager"],
+      ["analytics-taskmanager", 6122, "analytics-jobmanager"],
     ],
   )
 
@@ -27,15 +34,14 @@ locals {
     [for c in ["auth", "auth-relay", "notifier", "marketplace", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat"] : [5432, c]],
     # The read replica (ADR 0020): the services that read it.
     [for c in ["marketplace", "assets"] : [5433, c]],
-    [for c in ["lobby", "game-server-1", "game-server-2", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat", "marketplace"] : [6379, c]],
+    [for c in ["lobby", "game-server-1", "game-server-2", "relay-1", "relay-2", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat", "marketplace"] : [6379, c]],
     [for c in ["assets", "assets-worker"] : [27017, c]],
     # Search (ADR 0023): the web process queries, the indexer writes.
     [for c in ["assets", "assets-indexer"] : [9200, c]],
     # Kafka: its clients only (ADR 0013). The assets web process and worker have no Kafka user.
-    [for c in ["lobby", "game-server-1", "game-server-2", "notifier", "auth-relay", "marketplace", "assets-consumer", "assets-relay"] : [9092, c]],
-    # Telemetry: OTLP/HTTP from every service, OTLP/gRPC from the gateway's module.
-    [for c in keys(local.services) : [4318, c]],
-    [[4317, "gateway"]],
+    [for c in ["lobby", "game-server-1", "game-server-2", "relay-1", "relay-2", "notifier", "auth-relay", "marketplace", "assets-consumer", "assets-relay", "analytics-jobmanager", "analytics-taskmanager"] : [9092, c]],
+    # Telemetry (OTLP, 4317-4318) is one rule for the whole VPC below, not one per service: with
+    # every service's own rule the group passed AWS's 60 inbound rules (task 6.9).
     # Browser telemetry, through the gateway only (task 5.4).
     [[4319, "gateway"]],
   )
@@ -59,6 +65,19 @@ resource "aws_vpc_security_group_ingress_rule" "gateway_from_alb" {
   to_port                      = 80
   ip_protocol                  = "tcp"
   description                  = "from the load balancer"
+}
+
+# Every task sends telemetry to the collector on the data host (OTLP/gRPC and OTLP/HTTP). It
+# guards no data, so one rule for the VPC's addresses replaces a rule per service, which kept the
+# data host's group under AWS's limit of 60 inbound rules (task 6.9). The stores' ports stay
+# named per caller, and so does the browser receiver (4319, the gateway only).
+resource "aws_vpc_security_group_ingress_rule" "data_host_telemetry" {
+  security_group_id = aws_security_group.data_host.id
+  cidr_ipv4         = aws_vpc.main.cidr_block
+  from_port         = 4317
+  to_port           = 4318
+  ip_protocol       = "tcp"
+  description       = "telemetry (OTLP) from any task in the VPC"
 }
 
 resource "aws_vpc_security_group_ingress_rule" "data_host" {

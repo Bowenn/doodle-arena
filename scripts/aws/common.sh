@@ -179,3 +179,12 @@ backup_telemetry() {
   fi
   rm -f "$file"
 }
+
+# wait_stable <service>...: aws ecs wait services-stable for any number of services (it takes at
+# most 10 per call).
+wait_stable() {
+  local all=("$@") i
+  for ((i = 0; i < ${#all[@]}; i += 10)); do
+    aws ecs wait services-stable --cluster "$cluster" --services "${all[@]:i:10}"
+  done
+}
