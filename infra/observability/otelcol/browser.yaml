@@ -86,7 +86,7 @@ processors:
         - not (name == "error" or IsMatch(name, "^fetch (GET|POST|PUT|PATCH|DELETE) (/api/[A-Za-z0-9/{}._-]{1,200}|failed)$"))
       # Every event (the fetch instrumentation's timings carry nothing the dashboards use).
       spanevent:
-        - true
+        - "true"
   transform/browser-traces:
     error_mode: ignore
     trace_statements:
