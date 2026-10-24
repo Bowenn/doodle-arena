@@ -267,3 +267,41 @@ The ceiling:
 | 400 a second | — | 214 served, overloaded |
 
 The cache moved the ceiling from about 186 to about 290 requests a second. More importantly, it took Postgres out of the path: what's left is CPU in assets' two workers, about 7 ms per cached request (179% CPU at 300 a second). That is the OpenTelemetry instrumentation, verifying the JWT and building JSON; locally, without telemetry, a cached request takes 1.8 ms, mostly waiting on Redis. More workers (`WEB_CONCURRENCY`) or instances now scale the gallery, because the shared stores are no longer the limit.
+
+## 12. Stroke batching and wire formats (task 6.4)
+
+`make experiment-strokes` on the GCP dev box (e2-standard-8), 2026-10-23, from branch `stage-6/6.4-experiments`. Each game server is limited to one CPU. 24 rooms (96 players, 48 drawers drawing 160 points a second) are held for 3 minutes, and every cell is the median of two runs (ADR 0025). k6 runs on the stack's network.
+
+- **Ink delay:** from a point being drawn until another player has it (the batch's oldest point).
+- **Fan-out:** from a batch being sent until another player has it.
+- **Batches/s:** the server's own count of stroke batches received.
+
+| Batch | Wire | Fan-out p50 / p95 | Ink delay p50 / p95 / p99 | Stroke KB/s in / out | Batches/s | Game-server CPU | CPU per 1,000 batches/s | k6 CPU | Redis cmds/s | Input / send lag p95 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 16 ms | JSON | 4 / 23 ms | 14 / 33 / 62 ms | 263 / 1,423 | 1,773 | 1.16 | 0.65 | 1.66 | 5,235 | 3.0 / 2.3 ms |
+| 16 ms | protobuf | 13 / 76 | 22 / 86 / 141 | 70 / 353 | 1,445 | 0.97 | 0.67 | 3.04 | 4,291 | 3.8 / 2.3 |
+| 33 ms | JSON | 3 / 15 | 30 / 42 / 68 | 224 / 1,144 | 1,204 | 0.91 | 0.76 | 1.32 | 3,570 | 1.7 / 1.9 |
+| 33 ms | protobuf | 8 / 123 | 34 / 149 / 300 | 53 / 253 | 853 | 0.72 | 0.85 | 2.47 | 2,553 | 0.9 / 1.5 |
+| 50 ms | JSON | 3 / 9 | 47 / 53 / 66 | 182 / 893 | 812 | 0.66 | 0.81 | 1.06 | 2,460 | 0.9 / 1.2 |
+| 50 ms | protobuf | 4 / 36 | 48 / 79 / 126 | 57 / 264 | 737 | 0.66 | 0.89 | 2.29 | 2,254 | 0.3 / 0.9 |
+| 100 ms | JSON | 2 / 7 | 96 / 101 / 108 | 138 / 635 | 411 | 0.38 | 0.92 | 0.70 | 1,330 | 0.7 / 0.9 |
+| 100 ms | protobuf | 4 / 25 | 98 / 117 / 151 | 47 / 209 | 398 | 0.39 | 0.97 | 1.87 | 1,292 | 0.1 / 0.7 |
+
+- **Batch interval:** the cost follows batches per second, since each is one Redis commit and a fan-out to three players. A shorter interval buys ink delay at a steep price; 50 ms stays the default.
+- **Wire format:**
+  - **Bytes:** protobuf frames are about 70% smaller.
+  - **Server CPU:** the server spends slightly more per batch with them, because the room's event log stays JSON and each stroke is encoded twice. Decoding a protobuf batch is cheaper than the strict JSON decoder, but a batch's cost is mostly its Redis commit.
+  - **k6:** protobuf's client-side numbers are k6's. Its JavaScript interpreter needs twice the CPU for binary frames and sends fewer batches as it falls behind.
+  - **The browser:** in V8 both formats cost microseconds per message. Receiving one event takes 0.50 µs to decode and 0.67 µs with `JSON.parse`; sending a batch takes 2.4 µs to encode and 0.46 µs with `JSON.stringify` (`BENCH=1` in `web/src/game/strokeCodec.timing.test.ts`).
+  - JSON stays the default, with protobuf opt-in (`?wire=pb`).
+
+The ceiling at 50 ms batches, with rooms added 20 at a time, each held for 2 minutes:
+
+| Rooms | 20 | 40 | 60 | 80 | 100 | 120 |
+|---|---|---|---|---|---|---|
+| JSON fan-out p95 | 7 ms | 22 | 75 | 184 | 269 | 360 |
+| JSON batches/s taken in | 652 | 1,304 | 1,780 | 1,961 | 2,016 | 2,061 |
+| JSON input lag p95 | 0.9 ms | 1.4 | 7.6 | 44 | 102 | 172 |
+| Protobuf batches/s (k6 at 2.6–2.9 cores) | 590 | 832 | 884 | 897 | 926 | 859 |
+
+With JSON, two one-CPU game servers keep the stroke fan-out p95 under 250 ms up to 80 rooms (320 players). From 80 rooms on, the servers take in about 2,000 batches a second however many rooms send them. For protobuf the limit was k6, not the servers, which stayed near 0.7 cores; finding its server ceiling would take a load client in Go.
