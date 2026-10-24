@@ -11,8 +11,8 @@ if ! curl -fsS -o /dev/null "$GRAFANA/api/health"; then
   echo "Grafana isn't reachable at $GRAFANA: start the tunnel first (make aws-grafana)." >&2
   exit 1
 fi
-# No relays in AWS until task 6.9 (ADR 0017).
-SMOKE_RELAYS="" "$ROOT/scripts/smoke.sh"
+# Both relays run in AWS since task 6.9 (ADR 0017).
+SMOKE_RELAYS="relay-1 relay-2" "$ROOT/scripts/smoke.sh"
 "$ROOT/scripts/telemetry-check.sh"
 GRAFANA_USER=admin GRAFANA_PASSWORD="$(aws ssm get-parameter --with-decryption \
   --name /doodle-arena/stack/grafana-admin-password --query Parameter.Value --output text)" \

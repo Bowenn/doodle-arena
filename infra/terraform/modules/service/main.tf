@@ -86,6 +86,7 @@ resource "aws_ecs_task_definition" "this" {
       }
     }
     readonlyRootFilesystem = false
+    ulimits                = var.nofile == null ? null : [{ name = "nofile", softLimit = var.nofile, hardLimit = var.nofile }]
   }])
 }
 

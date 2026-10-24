@@ -8,7 +8,7 @@ locals {
   # [callee, port, caller]: the services' own ports.
   service_rules = concat(
     # The gateway routes every public path and checks /healthz/<service> (make smoke).
-    [for svc in ["auth", "lobby", "game-server-1", "game-server-2", "assets", "ai", "marketplace", "notifier", "web"] :
+    [for svc in ["auth", "lobby", "game-server-1", "game-server-2", "relay-1", "relay-2", "assets", "ai", "marketplace", "notifier", "web"] :
     [svc, 8080, "gateway"]],
     # Access tokens are checked against auth's JWKS (ADR 0001).
     [for caller in ["lobby", "notifier", "assets", "marketplace"] : ["auth", 8080, caller]],
@@ -19,6 +19,13 @@ locals {
       ["lobby", 9090, "game-server-2"],
       ["game-server-1", 9090, "lobby"], # room allocation and moves (ADR 0006)
       ["game-server-2", 9090, "lobby"],
+      ["lobby", 9090, "relay-1"], # relays register and report viewers (ADR 0017)
+      ["lobby", 9090, "relay-2"],
+      # Flink (ADR 0018): the TaskManager registers with the JobManager and fetches the job's
+      # jar; the JobManager deploys tasks to it.
+      ["analytics-jobmanager", 6123, "analytics-taskmanager"],
+      ["analytics-jobmanager", 6124, "analytics-taskmanager"],
+      ["analytics-taskmanager", 6122, "analytics-jobmanager"],
     ],
   )
 
@@ -27,15 +34,15 @@ locals {
     [for c in ["auth", "auth-relay", "notifier", "marketplace", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat"] : [5432, c]],
     # The read replica (ADR 0020): the services that read it.
     [for c in ["marketplace", "assets"] : [5433, c]],
-    [for c in ["lobby", "game-server-1", "game-server-2", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat", "marketplace"] : [6379, c]],
+    [for c in ["lobby", "game-server-1", "game-server-2", "relay-1", "relay-2", "assets", "assets-worker", "assets-consumer", "assets-relay", "assets-beat", "marketplace"] : [6379, c]],
     [for c in ["assets", "assets-worker"] : [27017, c]],
     # Search (ADR 0023): the web process queries, the indexer writes.
     [for c in ["assets", "assets-indexer"] : [9200, c]],
     # Kafka: its clients only (ADR 0013). The assets web process and worker have no Kafka user.
-    [for c in ["lobby", "game-server-1", "game-server-2", "notifier", "auth-relay", "marketplace", "assets-consumer", "assets-relay"] : [9092, c]],
+    [for c in ["lobby", "game-server-1", "game-server-2", "relay-1", "relay-2", "notifier", "auth-relay", "marketplace", "assets-consumer", "assets-relay", "analytics-jobmanager", "analytics-taskmanager"] : [9092, c]],
     # Telemetry: OTLP/HTTP from every service, OTLP/gRPC from the gateway's module.
     [for c in keys(local.services) : [4318, c]],
-    [[4317, "gateway"]],
+    [[4317, "gateway"], [4317, "analytics-jobmanager"], [4317, "analytics-taskmanager"]], # Flink's reporter speaks gRPC
     # Browser telemetry, through the gateway only (task 5.4).
     [[4319, "gateway"]],
   )

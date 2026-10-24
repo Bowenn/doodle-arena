@@ -54,6 +54,11 @@ locals {
       # HEAD on a missing image must say 404, not 403, so the pipeline uploads it.
       { actions = ["s3:ListBucket"], resources = [aws_s3_bucket.bucket["drawings"].arn, aws_s3_bucket.bucket["round-logs"].arn] },
     ]
+    # Flink's checkpoints: written, listed (the restore finds the newest), and old ones deleted.
+    analytics = [
+      { actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], resources = ["${aws_s3_bucket.bucket["analytics-checkpoints"].arn}/*"] },
+      { actions = ["s3:ListBucket", "s3:GetBucketLocation"], resources = [aws_s3_bucket.bucket["analytics-checkpoints"].arn] },
+    ]
   }
 }
 

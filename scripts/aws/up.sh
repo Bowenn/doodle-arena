@@ -104,7 +104,7 @@ wait_stable "${services[@]}"
 # marketplace's JVM takes about a minute): wait until every service answers through the gateway.
 url="$(tf_output url)"
 for target in healthz healthz/auth healthz/lobby healthz/game-server-1 healthz/game-server-2 healthz/assets \
-  healthz/ai healthz/marketplace healthz/notifier healthz/web; do
+  healthz/ai healthz/marketplace healthz/notifier healthz/web healthz/relay-1 healthz/relay-2; do
   until [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url/$target")" == 200 ]]; do
     if ((SECONDS - start > 1800)); then
       echo "$url/$target still isn't healthy; see CloudWatch Logs, /doodle-arena/ecs" >&2

@@ -127,3 +127,9 @@ variable "log_group" {
 variable "region" {
   type = string
 }
+
+variable "nofile" {
+  description = "The open-file limit (soft and hard), for a task with thousands of sockets; null keeps Fargate's default."
+  type        = number
+  default     = null
+}

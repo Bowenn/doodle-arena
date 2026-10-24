@@ -67,6 +67,26 @@ locals {
   assets_web_secrets = merge(local.assets_secrets, { ELASTICSEARCH_PASSWORD = local.secret_arn["elasticsearch-assets-password"] })
   indexer_env        = merge(local.assets_kafka_env, { ELASTICSEARCH_URL = "http://${local.data_host}:9200", ELASTICSEARCH_USERNAME = "assets-indexer" })
   indexer_secrets    = merge(local.assets_kafka_secrets, { ELASTICSEARCH_PASSWORD = local.secret_arn["elasticsearch-indexer-password"] })
+  # Flink (ADR 0018) as in compose's analytics-env, with AWS's endpoints and bucket.
+  analytics_env = merge(local.kafka_env, {
+    KAFKA_USERNAME                       = "analytics", OTEL_METRICS_EXPORTER = "none",
+    OTEL_INSTRUMENTATION_AWS_SDK_ENABLED = "false", ANALYTICS_RESTORE = "latest",
+  })
+  flink_properties = [
+    "jobmanager.rpc.address: analytics-jobmanager.doodle.internal",
+    "parallelism.default: 1",
+    "execution.checkpointing.interval: 30s",
+    "execution.checkpointing.dir: s3a://${aws_s3_bucket.bucket["analytics-checkpoints"].bucket}/checkpoints",
+    "state.backend.type: hashmap",
+    "s3.endpoint.region: ${var.region}",
+    "restart-strategy.type: exponential-delay",
+    "metrics.reporter.otel.factory.class: org.apache.flink.metrics.otel.OpenTelemetryMetricReporterFactory",
+    "metrics.reporter.otel.exporter.endpoint: http://${local.data_host}:4317",
+    "metrics.reporter.otel.exporter.protocol: gRPC",
+    "metrics.reporter.otel.service.name: analytics",
+    "metrics.reporter.otel.service.version: ${var.image_tag}",
+    "metrics.reporter.otel.interval: 15s",
+  ]
   # Kafka for assets' round consumer and outbox relay only, as in compose (ADR 0013).
   assets_kafka_env     = merge(local.assets_env, local.kafka_env, { KAFKA_USERNAME = "assets" })
   assets_kafka_secrets = merge(local.assets_secrets, { KAFKA_PASSWORD = local.secret_arn["kafka-assets-password"] })
@@ -95,7 +115,7 @@ locals {
     }
     game-server-1 = {
       image  = "game-server", role = "game-server", ports = [8080, 9090], discover = true, singleton = true,
-      health = local.go_health, stop_timeout = 60
+      health = local.go_health, stop_timeout = 60, cpu = 1024, memory = 2048
       env = merge(local.s3_env, local.kafka_env, {
         GRPC_PORT       = "9090", LOBBY_GRPC_ADDR = "lobby.doodle.internal:9090",
         CONTROL_ADDRESS = "game-server-1.doodle.internal:9090", WS_ADDRESS = "/ws/game-server-1",
@@ -110,7 +130,7 @@ locals {
     }
     game-server-2 = {
       image  = "game-server", role = "game-server", ports = [8080, 9090], discover = true, singleton = true,
-      health = local.go_health, stop_timeout = 60
+      health = local.go_health, stop_timeout = 60, cpu = 1024, memory = 2048
       env = merge(local.s3_env, local.kafka_env, {
         GRPC_PORT       = "9090", LOBBY_GRPC_ADDR = "lobby.doodle.internal:9090",
         CONTROL_ADDRESS = "game-server-2.doodle.internal:9090", WS_ADDRESS = "/ws/game-server-2",
@@ -122,6 +142,66 @@ locals {
         KAFKA_PASSWORD        = local.secret_arn["kafka-game-server-password"]
         REDIS_PASSWORD        = local.secret_arn["redis-game-server-password"]
       }
+    }
+    # Relays (ADR 0017, task 6.9): the game server's binary in its relay role, live rooms' viewers.
+    # A relay reads rooms from Redis and never writes room state: no S3, no control port. One
+    # vCPU each (locally a relay used under two cores at 2,500 viewers); 5,000 viewer sockets
+    # need the open-file limit raised.
+    relay-1 = {
+      image = "game-server", ports = [8080], discover = true, singleton = true, health = local.go_health,
+      cpu   = 1024, memory = 2048, nofile = 65535
+      env = merge(local.kafka_env, {
+        ROLE               = "relay", LOBBY_GRPC_ADDR = "lobby.doodle.internal:9090", WS_ADDRESS = "/ws/relay-1",
+        REDIS_ADDR         = local.redis, REDIS_USERNAME = "relay", KAFKA_USERNAME = "relay",
+        WS_ALLOWED_ORIGINS = var.domain_name,
+      })
+      secrets = {
+        TICKET_PUBLIC_KEY_PEM = local.secret_arn["ticket-public-key"]
+        KAFKA_PASSWORD        = local.secret_arn["kafka-relay-password"]
+        REDIS_PASSWORD        = local.secret_arn["redis-relay-password"]
+      }
+    }
+    relay-2 = {
+      image = "game-server", ports = [8080], discover = true, singleton = true, health = local.go_health,
+      cpu   = 1024, memory = 2048, nofile = 65535
+      env = merge(local.kafka_env, {
+        ROLE               = "relay", LOBBY_GRPC_ADDR = "lobby.doodle.internal:9090", WS_ADDRESS = "/ws/relay-2",
+        REDIS_ADDR         = local.redis, REDIS_USERNAME = "relay", KAFKA_USERNAME = "relay",
+        WS_ALLOWED_ORIGINS = var.domain_name,
+      })
+      secrets = {
+        TICKET_PUBLIC_KEY_PEM = local.secret_arn["ticket-public-key"]
+        KAFKA_PASSWORD        = local.secret_arn["kafka-relay-password"]
+        REDIS_PASSWORD        = local.secret_arn["redis-relay-password"]
+      }
+    }
+    # Analytics (ADR 0018, task 6.9): Flink 2.2 in application mode, one JobManager and one
+    # TaskManager, as in compose. Checkpoints go to analytics' own bucket through the Hadoop S3
+    # plugin (s3a://), with the task role's credentials. The TaskManager's ports are fixed so the
+    # security groups can name them.
+    analytics-jobmanager = {
+      image   = "analytics", role = "analytics", ports = [8081, 6123, 6124], discover = true, singleton = true,
+      cpu     = 512, memory = 1024, start_period = 120, instance_service = "analytics",
+      command = ["standalone-job", "--job-classname", "com.doodlearena.analytics.AnalyticsJob"]
+      health  = ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8081/overview"]
+      env = merge(local.analytics_env, {
+        FLINK_PROPERTIES = join("\n", concat(local.flink_properties, ["jobmanager.memory.process.size: 768m"]))
+      })
+      secrets = { KAFKA_PASSWORD = local.secret_arn["kafka-analytics-password"] }
+    }
+    analytics-taskmanager = {
+      image   = "analytics", role = "analytics", ports = [6121, 6122], discover = true, singleton = true,
+      cpu     = 512, memory = 2048, start_period = 120, instance_service = "analytics",
+      command = ["taskmanager"]
+      health  = ["CMD-SHELL", "pgrep -f TaskManagerRunner >/dev/null"]
+      env = merge(local.analytics_env, {
+        FLINK_PROPERTIES = join("\n", concat(local.flink_properties, [
+          "taskmanager.memory.process.size: 1024m", "taskmanager.numberOfTaskSlots: 2",
+          "taskmanager.rpc.port: 6122", "taskmanager.data.port: 6121",
+          "taskmanager.host: analytics-taskmanager.doodle.internal",
+        ]))
+      })
+      secrets = { KAFKA_PASSWORD = local.secret_arn["kafka-analytics-password"] }
     }
     notifier = {
       image = "notifier", ports = [8080], discover = true, health = local.go_health
@@ -237,7 +317,8 @@ locals {
 locals {
   # As in compose: <name>-1, except a game server, whose instance id is its server id
   # (game-server-1), the one the gateway routes /ws/<server_id>/ by (ADR 0002).
-  instance_id = { for name in keys(local.services) : name => startswith(name, "game-server") ? name : "${name}-1" }
+  # A relay's is its relay id (relay-1), the one the gateway routes /ws/relay-1/ by (ADR 0017).
+  instance_id = { for name in keys(local.services) : name => startswith(name, "game-server") || startswith(name, "relay-") ? name : "${name}-1" }
   # A rolling redeploy replaces one game server at a time, after everything else
   # (scripts/aws/up.sh): two stopping together couldn't take each other's rooms, and a gateway
   # or lobby restarting during a drain makes every player reconnect at once.
@@ -261,13 +342,14 @@ module "svc" {
     SERVICE_INSTANCE_ID = "gateway-1"
     } : {
     SERVICE_INSTANCE_ID      = local.instance_id[each.key]
-    OTEL_SERVICE_NAME        = try(local.services[each.key].instance_service, startswith(each.key, "game-server") ? "game-server" : each.key)
+    OTEL_SERVICE_NAME        = try(local.services[each.key].instance_service, startswith(each.key, "game-server") || startswith(each.key, "relay-") ? "game-server" : each.key)
     OTEL_RESOURCE_ATTRIBUTES = "service.instance.id=${local.instance_id[each.key]},service.version=${local.image_tag[each.key]},deployment.environment=aws"
   })
   secrets             = try(local.services[each.key].secrets, {})
   health_check        = try(local.services[each.key].health, null)
   health_start_period = try(local.services[each.key].start_period, 30)
   stop_timeout        = try(local.services[each.key].stop_timeout, 30)
+  nofile              = try(local.services[each.key].nofile, null)
   singleton           = try(local.services[each.key].singleton, false)
   desired_count       = var.running ? 1 : 0
   discoverable        = try(local.services[each.key].discover, false)
