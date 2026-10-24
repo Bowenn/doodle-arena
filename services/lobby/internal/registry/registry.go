@@ -122,6 +122,19 @@ func (r *Registry) Record(ctx context.Context, s Server) (registered bool, err e
 	return errors.Is(prev.Err(), redis.Nil), nil
 }
 
+// CountByRole counts game servers and relays among servers (lobby.servers.healthy, task 6.9:
+// relays register like game servers, and counted together they hid a stopped game server).
+func CountByRole(servers []Server) (games, relays int) {
+	for _, s := range servers {
+		if s.IsRelay() {
+			relays++
+		} else {
+			games++
+		}
+	}
+	return games, relays
+}
+
 // Servers returns every live server (draining ones included), sorted by id, and forgets
 // servers whose entry has expired.
 func (r *Registry) Servers(ctx context.Context) ([]Server, error) {

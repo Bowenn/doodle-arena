@@ -516,7 +516,9 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: "max(lobby_servers_healthy) or vector(0)"
+              # Game servers only: relays register with the lobby too (task 6.9's fire drill
+              # found them hiding a stopped game server).
+              expr: "max(lobby_servers_healthy{role=\"game\"}) or vector(0)"
               instant: true
           - refId: C
             datasourceUid: __expr__

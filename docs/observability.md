@@ -122,7 +122,7 @@ Never put IDs such as `room_id`, `user_id` or `drawing_id` in metric attributes.
 | `lobby.allocations` | Counter | `result` = success, no_servers, exhausted (every tried server full or draining), error | lobby |
 | `lobby.watches` | Counter | `result` = success, not_live (no such room, or it isn't live), no_relays, error (viewer tickets, ADR 0017) | lobby |
 | `lobby.reassignments` | Counter | `result` = moved, ended (the game server answered NOT_FOUND), failed (retried on the next pass); `reason` = failover (the server's heartbeats stopped, or it no longer reports the room), drain (the server is shutting down and drains, task 5.5) | lobby |
-| `lobby.servers.healthy` | Gauge | – (game servers whose heartbeat arrived in the last 6 s, draining ones included) | lobby |
+| `lobby.servers.healthy` | Gauge | `role` = game, relay (servers whose heartbeat arrived in the last 6 s, draining ones included; relays register too, task 6.9) | lobby |
 | `lobby.leaderboard.matches` | Counter | `result` = applied, duplicate (the match was counted before: a redelivery), skipped (an unset or unknown `oneof` case, or a malformed message) | lobby |
 | `assets.pipeline.duration` | Histogram (ms) | `step` = fetch, render, upload, moderate | assets |
 | `assets.jobs.oldest_age` | Gauge (s) | `queue` | assets (pool process 0 of each worker; from a `sent_at` header on every task message, 0 when the queue is empty; a missing series means no worker is running) |
@@ -274,7 +274,7 @@ Starting rules (tune the thresholds after the first load test):
 | WebhookQueueStuck | `notifier.queue.oldest_age` above 300 s for 5 minutes (workers stopped or Postgres slow) | warning |
 | StripeSignatureFailures | More than 5 invalid signatures in 10 minutes (a wrong secret or forged requests) | warning |
 | RefreshTokenReuse | More than 3 `auth.refreshes{result=reuse_detected}` in 10 minutes (stolen tokens, or a client that refreshes concurrently) | warning |
-| GameServerDown | `lobby.servers.healthy` below the expected count (2, the local stack's game servers) for 1 minute | critical |
+| GameServerDown | `lobby.servers.healthy{role="game"}` below the expected count (2, the stack's game servers) for 1 minute | critical |
 | KafkaAuthFailures | Every minute for 5 minutes: failed Kafka logins (`kafka.broker.authentication.failures`) or logged ACL denials (the broker's `is Denied` lines in Loki) above 0 (a service missing a credential or a grant, or someone probing; a one-off like CI's `make kafka-acl-check` doesn't last 5 minutes) | warning |
 | KafkaAdminUsed | Any login on the broker's ADMIN listener in 5 minutes (`kafka.broker.authentication.successes{listener=ADMIN}`): `admin`, the super user for humans, used from inside the broker container | warning |
 | WashTradingFlagged | Any `analytics.wash_trades.flagged` in 15 minutes, one alert per `rule` (ADR 0018): accounts passed a drawing round among themselves within 7 days. A signal for a human, not a verdict; each flag's accounts are in the analytics logs and on `analytics.flags.v1` | warning |

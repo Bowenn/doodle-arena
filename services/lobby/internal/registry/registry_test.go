@@ -231,3 +231,11 @@ func TestRelaysAndViewers(t *testing.T) {
 		t.Fatalf("viewers = %v", v)
 	}
 }
+
+func TestCountByRoleKeepsRelaysApart(t *testing.T) {
+	games, relays := CountByRole([]Server{{ID: "game-server-1"}, {ID: "relay-1", Role: RoleRelay},
+		{ID: "game-server-2", Draining: true}, {ID: "relay-2", Role: RoleRelay}})
+	if games != 2 || relays != 2 {
+		t.Fatalf("games, relays = %d, %d; want 2, 2", games, relays)
+	}
+}

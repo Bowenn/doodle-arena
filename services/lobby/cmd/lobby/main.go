@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/grpc"
 )
@@ -230,11 +231,14 @@ func run(cfg config, logger *slog.Logger) error {
 	return nil
 }
 
-// registerServerGauge exports lobby.servers.healthy: game servers whose heartbeats arrive
-// (draining ones included). The GameServerDown alert compares it with the expected count.
+// registerServerGauge exports lobby.servers.healthy: servers whose heartbeats arrive (draining
+// ones included), by role, game or relay. The GameServerDown alert compares the game servers with
+// the expected count.
 func registerServerGauge(reg *registry.Registry) error {
+	game := metric.WithAttributes(attribute.String("role", "game"))
+	relay := metric.WithAttributes(attribute.String("role", "relay"))
 	_, err := otel.Meter("lobby").Int64ObservableGauge("lobby.servers.healthy",
-		metric.WithDescription("Game servers that sent a heartbeat in the last 6 seconds"),
+		metric.WithDescription("Game servers and relays that sent a heartbeat in the last 6 seconds, by role"),
 		metric.WithUnit("{server}"),
 		metric.WithInt64Callback(func(ctx context.Context, o metric.Int64Observer) error {
 			ctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -243,7 +247,9 @@ func registerServerGauge(reg *registry.Registry) error {
 			if err != nil {
 				return err
 			}
-			o.Observe(int64(len(servers)))
+			games, relays := registry.CountByRole(servers)
+			o.Observe(int64(games), game)
+			o.Observe(int64(relays), relay)
 			return nil
 		}))
 	if err != nil {

@@ -537,7 +537,7 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Healthy game servers (lobby's view)",
+      "title": "Healthy game servers and relays (lobby's view)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -572,8 +572,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(lobby_servers_healthy)",
-          "legendFormat": "healthy"
+          "expr": "max by (role) (lobby_servers_healthy)",
+          "legendFormat": "{{role}}"
         }
       ],
       "gridPos": {

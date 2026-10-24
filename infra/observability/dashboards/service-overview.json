@@ -488,7 +488,7 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Healthy game servers",
+      "title": "Healthy game servers and relays",
       "description": "Game servers with a heartbeat in the last 6 s. GameServerDown fires below the expected count.",
       "datasource": {
         "type": "prometheus",
@@ -523,8 +523,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "max(lobby_servers_healthy)",
-          "legendFormat": "healthy"
+          "expr": "max by (role) (lobby_servers_healthy)",
+          "legendFormat": "{{role}}"
         }
       ],
       "gridPos": {
