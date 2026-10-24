@@ -15,6 +15,8 @@
 # 6. Writes manifest.json last: a backup without one is incomplete and never restored.
 # 7. Keeps the newest 10 complete backups.
 # Any failure exits 1 with the stack still up (and still costing money), services at 0.
+# FAIL_BACKUP_AT=dump (a drill, task 6.9) fails on purpose right before the dump, to show that a
+# backup that fails destroys nothing.
 source "$(dirname "$0")/common.sh"
 require_aws
 stack_vars
@@ -52,10 +54,10 @@ scale_to_zero() {
   done
   ((${#present[@]})) || return 0
   # services-stable takes at most 10 services per call.
-  aws ecs wait services-stable --cluster "$cluster" --services "${present[@]:0:10}" || return 1
-  if ((${#present[@]} > 10)); then
-    aws ecs wait services-stable --cluster "$cluster" --services "${present[@]:10}" || return 1
-  fi
+  local i
+  for ((i = 0; i < ${#present[@]}; i += 10)); do
+    aws ecs wait services-stable --cluster "$cluster" --services "${present[@]:i:10}" || return 1
+  done
 }
 
 # The code that wrote this data, for the manifest (the schema check reads the migrations).
@@ -96,6 +98,7 @@ while IFS= read -r s; do services+=("$s"); done < <(terraform -chdir="$TF/stack"
 scale_to_zero "${services[@]}" || fail "the services didn't stop"
 
 echo "    4/6 dumping the databases on the data host"
+[[ "${FAIL_BACKUP_AT:-}" == dump ]] && fail "forced by FAIL_BACKUP_AT=dump (a drill)"
 dump_start=$SECONDS
 output="$work/dump.out"
 dumped=0
