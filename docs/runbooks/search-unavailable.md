@@ -27,7 +27,7 @@ Only search is affected. The gallery and the market keep their own lists, which 
 
 ## Fix
 
-- **Down:** start it (`PROFILES=live,analytics,search make up`; in AWS, recreate the container on the data host). Assets reconnects by itself.
+- **Down:** start it (`PROFILES=live,analytics,search make up`; in AWS, in a Session Manager shell on the data host, `sudo docker start doodle-data-elasticsearch-1`). Assets reconnects by itself.
 - **No users** (a new volume): rerun `elasticsearch-init`.
 - **The index was lost:** rebuild it from Postgres in the indexer's container:
 

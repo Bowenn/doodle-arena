@@ -1,4 +1,4 @@
-"""The fire drill (task 6.9, docs/runbooks/fire-drill.md): break something on purpose, check the
+"""The fire drill (task 6.9, docs/fire-drill.md): break something on purpose, check the
 right alert fires, then fix it the way its runbook says and time each step.
 
     python3 scripts/drills/fire_drill.py [game-server|search ...]          the local stack
