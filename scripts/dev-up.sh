@@ -55,6 +55,15 @@ if [[ -n "${PROFILES:-}" ]]; then
 fi
 docker compose -f infra/docker-compose.yml --env-file .env up -d --build --wait --renew-anon-volumes --remove-orphans "$@"
 
+# A deploy marker on every dashboard (task 6.9): the commit, with -dirty for local changes.
+version="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+git diff --quiet HEAD 2>/dev/null || version="$version-dirty"
+for _ in $(seq 10); do
+  curl -s -o /dev/null --max-time 2 http://localhost:3000/api/health && break
+  sleep 3
+done
+./scripts/deploy-marker.sh "$version" local || true
+
 cat <<'EOF'
 
 Stack is up.
