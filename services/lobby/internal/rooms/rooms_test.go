@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"slices"
 	"strings"
@@ -971,6 +972,22 @@ func (e *env) reassignments(t *testing.T) map[string]int64 {
 		}
 	}
 	return out
+}
+
+// Every result and reason exists at 0 before the first pass. Prometheus reads a series that
+// first appears with its first value as one sample, so increase() and rate() over it are 0: task
+// 6.9's drain moved 47 rooms and showed moved/drain 0.
+func TestReassignmentSeriesStartAtZero(t *testing.T) {
+	e := newEnv(t)
+	want := map[string]int64{}
+	for _, result := range []string{"moved", "ended", "failed"} {
+		for _, reason := range []string{"failover", "drain"} {
+			want[result+"/"+reason] = 0
+		}
+	}
+	if got := e.reassignments(t); !maps.Equal(got, want) {
+		t.Fatalf("lobby.reassignments before any pass = %v, want %v", got, want)
+	}
 }
 
 // A draining server (task 5.5: it is shutting down and waits for its rooms to leave) is alive

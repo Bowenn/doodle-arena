@@ -79,6 +79,13 @@ func NewMetrics(m metric.Meter) (*Metrics, error) {
 		metric.WithUnit("{guess}")); err != nil {
 		return nil, err
 	}
+	// The rare events start at 0, or a burst's first export would be the series' first sample,
+	// which increase() and rate() read as no change (task 6.9's drain: 47 takeovers, none shown).
+	ctx := context.Background()
+	mt.takeovers.Add(ctx, 0)
+	for _, reason := range []string{"takeover", "stale"} {
+		mt.requeued.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", reason)))
+	}
 	return &mt, nil
 }
 
