@@ -60,8 +60,27 @@ sample_cpu() {
   done
 }
 
+# Recreated game servers register with the lobby by heartbeat: until both have, creating a room
+# answers 503 NO_GAME_SERVER. Waits until the lobby places a room (an empty private one).
+wait_for_lobby() {
+  local token
+  token="$(uv run -q --project services/auth python scripts/drills/mint_tokens.py ExpProbe |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["token"])')"
+  for _ in $(seq 1 60); do
+    if [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $token" \
+      -H 'Content-Type: application/json' -d '{"public": false}' http://localhost:8080/api/lobby/rooms)" == 201 ]]; then
+      sleep 5 # both servers, not just the first to report
+      return 0
+    fi
+    sleep 2
+  done
+  echo "The lobby can't place a room after 2 minutes." >&2
+  exit 1
+}
+
 echo "==> game servers limited to one CPU each"
 "${limited[@]}" up -d --wait game-server-1 game-server-2 >/dev/null
+wait_for_lobby
 restore() {
   echo "==> game servers back without the CPU limit"
   "${compose[@]}" up -d --wait game-server-1 game-server-2 >/dev/null || true
