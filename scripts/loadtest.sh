@@ -217,16 +217,32 @@ case "$profile" in
   *) echo "usage: $0 [full|smoke|live|live-smoke|tips|drops]" >&2; exit 2 ;;
 esac
 
-if [[ "$GATEWAY" == https://* && -z "${DRILL_JWT_PEM:-}" ]]; then
-  DRILL_JWT_PEM="$(aws ssm get-parameter --profile "${AWS_PROFILE:-doodle-arena}" --region us-west-2 \
-    --with-decryption --name /doodle-arena/stack/jwt-private-key --query Parameter.Value --output text)"
-  export DRILL_JWT_PEM
+# The players' tokens, 100 per variable (TOKENS_0, TOKENS_1, ...): Linux refuses one environment
+# string over 128 KB, about 160 tokens. Tokens already given in TOKENS_0... are used as they are:
+# from the dev box (task 6.9), the Mac mints them with the AWS stack's key and pipes them over, so
+# the signing key itself never leaves the Mac.
+token_vars=()
+if [[ -z "${TOKENS_0:-}" ]]; then
+  if [[ "$GATEWAY" == https://* && -z "${DRILL_JWT_PEM:-}" ]]; then
+    DRILL_JWT_PEM="$(aws ssm get-parameter --profile "${AWS_PROFILE:-doodle-arena}" --region us-west-2 \
+      --with-decryption --name /doodle-arena/stack/jwt-private-key --query Parameter.Value --output text)"
+    export DRILL_JWT_PEM
+  fi
+  names=()
+  for i in $(seq 1 $((rooms * 4))); do names+=("$(printf 'Load%04d' "$i")"); done
+  for i in $(seq 1 "$viewer_tokens"); do names+=("$(printf 'Viewer%03d' "$i")"); done
+  chunk=0
+  for ((i = 0; i < ${#names[@]}; i += 100)); do
+    export "TOKENS_$chunk=$(uv run -q --project services/auth python scripts/drills/mint_tokens.py "${names[@]:i:100}")"
+    chunk=$((chunk + 1))
+  done
 fi
-names=()
-for i in $(seq 1 $((rooms * 4))); do names+=("$(printf 'Load%04d' "$i")"); done
-for i in $(seq 1 "$viewer_tokens"); do names+=("$(printf 'Viewer%03d' "$i")"); done
-TOKENS="$(uv run -q --project services/auth python scripts/drills/mint_tokens.py "${names[@]}")"
-export TOKENS PROFILE="$profile"
+for ((chunk = 0; ; chunk++)); do
+  v="TOKENS_$chunk"
+  [[ -n "${!v:-}" ]] || break
+  token_vars+=(-e "$v")
+done
+export PROFILE="$profile"
 
 out=()
 if [[ "$script" == loadtest/live.js ]]; then
@@ -261,7 +277,7 @@ fi
 # never touches a relay, went from 4 ms to seconds. Inside the network k6 talks to the gateway
 # directly, as browsers talk to the load balancer in AWS. K6_IN_DOCKER=0 runs it on the host.
 if [[ "$script" == loadtest/live.js && "$GATEWAY" == http://localhost:8080 && "${K6_IN_DOCKER:-1}" == 1 ]]; then
-  env_args=(-e TOKENS -e PROFILE -e GATEWAY=http://gateway)
+  env_args=("${token_vars[@]}" -e PROFILE -e GATEWAY=http://gateway)
   for v in VIEWERS VIEWER_VUS RATE HOLD; do
     if [[ -n "${!v:-}" ]]; then env_args+=(-e "$v"); fi
   done
