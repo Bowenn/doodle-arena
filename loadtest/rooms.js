@@ -35,9 +35,17 @@ import { sleep } from 'k6'
 import { api, playRoom, PLAYERS, roomError } from './lib/room.js'
 
 const TOKENS = JSON.parse(__ENV.TOKENS || '[]')
+// Or TOKENS_0, TOKENS_1, ...: one environment string may not exceed 128 KB (about 160 tokens).
+for (let i = 0; __ENV[`TOKENS_${i}`]; i++) TOKENS.push(...JSON.parse(__ENV[`TOKENS_${i}`]))
 const SMOKE = __ENV.PROFILE === 'smoke'
+// PROFILE=fixed (task 6.4, scripts/experiments/strokes.sh): ROOMS rooms, one more a second, held
+// for HOLD seconds, each room open the whole time. BATCH_MS, POINTS_PER_SECOND and WIRE
+// (loadtest/lib/room.js) set how drawers send strokes.
+const FIXED = __ENV.PROFILE === 'fixed'
+const ROOMS = Number(__ENV.ROOMS || 40)
+const HOLD = Number(__ENV.HOLD || 240)
 // How long one room stays open: a few matches, then the virtual user leaves and starts over.
-const ROOM_SECONDS = Number(__ENV.ROOM_SECONDS || (SMOKE ? 50 : 420))
+const ROOM_SECONDS = Number(__ENV.ROOM_SECONDS || (SMOKE ? 50 : FIXED ? ROOMS + HOLD : 420))
 
 export const options = {
   // PIN_HOST=icanfly.click PIN_IP=<address> skips the local resolver, which may still cache a
@@ -46,7 +54,9 @@ export const options = {
   scenarios: {
     rooms: SMOKE
       ? { executor: 'per-vu-iterations', vus: 2, iterations: 1, maxDuration: '2m' }
-      : {
+      : FIXED
+        ? { executor: 'per-vu-iterations', vus: ROOMS, iterations: 1, maxDuration: `${ROOMS + HOLD + 90}s` }
+        : {
           executor: 'ramping-vus',
           startVUs: 0,
           // Rooms arrive about one a second at most: each costs nine gateway requests (create,
@@ -70,7 +80,13 @@ export const options = {
     stroke_fanout: ['p(95)<250'],
     room_errors: ['count<5'],
     http_req_failed: ['rate<0.01'],
+    // Not limits: they make the summary report bytes per kind (task 6.4).
+    'ws_bytes_sent{kind:stroke}': ['count>=0'],
+    'ws_bytes_sent{kind:other}': ['count>=0'],
+    'ws_bytes_received{kind:stroke}': ['count>=0'],
+    'ws_bytes_received{kind:other}': ['count>=0'],
   },
+  summaryTrendStats: ['avg', 'p(50)', 'p(95)', 'p(99)', 'max'],
 }
 
 // A virtual user whose room failed waits before the next one, so a broken stack sees a trickle
@@ -79,6 +95,9 @@ let failures = 0
 
 export default function () {
   if (failures > 0) sleep(Math.min(30, 2 ** failures) * (0.5 + Math.random() / 2))
+  // Fixed: one room a second (the gateway's 20 requests a second per address), all ending together.
+  const stagger = FIXED ? exec.vu.idInTest - 1 : 0
+  if (stagger) sleep(stagger)
 
   // Four tokens per virtual user, in order: the first player is the host.
   const base = ((exec.vu.idInTest - 1) * PLAYERS) % TOKENS.length
@@ -95,6 +114,6 @@ export default function () {
   }
   const room = created.json()
 
-  playRoom(room, players, ROOM_SECONDS)
+  playRoom(room, players, ROOM_SECONDS - stagger)
   failures = 0
 }

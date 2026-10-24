@@ -1,0 +1,8 @@
+# Task 6.4's experiments (scripts/experiments/strokes.sh, ADR 0025): each game server limited to
+# one CPU, so its throughput limit shows up as rooms per core instead of depending on how busy
+# the rest of the host is. Applied on top of infra/docker-compose.yml, then removed again.
+services:
+  game-server-1:
+    cpus: 1
+  game-server-2:
+    cpus: 1

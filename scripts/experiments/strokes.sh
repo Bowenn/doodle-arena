@@ -1,0 +1,190 @@
+#!/usr/bin/env bash
+# Task 6.4 (ADR 0025): stroke batch intervals and JSON against binary (protobuf) stroke frames,
+# on the local stack (make up; run it on the dev box). make experiment-strokes runs it.
+#
+# 1. The matrix: BATCHES (16 33 50 100 ms) x WIRES (json pb), each a fixed load of ROOMS rooms
+#    (40: 160 players, 80 drawers at POINTS_PER_SECOND each) held for HOLD seconds (240),
+#    REPEAT times (2). Every cell records k6's stroke fan-out and ink delay, bytes per second
+#    each way, the game servers' CPU, Redis commands per second (each stroke batch is one
+#    commit) and the servers' p95 input and send lag.
+# 2. The ceiling, for CEILING_BATCH (50) and each wire: rooms from 20 up by 20, HOLD_CEILING
+#    seconds each (120), until p95 input or send lag passes 250 ms (SlowBroadcasts' line).
+#
+# Each game server runs limited to one CPU (infra/experiments/cpu-limit.yml) for the runs and is
+# put back afterwards. k6 runs in a container on the stack's network. Results go to OUT
+# (a Markdown file, printed at the end). SKIP_MATRIX=1 or SKIP_CEILING=1 skip a part.
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+if [[ -d "$HOME/.docker/bin" ]]; then
+  export PATH="$HOME/.docker/bin:$PATH"
+fi
+ENV_FILE="${ENV_FILE:-.env}"
+BATCHES="${BATCHES:-16 33 50 100}"
+WIRES="${WIRES:-json pb}"
+ROOMS="${ROOMS:-40}"
+HOLD="${HOLD:-240}"
+REPEAT="${REPEAT:-2}"
+POINTS_PER_SECOND="${POINTS_PER_SECOND:-160}"
+CEILING_BATCH="${CEILING_BATCH:-50}"
+HOLD_CEILING="${HOLD_CEILING:-120}"
+OUT="${OUT:-/tmp/strokes-$(date +%Y%m%d-%H%M).md}"
+RESULTS="$(mktemp -d)"
+
+compose=(docker compose -f infra/docker-compose.yml --env-file "$ENV_FILE")
+limited=(docker compose -f infra/docker-compose.yml -f infra/experiments/cpu-limit.yml --env-file "$ENV_FILE")
+
+env_value() { grep "^$1=" "$ENV_FILE" | cut -d= -f2-; }
+
+# Prometheus inside otel-lgtm: one instant query at time $2 (epoch seconds), the first value.
+prom() {
+  docker exec doodle-arena-otel-lgtm-1 curl -s "localhost:9090/api/v1/query" \
+    --data-urlencode "query=$1" --data-urlencode "time=$2" |
+    python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(round(float(r[0]["value"][1]),1) if r and r[0]["value"][1] not in ("NaN","+Inf") else "")'
+}
+
+redis_commands() {
+  REDISCLI_AUTH="$(env_value REDIS_ADMIN_PASSWORD)" "${compose[@]}" exec -T -e REDISCLI_AUTH redis \
+    redis-cli --user admin --no-auth-warning info stats | tr -d '\r' | awk -F: '$1=="total_commands_processed"{print $2}'
+}
+
+# The game servers' CPU in cores, sampled every 5 s until the file $1 appears.
+sample_cpu() {
+  local stop="$1" out="$2"
+  while [[ ! -e "$stop" ]]; do
+    docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' doodle-arena-game-server-1-1 doodle-arena-game-server-2-1 |
+      awk '{gsub("%","",$2); s+=$2} END {print s/100}' >>"$out"
+    sleep 5
+  done
+}
+
+echo "==> game servers limited to one CPU each"
+"${limited[@]}" up -d --wait game-server-1 game-server-2 >/dev/null
+restore() {
+  echo "==> game servers back without the CPU limit"
+  "${compose[@]}" up -d --wait game-server-1 game-server-2 >/dev/null || true
+  rm -rf "$RESULTS"
+}
+trap restore EXIT
+
+max_rooms="$ROOMS"
+for r in 20 40 60 80 100 120; do
+  if [[ -z "${SKIP_CEILING:-}" && $r -gt $max_rooms ]]; then max_rooms=$r; fi
+done
+names=()
+for i in $(seq 1 $((max_rooms * 4))); do names+=("$(printf 'Exp%04d' "$i")"); done
+# 100 tokens per variable: one environment string may not exceed 128 KB.
+token_args=()
+chunk=0
+for ((i = 0; i < ${#names[@]}; i += 100)); do
+  export "TOKENS_$chunk=$(uv run -q --project services/auth python scripts/drills/mint_tokens.py "${names[@]:i:100}")"
+  token_args+=(-e "TOKENS_$chunk")
+  chunk=$((chunk + 1))
+done
+
+# run <label> <batch_ms> <wire> <rooms> <hold>: one fixed load; appends a JSON line to cells.
+run() {
+  local label="$1" batch="$2" wire="$3" rooms="$4" hold="$5"
+  local summary="$RESULTS/$label.json" stop="$RESULTS/$label.stop" cpu="$RESULTS/$label.cpu"
+  echo "==> $label: $rooms rooms, batches every $batch ms, $wire, $hold s"
+  local before_cmds start end status=0
+  before_cmds="$(redis_commands)"
+  start="$(date +%s)"
+  sample_cpu "$stop" "$cpu" &
+  local sampler=$!
+  docker run --rm --network doodle-arena_default -v "$PWD/loadtest:/loadtest:ro" -v "$RESULTS:/results" \
+    "${token_args[@]}" -e PROFILE=fixed -e GATEWAY=http://gateway -e ROOMS="$rooms" -e HOLD="$hold" \
+    -e BATCH_MS="$batch" -e WIRE="$wire" -e POINTS_PER_SECOND="$POINTS_PER_SECOND" \
+    grafana/k6:2.3.0 run --quiet --summary-export "/results/$label.json" /loadtest/rooms.js >"$RESULTS/$label.log" 2>&1 || status=$?
+  end="$(date +%s)"
+  touch "$stop"
+  wait "$sampler" || true
+  if [[ "$status" != 0 && "$status" != 99 ]]; then
+    echo "k6 failed ($status):" >&2
+    tail -20 "$RESULTS/$label.log" >&2
+    exit "$status"
+  fi
+  local after_cmds window
+  after_cmds="$(redis_commands)"
+  # The hold, after every room started: the servers' lags over it.
+  window=$((hold > 30 ? hold - 10 : hold))
+  local input send
+  input="$(prom "histogram_quantile(0.95, sum by (le) (rate(game_room_input_lag_milliseconds_bucket[${window}s])))" "$((end - 5))")"
+  send="$(prom "histogram_quantile(0.95, sum by (le) (rate(game_ws_send_lag_milliseconds_bucket[${window}s])))" "$((end - 5))")"
+  python3 - "$summary" "$cpu" "$label" "$batch" "$wire" "$rooms" "$((end - start))" "$((after_cmds - before_cmds))" "$input" "$send" >>"$RESULTS/cells.jsonl" <<'PY'
+import json, statistics, sys
+summary, cpu, label, batch, wire, rooms, seconds, cmds, input_lag, send_lag = sys.argv[1:]
+m = json.load(open(summary))["metrics"]
+def trend(name, stat):
+    return round(m.get(name, {}).get(stat, 0), 1)
+def count(name):
+    return m.get(name, {}).get("count", 0)
+cores = [float(x) for x in open(cpu).read().split() if x]
+seconds = int(seconds)
+print(json.dumps({
+    "label": label, "batch_ms": int(batch), "wire": wire, "rooms": int(rooms),
+    "fanout_p50": trend("stroke_fanout", "p(50)"), "fanout_p95": trend("stroke_fanout", "p(95)"), "fanout_p99": trend("stroke_fanout", "p(99)"),
+    "ink_p50": trend("ink_delay", "p(50)"), "ink_p95": trend("ink_delay", "p(95)"), "ink_p99": trend("ink_delay", "p(99)"),
+    "stroke_kb_s_in": round(count("ws_bytes_sent{kind:stroke}") / seconds / 1024, 1),
+    "stroke_kb_s_out": round(count("ws_bytes_received{kind:stroke}") / seconds / 1024, 1),
+    "other_kb_s_out": round(count("ws_bytes_received{kind:other}") / seconds / 1024, 1),
+    "cpu_cores": round(statistics.median(cores), 2) if cores else None,
+    "redis_cmds_s": round(int(cmds) / seconds),
+    "input_lag_p95": float(input_lag) if input_lag else None, "send_lag_p95": float(send_lag) if send_lag else None,
+    "room_errors": count("room_errors"),
+}))
+PY
+  tail -1 "$RESULTS/cells.jsonl"
+}
+
+if [[ -z "${SKIP_MATRIX:-}" ]]; then
+  for rep in $(seq 1 "$REPEAT"); do
+    for batch in $BATCHES; do
+      for wire in $WIRES; do
+        run "m-$batch-$wire-$rep" "$batch" "$wire" "$ROOMS" "$HOLD"
+      done
+    done
+  done
+fi
+if [[ -z "${SKIP_CEILING:-}" ]]; then
+  for wire in $WIRES; do
+    for rooms in 20 40 60 80 100 120; do
+      run "c-$CEILING_BATCH-$wire-$rooms" "$CEILING_BATCH" "$wire" "$rooms" "$HOLD_CEILING"
+      over="$(tail -1 "$RESULTS/cells.jsonl" | python3 -c 'import json,sys; c=json.load(sys.stdin); print(int(max(c["input_lag_p95"] or 0, c["send_lag_p95"] or 0) > 250))')"
+      if [[ "$over" == 1 ]]; then break; fi
+    done
+  done
+fi
+
+python3 - "$RESULTS/cells.jsonl" >"$OUT" <<'PY'
+import json, statistics, sys
+cells = [json.loads(l) for l in open(sys.argv[1])]
+matrix = [c for c in cells if c["label"].startswith("m-")]
+ceiling = [c for c in cells if c["label"].startswith("c-")]
+cols = ["fanout_p50", "fanout_p95", "fanout_p99", "ink_p50", "ink_p95", "ink_p99", "stroke_kb_s_in", "stroke_kb_s_out",
+        "other_kb_s_out", "cpu_cores", "redis_cmds_s", "input_lag_p95", "send_lag_p95", "room_errors"]
+def med(values):
+    values = [v for v in values if v is not None]
+    return round(statistics.median(values), 2) if values else ""
+if matrix:
+    print("## Matrix (medians of the repeats)\n")
+    print("| batch ms | wire | " + " | ".join(cols) + " |")
+    print("|---|---|" + "---|" * len(cols))
+    keys = sorted({(c["batch_ms"], c["wire"]) for c in matrix})
+    for b, w in keys:
+        group = [c for c in matrix if c["batch_ms"] == b and c["wire"] == w]
+        print(f"| {b} | {w} | " + " | ".join(str(med([c[k] for c in group])) for k in cols) + " |")
+if ceiling:
+    print("\n## Ceiling\n")
+    print("| wire | rooms | fanout_p95 | cpu_cores | input_lag_p95 | send_lag_p95 | room_errors |")
+    print("|---|---|---|---|---|---|---|")
+    for c in ceiling:
+        print(f"| {c['wire']} | {c['rooms']} | {c['fanout_p95']} | {c['cpu_cores']} | {c['input_lag_p95']} | {c['send_lag_p95']} | {c['room_errors']} |")
+print("\n<details><summary>Every run</summary>\n")
+for c in cells:
+    print("    " + json.dumps(c))
+print("\n</details>")
+PY
+cp "$RESULTS/cells.jsonl" "${OUT%.md}.jsonl"
+echo "==> results in $OUT"
+cat "$OUT"

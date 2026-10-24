@@ -89,7 +89,7 @@ def known(metric: str, spec: set[str]) -> bool:
         return True
     base = re.sub(r"_(bucket|count|sum)$", "", metric)
     base = re.sub(r"_total$", "", base)
-    base = re.sub(r"_(seconds|milliseconds|bytes)$", "", base)
+    base = re.sub(r"_(seconds|milliseconds|microseconds|bytes)$", "", base)
     # A rate unit such as {request}/min becomes a _per_min suffix in Prometheus.
     base = re.sub(r"_per_(min|minute|second)$", "", base)
     return base in spec

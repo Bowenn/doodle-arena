@@ -4,10 +4,10 @@
 # --profile '*': down, ps and logs also reach the opt-in services (PROFILES on make up).
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env --profile '*'
 
-.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check tips-check drops-check search-check search-bench seed explain kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke loadtest-tips loadtest-drops loadtest-gallery lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
+.PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check tips-check drops-check search-check search-bench seed explain kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke loadtest-tips loadtest-drops loadtest-gallery experiment-strokes lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | tips-check | drops-check | search-check | search-bench | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | loadtest-tips | loadtest-drops | loadtest-gallery | lighthouse | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | tips-check | drops-check | search-check | search-bench | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | loadtest-tips | loadtest-drops | loadtest-gallery | experiment-strokes | lighthouse | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:
@@ -122,6 +122,11 @@ loadtest-drops:
 # recreates assets without it, RATE and DURATION override.
 loadtest-gallery:
 	@./scripts/loadtest.sh gallery
+
+# Task 6.4 (ADR 0025): stroke batch intervals and JSON against binary stroke frames, each game
+# server limited to one CPU; BATCHES, WIRES, ROOMS, HOLD, REPEAT override. About two hours.
+experiment-strokes:
+	@./scripts/experiments/strokes.sh
 
 # Lighthouse, mobile, 3 runs (task 5.4): the production web image locally, or
 # GATEWAY=https://icanfly.click for the AWS stack.

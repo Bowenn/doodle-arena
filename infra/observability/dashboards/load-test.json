@@ -1142,6 +1142,175 @@
         "w": 12,
         "h": 8
       }
+    },
+    {
+      "id": 104,
+      "type": "row",
+      "title": "Wire format (task 6.4, ADR 0025)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Player socket bytes",
+      "description": "Payload bytes a second on player sockets by direction, format (json, pb: binary stroke frames on sockets that negotiated doodle.strokes.pb) and type (stroke, other).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (direction, format, type) (rate(game_ws_bytes_total[$__rate_interval]))",
+          "legendFormat": "{{direction}} {{format}} {{type}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Player socket frames",
+      "description": "Frames a second on player sockets, by direction, format and type.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (direction, format, type) (rate(game_ws_frames_total[$__rate_interval]))",
+          "legendFormat": "{{direction}} {{format}} {{type}}"
+        }
+      ],
+      "gridPos": {
+        "x": 8,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Stroke event encoding",
+      "description": "p50 and p95 of marshalling one stroke_batch event, per format.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "\u00b5s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, format) (rate(game_encode_duration_microseconds_bucket[$__rate_interval])))",
+          "legendFormat": "p50 {{format}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, format) (rate(game_encode_duration_microseconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95 {{format}}"
+        }
+      ],
+      "gridPos": {
+        "x": 16,
+        "y": 69,
+        "w": 8,
+        "h": 8
+      }
     }
   ]
 }
