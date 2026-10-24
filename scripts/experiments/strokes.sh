@@ -30,6 +30,8 @@ CEILING_BATCH="${CEILING_BATCH:-50}"
 HOLD_CEILING="${HOLD_CEILING:-120}"
 OUT="${OUT:-/tmp/strokes-$(date +%Y%m%d-%H%M).md}"
 RESULTS="$(mktemp -d)"
+# k6's container runs as its own user and writes its summary here.
+chmod 0777 "$RESULTS"
 
 compose=(docker compose -f infra/docker-compose.yml --env-file "$ENV_FILE")
 limited=(docker compose -f infra/docker-compose.yml -f infra/experiments/cpu-limit.yml --env-file "$ENV_FILE")
@@ -99,7 +101,7 @@ run() {
   end="$(date +%s)"
   touch "$stop"
   wait "$sampler" || true
-  if [[ "$status" != 0 && "$status" != 99 ]]; then
+  if [[ ! -s "$summary" || ( "$status" != 0 && "$status" != 99 ) ]]; then
     echo "k6 failed ($status):" >&2
     tail -20 "$RESULTS/$label.log" >&2
     exit "$status"
