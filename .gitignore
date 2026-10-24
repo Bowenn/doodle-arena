@@ -17,6 +17,7 @@ docs/_review
 
 # Go
 services/*/bin/
+proto/gen/java/bin/
 tools/eventctl/eventctl
 coverage.out
 
