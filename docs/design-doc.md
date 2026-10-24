@@ -439,7 +439,7 @@ Notifier (authenticated with an API key or the session's access token):
 
 ### 6.4 WebSocket protocol
 
-The client connects to the URL from the lobby (`/ws/<server_id>/rooms/<room_id>`, ADR 0002) and sends `hello` with its join ticket and, when resuming, `last_seq`, within 10 seconds. Messages are JSON text frames shaped `{"type": ..., "data": ...}`. A client message is at most 64 KB (a server message such as `welcome` can be larger, because it carries the canvas). Coordinates are normalized to 0–10000, so canvas size doesn't matter; a point is `[x, y, t_ms]` and a batch has 1–512 points. Deadlines are Unix milliseconds. A binary format is a Stage 6 experiment. The client pings every 5 seconds; a socket idle for 60 seconds is closed. A frozen server keeps its TCP sockets open, so the client also checks liveness itself: any server message must arrive within 10 seconds of opening a socket and within 5 seconds of a ping, or the client abandons the socket (without waiting for its close) and reconnects (section 7.4).
+The client connects to the URL from the lobby (`/ws/<server_id>/rooms/<room_id>`, ADR 0002) and sends `hello` with its join ticket and, when resuming, `last_seq`, within 10 seconds. Messages are JSON text frames shaped `{"type": ..., "data": ...}`. A client message is at most 64 KB (a server message such as `welcome` can be larger, because it carries the canvas). Coordinates are normalized to 0–10000, so canvas size doesn't matter; a point is `[x, y, t_ms]` and a batch has 1–512 points. Deadlines are Unix milliseconds. A client may also ask for the subprotocol `doodle.strokes.pb` (ADR 0025, task 6.4): on such a socket, stroke batches travel both ways as binary frames (`doodle.game.v1.StrokeFrame`: the client's `batch`, the room's `event` with its `seq`), and every other message stays JSON text. Welcome, resume replays, relays and viewers stay JSON, and the room's event log in Redis keeps the JSON form. Each stroke event is encoded once per format the room's sockets use. The client pings every 5 seconds; a socket idle for 60 seconds is closed. A frozen server keeps its TCP sockets open, so the client also checks liveness itself: any server message must arrive within 10 seconds of opening a socket and within 5 seconds of a ping, or the client abandons the socket (without waiting for its close) and reconnects (section 7.4).
 
 Client to server:
 
@@ -473,7 +473,7 @@ Guess rules: a guess is compared after lowercasing and keeping only the letters 
 
 `room_moved {reason}` (private) comes right before close 4010 when another server took the room over (ADR 0007).
 
-Close codes: 4000 bad first message, 4001 invalid or reused ticket, 4003 room full, 4008 no `hello` in time, 4010 the room isn't (or is no longer) on this server: ask the lobby again and resume there (sent after a takeover, and to a valid ticket for a room this server doesn't hold, because the room is moving; the server never sends 4004), 4009 the same player connected again elsewhere, 1003 binary frame, 1008 flooding, 1009 message too big, 1011 room store (Redis) unavailable, 1013 too slow (the send queue filled up), 1001 server shutting down. After a close, a client asks the lobby for a new ticket (tickets are single-use) and reconnects.
+Close codes: 4000 bad first message, 4001 invalid or reused ticket, 4003 room full, 4008 no `hello` in time, 4010 the room isn't (or is no longer) on this server: ask the lobby again and resume there (sent after a takeover, and to a valid ticket for a room this server doesn't hold, because the room is moving; the server never sends 4004), 4009 the same player connected again elsewhere, 1003 binary frame (on a socket without `doodle.strokes.pb`), 1008 flooding, 1009 message too big, 1011 room store (Redis) unavailable, 1013 too slow (the send queue filled up), 1001 server shutting down. After a close, a client asks the lobby for a new ticket (tickets are single-use) and reconnects.
 
 ## 7. Key flows
 
@@ -820,7 +820,7 @@ Releases:
 | D13 | Claim check for round stroke logs (object key in the event) | Keeps Kafka messages small and avoids cross-topic ordering problems |
 | D14 | SeaweedFS for local S3 | MinIO's community edition is no longer maintained |
 | D15 | Drawing metadata in Postgres; replays in MongoDB | Django needs SQL; replays are large documents read whole |
-| D16 | JSON WebSocket messages in v1; binary format is a Stage 6 experiment | Easy debugging first, measured optimization later |
+| D16 | JSON WebSocket messages in v1; binary format is a Stage 6 experiment (decided in ADR 0025, task 6.4: D61) | Easy debugging first, measured optimization later |
 | D17 | OpenTelemetry to Prometheus, Tempo and Loki, plus CloudWatch; Grafana alerting to Discord | One UI for every signal; alerts arrive where the team already is |
 | D18 | Every service verifies RS256 JWTs itself, with one audience (`doodle-api`); the gateway only routes; the Django admin bridges Google sign-in into a short session (ADR 0001) | No extra hop, no trusted headers, one identity for players and moderators |
 | D19 | Each Kafka topic carries one wrapper message with a `oneof` per event type; no schema registry, Buf only (ADR 0004) | The contract says what each topic holds and `buf breaking` checks it; no extra stateful service |

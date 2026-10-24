@@ -50,12 +50,13 @@ redis_commands() {
     redis-cli --user admin --no-auth-warning info stats | tr -d '\r' | awk -F: '$1=="total_commands_processed"{print $2}'
 }
 
-# The game servers' CPU in cores, sampled every 5 s until the file $1 appears.
+# CPU in cores, sampled every 5 s until the file $1 appears: the game servers', then k6's (a
+# saturated k6 reads its sockets late and would make the servers look slow).
 sample_cpu() {
   local stop="$1" out="$2"
   while [[ ! -e "$stop" ]]; do
-    docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' doodle-arena-game-server-1-1 doodle-arena-game-server-2-1 |
-      awk '{gsub("%","",$2); s+=$2} END {print s/100}' >>"$out"
+    docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' doodle-arena-game-server-1-1 doodle-arena-game-server-2-1 strokes-k6 2>/dev/null |
+      awk '{gsub("%","",$2); if ($1 == "strokes-k6") k=$2; else s+=$2} END {print s/100, k/100}' >>"$out"
     sleep 5
   done
 }
@@ -88,32 +89,31 @@ restore() {
 }
 trap restore EXIT
 
-max_rooms="$ROOMS"
-for r in 20 40 60 80 100 120; do
-  if [[ -z "${SKIP_CEILING:-}" && $r -gt $max_rooms ]]; then max_rooms=$r; fi
-done
-names=()
-for i in $(seq 1 $((max_rooms * 4))); do names+=("$(printf 'Exp%04d' "$i")"); done
-# 100 tokens per variable: one environment string may not exceed 128 KB.
-token_args=()
-chunk=0
-for ((i = 0; i < ${#names[@]}; i += 100)); do
-  export "TOKENS_$chunk=$(uv run -q --project services/auth python scripts/drills/mint_tokens.py "${names[@]:i:100}")"
-  token_args+=(-e "TOKENS_$chunk")
-  chunk=$((chunk + 1))
-done
+# Fresh tokens for every run (they live 90 minutes; the experiment takes longer), 100 per
+# variable: one environment string may not exceed 128 KB.
+mint() {
+  local rooms="$1" names=() i chunk=0
+  token_args=()
+  for i in $(seq 1 $((rooms * 4))); do names+=("$(printf 'Exp%04d' "$i")"); done
+  for ((i = 0; i < ${#names[@]}; i += 100)); do
+    export "TOKENS_$chunk=$(uv run -q --project services/auth python scripts/drills/mint_tokens.py "${names[@]:i:100}")"
+    token_args+=(-e "TOKENS_$chunk")
+    chunk=$((chunk + 1))
+  done
+}
 
 # run <label> <batch_ms> <wire> <rooms> <hold>: one fixed load; appends a JSON line to cells.
 run() {
   local label="$1" batch="$2" wire="$3" rooms="$4" hold="$5"
   local summary="$RESULTS/$label.json" stop="$RESULTS/$label.stop" cpu="$RESULTS/$label.cpu"
   echo "==> $label: $rooms rooms, batches every $batch ms, $wire, $hold s"
+  mint "$rooms"
   local before_cmds start end status=0
   before_cmds="$(redis_commands)"
   start="$(date +%s)"
   sample_cpu "$stop" "$cpu" &
   local sampler=$!
-  docker run --rm --network doodle-arena_default -v "$PWD/loadtest:/loadtest:ro" -v "$RESULTS:/results" \
+  docker run --rm --name strokes-k6 --network doodle-arena_default -v "$PWD/loadtest:/loadtest:ro" -v "$RESULTS:/results" \
     "${token_args[@]}" -e PROFILE=fixed -e GATEWAY=http://gateway -e ROOMS="$rooms" -e HOLD="$hold" \
     -e BATCH_MS="$batch" -e WIRE="$wire" -e POINTS_PER_SECOND="$POINTS_PER_SECOND" \
     grafana/k6:2.3.0 run --quiet --summary-export "/results/$label.json" /loadtest/rooms.js >"$RESULTS/$label.log" 2>&1 || status=$?
@@ -140,7 +140,9 @@ def trend(name, stat):
     return round(m.get(name, {}).get(stat, 0), 1)
 def count(name):
     return m.get(name, {}).get("count", 0)
-cores = [float(x) for x in open(cpu).read().split() if x]
+samples = [line.split() for line in open(cpu) if line.strip()]
+cores = [float(s[0]) for s in samples]
+k6 = [float(s[1]) for s in samples if len(s) > 1]
 seconds = int(seconds)
 print(json.dumps({
     "label": label, "batch_ms": int(batch), "wire": wire, "rooms": int(rooms),
@@ -150,6 +152,7 @@ print(json.dumps({
     "stroke_kb_s_out": round(count("ws_bytes_received{kind:stroke}") / seconds / 1024, 1),
     "other_kb_s_out": round(count("ws_bytes_received{kind:other}") / seconds / 1024, 1),
     "cpu_cores": round(statistics.median(cores), 2) if cores else None,
+    "k6_cores": round(statistics.median(k6), 2) if k6 else None,
     "redis_cmds_s": round(int(cmds) / seconds),
     "input_lag_p95": float(input_lag) if input_lag else None, "send_lag_p95": float(send_lag) if send_lag else None,
     "room_errors": count("room_errors"),
@@ -183,7 +186,7 @@ cells = [json.loads(l) for l in open(sys.argv[1])]
 matrix = [c for c in cells if c["label"].startswith("m-")]
 ceiling = [c for c in cells if c["label"].startswith("c-")]
 cols = ["fanout_p50", "fanout_p95", "fanout_p99", "ink_p50", "ink_p95", "ink_p99", "stroke_kb_s_in", "stroke_kb_s_out",
-        "other_kb_s_out", "cpu_cores", "redis_cmds_s", "input_lag_p95", "send_lag_p95", "room_errors"]
+        "other_kb_s_out", "cpu_cores", "k6_cores", "redis_cmds_s", "input_lag_p95", "send_lag_p95", "room_errors"]
 def med(values):
     values = [v for v in values if v is not None]
     return round(statistics.median(values), 2) if values else ""
@@ -197,10 +200,10 @@ if matrix:
         print(f"| {b} | {w} | " + " | ".join(str(med([c[k] for c in group])) for k in cols) + " |")
 if ceiling:
     print("\n## Ceiling\n")
-    print("| wire | rooms | fanout_p95 | cpu_cores | input_lag_p95 | send_lag_p95 | room_errors |")
-    print("|---|---|---|---|---|---|---|")
+    print("| wire | rooms | fanout_p95 | cpu_cores | k6_cores | redis_cmds_s | input_lag_p95 | send_lag_p95 | room_errors |")
+    print("|---|---|---|---|---|---|---|---|---|")
     for c in ceiling:
-        print(f"| {c['wire']} | {c['rooms']} | {c['fanout_p95']} | {c['cpu_cores']} | {c['input_lag_p95']} | {c['send_lag_p95']} | {c['room_errors']} |")
+        print(f"| {c['wire']} | {c['rooms']} | {c['fanout_p95']} | {c['cpu_cores']} | {c.get('k6_cores')} | {c['redis_cmds_s']} | {c['input_lag_p95']} | {c['send_lag_p95']} | {c['room_errors']} |")
 print("\n<details><summary>Every run</summary>\n")
 for c in cells:
     print("    " + json.dumps(c))

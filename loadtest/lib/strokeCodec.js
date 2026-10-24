@@ -46,69 +46,75 @@ export function encodeStrokeBatch(m) {
   return new Uint8Array(frame).buffer
 }
 
-function reader(bytes) {
-  let pos = 0
-  const r = {
-    done: () => pos >= bytes.length,
-    varint() {
-      let n = 0
-      let scale = 1
-      for (;;) {
-        if (pos >= bytes.length) throw new Error('truncated')
-        const b = bytes[pos++]
-        n += (b & 127) * scale
-        if (b < 128) return n
-        scale *= 128
-      }
-    },
-    bytes() {
-      const len = r.varint()
-      const out = bytes.subarray(pos, pos + len)
-      pos += len
-      return out
-    },
-    skip(wire) {
-      if (wire === 0) r.varint()
-      else if (wire === 2) r.bytes()
-      else if (wire === 1) pos += 8
-      else if (wire === 5) pos += 4
-      else throw new Error('wire type ' + wire)
-    },
-  }
-  return r
+// k6 decodes every stroke frame every player receives, in its interpreter, so this reads the
+// event in one pass without building a reader per field, and keeps only what the test uses:
+// seq, user_id, stroke_id and the first and last points. The web app's decoder keeps them all.
+function asciiText(b, from, to) {
+  let out = ''
+  for (let i = from; i < to; i++) out += String.fromCharCode(b[i])
+  return out
 }
 
-const text = (b) => String.fromCharCode.apply(null, Array.from(b))
-
-/** A server's binary frame (ArrayBuffer) as the event {seq, type: 'stroke_batch', data}, or null. */
+/** A server's binary frame (ArrayBuffer) as the event {seq, type: 'stroke_batch', data}, or null.
+ * data.points holds only the batch's first and last points. */
 export function decodeStrokeEvent(buf) {
-  const frame = reader(new Uint8Array(buf))
-  let event = null
-  while (!frame.done()) {
-    const key = frame.varint()
-    if (key === 2 * 8 + 2) event = frame.bytes()
-    else frame.skip(key % 8)
+  const b = new Uint8Array(buf)
+  let pos = 0
+  const varint = () => {
+    let n = 0
+    let scale = 1
+    for (;;) {
+      const x = b[pos++]
+      n += (x & 127) * scale
+      if (x < 128) return n
+      scale *= 128
+    }
   }
-  if (!event) return null
-  const r = reader(event)
+  // StrokeFrame: find field 2 (event).
+  let end = -1
+  while (pos < b.length) {
+    const key = varint()
+    if (key === 2 * 8 + 2) {
+      const len = varint()
+      end = pos + len
+      break
+    }
+    if (key % 8 === 2) pos += varint()
+    else if (key % 8 === 0) varint()
+    else return null
+  }
+  if (end < 0 || end > b.length) return null
   const data = { user_id: '', stroke_id: '', points: [], color: '', width: 0, done: false }
-  const flat = []
   let seq = 0
-  while (!r.done()) {
-    const key = r.varint()
+  while (pos < end) {
+    const key = varint()
     const f = Math.floor(key / 8)
     const wire = key % 8
-    if (f === 1 && wire === 0) seq = r.varint()
-    else if (f === 2 && wire === 2) data.user_id = text(r.bytes())
-    else if (f === 3 && wire === 2) data.stroke_id = text(r.bytes())
-    else if (f === 4 && wire === 2) {
-      const p = reader(r.bytes())
-      while (!p.done()) flat.push(p.varint())
-    } else if (f === 5 && wire === 2) data.color = text(r.bytes())
-    else if (f === 6 && wire === 0) data.width = r.varint()
-    else if (f === 7 && wire === 0) data.done = r.varint() !== 0
-    else r.skip(wire)
+    if (wire === 0) {
+      const v = varint()
+      if (f === 1) seq = v
+      else if (f === 6) data.width = v
+      else if (f === 7) data.done = v !== 0
+    } else if (wire === 2) {
+      const len = varint()
+      const stop = pos + len
+      if (f === 2) data.user_id = asciiText(b, pos, stop)
+      else if (f === 3) data.stroke_id = asciiText(b, pos, stop)
+      else if (f === 5) data.color = asciiText(b, pos, stop)
+      else if (f === 4) {
+        let first = null
+        let last = null
+        while (pos < stop) {
+          const p = [varint(), varint(), varint()]
+          if (first === null) first = p
+          last = p
+        }
+        if (first) data.points = first === last ? [first] : [first, last]
+      }
+      pos = stop
+    } else {
+      return null
+    }
   }
-  for (let i = 0; i + 2 < flat.length; i += 3) data.points.push([flat[i], flat[i + 1], flat[i + 2]])
   return { seq, type: 'stroke_batch', data }
 }

@@ -49,7 +49,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Jenkins | Optional deployment pipeline | 7 |
 | GitHub Actions | CI for every service, proto checks | 1, 5 |
 | Real-time systems | Game server | 2 |
-| Real-time collaboration (实时协作), WebSocket | Shared canvas with two drawers; WebSocket protocol | 2 |
+| Real-time collaboration (实时协作), WebSocket | Shared canvas with two drawers; WebSocket protocol; batch intervals and JSON against protobuf frames measured under load, negotiated per socket with a subprotocol (ADR 0025, task 6.4) | 2, 6 |
 | Real-time continuous ingestion (实时持续接收), Kafka, Flink | Kafka in Stage 2; Flink jobs in Stage 6 | 2, 6 |
 | Correctness | Server-authoritative ordering; ledger invariants; reconciliation job | 2, 4 |
 | Webhooks (signed, retried event delivery) | Notifier (outgoing); Stripe (incoming) | 4 |
