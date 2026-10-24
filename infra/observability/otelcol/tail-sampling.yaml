@@ -1,0 +1,69 @@
+# Tail sampling (task 6.9, docs/observability.md section 4), merged after memory-limiter.yaml
+# through OTELCOL_EXTRA_ARGS in both composes. The collector waits for a trace's spans, then
+# decides once for the whole trace:
+#
+#   - drop health checks (load balancers and compose poll them every few seconds);
+#   - keep every trace with an error, and every trace slower than 500 ms;
+#   - keep every trace that moved money: purchases, Stripe webhooks, rewards, tips, drops;
+#   - keep synthetic checks: their trace ids start with 5ca1ab1e (scripts/telemetry-check.sh), so
+#     a check never depends on the sample (a client can choose that prefix too; all it gains is
+#     keeping its own traces, behind the gateway's rate limits);
+#   - keep 10% of everything else.
+#
+# The services' head samplers still decide first (game servers and the lobby drop parentless
+# Redis spans), so this only ever removes. One collector receives every span, which tail
+# sampling needs. Traces wait decision_wait in memory, bounded by num_traces and by the
+# memory_limiter that runs first.
+processors:
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 500
+    decision_cache:
+      sampled_cache_size: 50000
+      non_sampled_cache_size: 50000
+    policies:
+      - name: health-checks
+        type: drop
+        drop:
+          drop_sub_policy:
+            - name: healthz
+              type: ottl_condition
+              ottl_condition:
+                error_mode: ignore
+                span:
+                  - attributes["url.path"] == "/healthz"
+                  - attributes["http.route"] == "/healthz"
+                  - attributes["http.target"] == "/healthz"
+                  - IsMatch(attributes["url.path"], "^/healthz/")
+                  - IsMatch(attributes["http.target"], "^/healthz/")
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 500
+      - name: money
+        type: ottl_condition
+        ottl_condition:
+          error_mode: ignore
+          span:
+            - IsMatch(name, "^market\\.(purchase|stripe\\.webhook|reward|tip|tip\\.settle|drop\\.purchase|drop\\.settle|checkout)$")
+      - name: synthetic-checks
+        type: ottl_condition
+        ottl_condition:
+          error_mode: ignore
+          span:
+            - IsMatch(trace_id.string, "^5ca1ab1e")
+      - name: the-rest
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+
+# The merge replaces lists: memory_limiter first, then the decision, then batching.
+service:
+  pipelines:
+    traces:
+      processors: [memory_limiter, tail_sampling, batch]

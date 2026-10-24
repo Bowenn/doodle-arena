@@ -1174,7 +1174,7 @@ services:
       DEPLOYMENT_ENVIRONMENT: local
       DISCORD_ALERT_WEBHOOK_URL: ${DISCORD_ALERT_WEBHOOK_URL:-http://webhook-receiver:9000/hooks/alerts}
       # The collector's memory limit, merged over the image's config (the file says why).
-      OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml --config=file:/etc/doodle-arena/otelcol-browser.yaml
+      OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml --config=file:/etc/doodle-arena/otelcol-tail-sampling.yaml --config=file:/etc/doodle-arena/otelcol-browser.yaml
     # The image's own check (every backend ready, Loki included), run more often than its 30 s
     # default: every service waits for it, so records never queue up behind a starting Loki.
     # After startup the image's check skips a backend that refuses connections, so a Tempo or
@@ -1198,6 +1198,7 @@ services:
       - ./observability/grafana/alerting/policies.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-policies.yaml:ro
       - ./observability/grafana/alerting/rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-rules.yaml:ro
       - ./observability/otelcol/memory-limiter.yaml:/etc/doodle-arena/otelcol-memory-limiter.yaml:ro
+      - ./observability/otelcol/tail-sampling.yaml:/etc/doodle-arena/otelcol-tail-sampling.yaml:ro
       - ./observability/otelcol/browser.yaml:/etc/doodle-arena/otelcol-browser.yaml:ro
     ports:
       - "127.0.0.1:3000:3000"

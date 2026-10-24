@@ -285,7 +285,7 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
       # The collector's memory limit, merged over the image's config (the file says why).
-      OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml --config=file:/etc/doodle-arena/otelcol-browser.yaml
+      OTELCOL_EXTRA_ARGS: --config=file:/etc/doodle-arena/otelcol-memory-limiter.yaml --config=file:/etc/doodle-arena/otelcol-tail-sampling.yaml --config=file:/etc/doodle-arena/otelcol-browser.yaml
     # As in infra/docker-compose.yml: the image's check skips a backend that refuses
     # connections, so Tempo's and the collector's /ready are required too. Docker doesn't
     # restart an unhealthy container; `docker ps` on the data host shows it (docs/setup.md).
@@ -307,6 +307,7 @@ services:
       - ./observability/grafana/alerting/rules.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/doodle-arena-rules.yaml:ro
       - ./grafana-cloudwatch.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/doodle-arena-cloudwatch.yaml:ro
       - ./observability/otelcol/memory-limiter.yaml:/etc/doodle-arena/otelcol-memory-limiter.yaml:ro
+      - ./observability/otelcol/tail-sampling.yaml:/etc/doodle-arena/otelcol-tail-sampling.yaml:ro
       - ./observability/otelcol/browser.yaml:/etc/doodle-arena/otelcol-browser.yaml:ro
 
 volumes:
