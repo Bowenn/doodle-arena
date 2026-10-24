@@ -1,0 +1,34 @@
+# A stand-in for grafana/otel-lgtm 0.36.0's own collector config (/otel-lgtm/otelcol-config.yaml),
+# with the same receivers, exporters and pipelines, so scripts/otelcol-validate.sh can check the
+# repo's overlays merged over it with the plain contrib collector. Not used at runtime. Update it
+# when otel-lgtm's image changes.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch:
+exporters:
+  otlp_http/metrics:
+    endpoint: http://127.0.0.1:9090/api/v1/otlp
+  otlp_http/traces:
+    endpoint: http://127.0.0.1:4418
+  otlp_http/logs:
+    endpoint: http://127.0.0.1:3100/otlp
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/traces]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/logs]
