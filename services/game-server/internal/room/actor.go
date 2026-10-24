@@ -26,6 +26,16 @@ type Conn interface {
 	Close(code int, reason string)
 }
 
+// StrokeConn is a Conn that may have negotiated binary stroke frames (protocol.StrokesSubprotocol,
+// ADR 0025): a stroke_batch event goes to it through SendStroke, which picks the form.
+type StrokeConn interface {
+	Conn
+	// BinaryStrokes reports whether the socket takes stroke batches as binary frames.
+	BinaryStrokes() bool
+	// SendStroke queues a stroke_batch event: the JSON message, or bin when BinaryStrokes.
+	SendStroke(json, bin []byte)
+}
+
 // Clock is time for the actor; tests use a fake one.
 type Clock interface {
 	Now() time.Time
@@ -503,12 +513,16 @@ func (r *Room) flush(ctx context.Context) error {
 	now := r.clock.Now()
 	var stored []StoredEvent
 	phase := false
+	strokes := map[int]CanvasBatch{} // stroke_batch events by index in outs, for binary frames
 	for i, o := range outs {
 		switch o.Type {
 		case "welcome":
 			welcomed[o.To] = o.Seq
 		case "event":
 			ev := o.Data.(protocol.Event)
+			if b, ok := ev.Data.(CanvasBatch); ok && ev.Type == protocol.TypeStrokeBatch {
+				strokes[i] = b
+			}
 			data, err := json.Marshal(ev.Data)
 			if err != nil {
 				return fmt.Errorf("encode %s: %w", ev.Type, err)
@@ -539,7 +553,7 @@ func (r *Room) flush(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, o := range outs {
+	for i, o := range outs {
 		if o.Type != "event" {
 			if c := r.conns[o.To]; c != nil {
 				c.Send(protocol.Marshal(o.Type, o.Data))
@@ -549,11 +563,25 @@ func (r *Room) flush(ctx context.Context) error {
 		ev := o.Data.(protocol.Event)
 		start := time.Now()
 		msg := protocol.Marshal("event", ev)
+		stroke, isStroke := strokes[i]
+		var bin []byte // the binary form, encoded once if any socket takes it
+		if isStroke {
+			r.metrics.encode(ctx, "json", time.Since(start))
+			if r.anyBinary() {
+				t := time.Now()
+				bin = protocol.EncodeStrokeEvent(ev.Seq, stroke.UserID, stroke.StrokeBatch)
+				r.metrics.encode(ctx, "pb", time.Since(t))
+			}
+		}
 		for uid, c := range r.conns {
 			if uid == o.Except {
 				continue
 			}
 			if seq, ok := welcomed[uid]; ok && ev.Seq <= seq {
+				continue
+			}
+			if sc, ok := c.(StrokeConn); ok && isStroke {
+				sc.SendStroke(msg, bin)
 				continue
 			}
 			c.Send(msg)
@@ -565,6 +593,16 @@ func (r *Room) flush(ctx context.Context) error {
 		r.finish(fin[i], outbox[i])
 	}
 	return nil
+}
+
+// anyBinary reports whether a connected socket takes binary stroke frames.
+func (r *Room) anyBinary() bool {
+	for _, c := range r.conns {
+		if sc, ok := c.(StrokeConn); ok && sc.BinaryStrokes() {
+			return true
+		}
+	}
+	return false
 }
 
 // finishing is a finished round or match on its way out: its end span and its outbox entry.

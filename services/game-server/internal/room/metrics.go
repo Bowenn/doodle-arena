@@ -13,6 +13,7 @@ import (
 type Metrics struct {
 	roomsActive metric.Int64UpDownCounter
 	broadcastMS metric.Float64Histogram
+	encodeUS    metric.Float64Histogram
 	inputLagMS  metric.Float64Histogram
 	guesses     metric.Int64Counter
 	reconnects  metric.Int64Counter
@@ -34,6 +35,13 @@ func NewMetrics(m metric.Meter) (*Metrics, error) {
 		metric.WithDescription("Time to marshal a room event and queue it to every local socket (not the network write)"),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250)); err != nil {
+		return nil, err
+	}
+	// Task 6.4 (ADR 0025): one stroke_batch event marshalled to JSON, or to a binary frame.
+	if mt.encodeUS, err = m.Float64Histogram("game.encode.duration",
+		metric.WithDescription("Time to marshal one stroke_batch event, by format (json or pb)"),
+		metric.WithUnit("us"),
+		metric.WithExplicitBucketBoundaries(1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000)); err != nil {
 		return nil, err
 	}
 	// The way in, as game.ws.send_lag is the way out: when the CPU is pinned, inputs wait
@@ -104,6 +112,10 @@ func (m *Metrics) roomClosed(ctx context.Context, mode string) {
 
 func (m *Metrics) broadcast(ctx context.Context, eventType string, d time.Duration) {
 	m.broadcastMS.Record(ctx, float64(d)/float64(time.Millisecond), metric.WithAttributes(attribute.String("event_type", eventType)))
+}
+
+func (m *Metrics) encode(ctx context.Context, format string, d time.Duration) {
+	m.encodeUS.Record(ctx, float64(d)/float64(time.Microsecond), metric.WithAttributes(attribute.String("format", format)))
 }
 
 func (m *Metrics) inputLag(ctx context.Context, d time.Duration) {
