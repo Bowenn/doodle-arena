@@ -81,7 +81,7 @@ Set up once (2026-10-19):
 - **Budget first:** `doodle-arena-monthly`, $35 a month, credits excluded (so it tracks real usage), email alerts at 50%, 80%, 100% and 100% forecasted. Created by hand before anything else and kept outside Terraform, so no destroy can remove it.
 - **Identity:** IAM Identity Center in us-west-2, MFA at sign-in, user `bowen` with `AdministratorAccess` (4-hour sessions). CLI profile `doodle-arena` (`aws configure sso`); sign in with `aws sso login --profile doodle-arena`. There is no IAM user and no access key anywhere.
 - **Region:** us-west-2 (Oregon).
-- **Domain:** `icanfly.click`, registered in Route 53 (auto-renew off); its hosted zone was created by the registration and stays between sessions ($0.50 a month).
+- **Domain:** `icanfly.click`, registered in Route 53 (auto-renew off); its hosted zone was created by the registration and stays between sessions ($0.50 a month). The app is served at `doodle-arena.icanfly.click` (task 6.11, D63), and the stack leaves the apex alone for other uses. The `aws-*` targets find the hosted zone from `DOMAIN` (the longest suffix Route 53 has a zone for); `ZONE=icanfly.click` names it instead.
 - **Bootstrap root:** `make aws-bootstrap` creates the Terraform state bucket, one ECR repository per image, empty SSM parameters for the third-party secrets and, since task 6.10 (ADR 0016), the backup bucket `doodle-arena-backups-<account>`, the log group `/doodle-arena/backups` and the generated `/doodle-arena/notifier-secret-key`. Run it once, and again after a change to `infra/terraform/bootstrap/` (the stack reads the notifier's key from there, so `aws-up` fails until it exists); its own state moves into the bucket it creates.
 - **Third-party secrets**, put by a human, never pasted into a chat or a file:
 
@@ -91,7 +91,7 @@ Set up once (2026-10-19):
 
   (zsh; in bash, `read -rsp "Paste the value: " VALUE`). Reading the value first keeps it out of your shell history.
 
-  for `/doodle-arena/google/client-id`, `/doodle-arena/google/client-secret`, `/doodle-arena/stripe/secret-key`, `/doodle-arena/stripe/webhook-secret` and `/doodle-arena/discord/alert-webhook-url`. For Google, add `https://icanfly.click/api/auth/google/callback` as an authorized redirect URI and `https://icanfly.click` as a JavaScript origin of the OAuth client. For Stripe (test mode), add an event destination in the account (or sandbox) the secret key belongs to: a webhook endpoint `https://icanfly.click/api/market/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`, with payload style **Snapshot** (a thin event has no session, so nothing would be credited), and put its signing secret. The destination and its secret outlive sessions. A parameter nobody has put yet holds the placeholder `unset`, which auth and the marketplace treat as not configured (Google sign-in and coin packs answer 503). Tasks read these when they start: after a change, redeploy the service (`aws ecs update-service --cluster doodle-arena --service auth --force-new-deployment`; otel-lgtm reads the Discord URL when the data host boots).
+  for `/doodle-arena/google/client-id`, `/doodle-arena/google/client-secret`, `/doodle-arena/stripe/secret-key`, `/doodle-arena/stripe/webhook-secret` and `/doodle-arena/discord/alert-webhook-url`. For Google, add `https://doodle-arena.icanfly.click/api/auth/google/callback` as an authorized redirect URI and `https://doodle-arena.icanfly.click` as a JavaScript origin of the OAuth client. For Stripe (test mode), add an event destination in the account (or sandbox) the secret key belongs to: a webhook endpoint `https://doodle-arena.icanfly.click/api/market/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`, with payload style **Snapshot** (a thin event has no session, so nothing would be credited), and put its signing secret. The destination and its secret outlive sessions. Moving the app to another host name (as task 6.11 did from the apex) means adding the new redirect URI and origin to the OAuth client and changing the Stripe endpoint's URL; editing the URL keeps its signing secret, so SSM doesn't change. A parameter nobody has put yet holds the placeholder `unset`, which auth and the marketplace treat as not configured (Google sign-in and coin packs answer 503). Tasks read these when they start: after a change, redeploy the service (`aws ecs update-service --cluster doodle-arena --service auth --force-new-deployment`; otel-lgtm reads the Discord URL when the data host boots).
 
 Each session (costs money from `aws-up` to `aws-down`; docs/performance.md has the measured cost per hour):
 
@@ -100,7 +100,7 @@ make aws-push
 ```
 
 ```bash
-DOMAIN=icanfly.click make aws-up
+DOMAIN=doodle-arena.icanfly.click make aws-up
 ```
 
 ```bash
@@ -108,11 +108,11 @@ make aws-grafana
 ```
 
 ```bash
-DOMAIN=icanfly.click make aws-check
+DOMAIN=doodle-arena.icanfly.click make aws-check
 ```
 
 ```bash
-DOMAIN=icanfly.click make aws-down
+DOMAIN=doodle-arena.icanfly.click make aws-down
 ```
 
 - `make aws-push` builds every image for linux/arm64 and pushes it to ECR, tagged with the commit (the tree must be clean; a tag that is already in ECR is skipped).
@@ -124,7 +124,7 @@ DOMAIN=icanfly.click make aws-down
 
 #### Backups (task 6.10, ADR 0016)
 
-- **aws-down** stops the gateway, the web app, the lobby, auth and the game servers, waits (at most 5 minutes, `DRAIN_TIMEOUT`) until the consumers, the Celery worker and the outbox relays are idle, stops the rest, then dumps the `auth`, `assets`, `marketplace` and `notifier` databases and assets' MongoDB database on the data host and copies the drawings bucket, all into `s3://doodle-arena-backups-<account>/backups/<UTC time>/`. Each file's size and SHA-256 are checked in S3, and `manifest.json` is written last. Only then does `terraform destroy` run. A failure prints `BACKUP FAILED`, leaves the stack up with its services at 0 (it still costs money), and exits: fix the cause and rerun, or end without keeping the data with `SKIP_BACKUP=1 DOMAIN=icanfly.click make aws-down`. The newest 10 backups are kept; a removed one stays recoverable as a noncurrent version for 30 days.
+- **aws-down** stops the gateway, the web app, the lobby, auth and the game servers, waits (at most 5 minutes, `DRAIN_TIMEOUT`) until the consumers, the Celery worker and the outbox relays are idle, stops the rest, then dumps the `auth`, `assets`, `marketplace` and `notifier` databases and assets' MongoDB database on the data host and copies the drawings bucket, all into `s3://doodle-arena-backups-<account>/backups/<UTC time>/`. Each file's size and SHA-256 are checked in S3, and `manifest.json` is written last. Only then does `terraform destroy` run. A failure prints `BACKUP FAILED`, leaves the stack up with its services at 0 (it still costs money), and exits: fix the cause and rerun, or end without keeping the data with `SKIP_BACKUP=1 DOMAIN=doodle-arena.icanfly.click make aws-down`. The newest 10 backups are kept; a removed one stays recoverable as a noncurrent version for 30 days.
 - **aws-up** on a fresh stack restores the newest backup that has a manifest, before the migrations: `BACKUP_ID=<id>` picks another (`aws s3 ls --profile doodle-arena s3://doodle-arena-backups-<account>/backups/`), `RESTORE=none` starts empty. It refuses a backup with a migration the deployed code (`IMAGE_TAG`) doesn't have, and fails if any table's rows differ from the manifest's after the load. The runbook is `docs/runbooks/aws-backup.md`.
 - **What comes back:** accounts, drawings, wallets, ownership, listings, purchases and webhook endpoints. Signing keys still rotate every session, so everyone signs in again. Rooms, tickets and the weekly leaderboard (Redis), the Kafka topics and the search index start empty. Fill search after `aws-up`: `POST /api/market/listings/republish` with an admin token and an `Idempotency-Key` (every active listing), then `reindex_search` in the `assets-indexer` task (ECS Exec), which indexes every approved drawing (ADR 0023).
 - **Where it shows:** CloudWatch metrics in the namespace `DoodleArena/Backups` and log lines in `/doodle-arena/backups` (docs/observability.md), and the Backups row of the service overview in AWS's Grafana.

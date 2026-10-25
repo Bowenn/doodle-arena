@@ -21,7 +21,7 @@ file), and GATEWAY names the issuer's origin:
 
     DRILL_JWT_PEM="$(aws ssm get-parameter --with-decryption \
         --name /doodle-arena/stack/jwt-private-key --query Parameter.Value --output text)" \
-        GATEWAY=https://icanfly.click uv run ... mint_tokens.py Ada
+        GATEWAY=https://doodle-arena.icanfly.click uv run ... mint_tokens.py Ada
 """
 
 import json

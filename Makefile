@@ -97,7 +97,7 @@ backup-check:
 alerts-check:
 	@python3 ./scripts/alerts-check.py
 
-# k6, many small rooms (task 5.3). GATEWAY=https://icanfly.click runs it against AWS.
+# k6, many small rooms (task 5.3). GATEWAY=https://doodle-arena.icanfly.click runs it against AWS.
 loadtest:
 	@./scripts/loadtest.sh full
 
@@ -129,7 +129,7 @@ experiment-strokes:
 	@./scripts/experiments/strokes.sh
 
 # Lighthouse, mobile, 3 runs (task 5.4): the production web image locally, or
-# GATEWAY=https://icanfly.click for the AWS stack.
+# GATEWAY=https://doodle-arena.icanfly.click for the AWS stack.
 lighthouse:
 	@./scripts/lighthouse.sh
 

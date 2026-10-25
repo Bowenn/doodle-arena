@@ -34,7 +34,7 @@ import { LobbyError, type JoinTicket } from '../../web/src/lobby.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '../..')
-// GATEWAY=https://icanfly.click plays in AWS (with DRILL_JWT_PEM, see mint_tokens.py).
+// GATEWAY=https://doodle-arena.icanfly.click plays in AWS (with DRILL_JWT_PEM, see mint_tokens.py).
 const GW = process.env.GATEWAY ?? 'http://localhost:8080'
 const WS = GW.replace(/^http/, 'ws')
 const NAMES = ['Ada', 'Bob', 'Cyd', 'Dee', 'Eve', 'Fay', 'Gus']

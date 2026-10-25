@@ -24,7 +24,7 @@ like docker kill isn't possible on Fargate: the image has no shell), and ECS sta
 replacement. For AWS, set GATEWAY to the stack's URL; the tokens are signed with the stack's
 key, read from SSM into DRILL_JWT_PEM (mint_tokens.py shows how):
 
-    GATEWAY=https://icanfly.click DRILL_JWT_PEM="$(aws ssm get-parameter ...)" \
+    GATEWAY=https://doodle-arena.icanfly.click DRILL_JWT_PEM="$(aws ssm get-parameter ...)" \
         uv run --project services/auth --with websockets python scripts/drills/failover.py stop
 """
 

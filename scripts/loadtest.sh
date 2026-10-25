@@ -17,7 +17,7 @@
 #                                       (task 6.7b, loadtest/gallery.js; make loadtest-gallery;
 #                                       CACHE=off recreates assets without its cache, ADR 0024;
 #                                       needs make seed; local only)
-#   GATEWAY=https://icanfly.click scripts/loadtest.sh
+#   GATEWAY=https://doodle-arena.icanfly.click scripts/loadtest.sh
 # It mints four access tokens per room (and, for live, one per viewer VU) with auth's own
 # TokenIssuer (mint_tokens.py): the local
 # development key, or, for an https GATEWAY, the AWS stack's key read from SSM. The tokens go to
