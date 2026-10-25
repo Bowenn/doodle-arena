@@ -53,10 +53,10 @@ The capacity, in one line: a game server at 0.25 vCPU holds about 20 to 40 four-
 
 ECS delivered SIGTERM about 18 s after `stop-task`, so the drill's own clock (32.6 s from the call) includes that delay. The lobby notices a dead server 6 to 7 s after its last heartbeat.
 
-A redeploy (Stage 5 review) now replaces the other services first, then one game server at a time, so each drains into the other: no drain hit its limit. Two costs remain, both for Stage 6:
+A redeploy (Stage 5 review) now replaces the other services first, then one game server at a time, so each drains into the other: no drain hit its limit. Two costs were left for Stage 6, and both are still open (2026-10-24):
 
-- **Replacing the lobby gives 502s for a few seconds.** The gateway resolves the lobby's name at request time and caches it for 10 s (Cloud Map's record has a TTL too), so it keeps sending to the old task until that expires: 161 room creations failed in two minutes at 80 rooms.
-- **One game server holds every room while the other is replaced.** At 0.25 vCPU that is two to four times its capacity (section 1): stroke fan-out p95 was 30.5 s and `ws_rtt` p95 14 s during those minutes. A third server, or a larger task for the duration of a deploy, would keep the survivor under its limit.
+- **Replacing the lobby gives 502s for a few seconds.** The gateway resolves the lobby's name at request time and caches it for 10 s (Cloud Map's record has a TTL too), so it keeps sending to the old task until that expires: 161 room creations failed in two minutes at 80 rooms. Nginx has no retry to another upstream (`proxy_next_upstream`) either; no change since.
+- **One game server holds every room while the other is replaced.** At 0.25 vCPU that is two to four times its capacity (section 1): stroke fan-out p95 was 30.5 s and `ws_rtt` p95 14 s during those minutes. A third server, or a larger task for the duration of a deploy, would keep the survivor under its limit. Since task 6.9 each game server has 1 vCPU, four times the size measured here, but no deploy has been measured at that size and nothing adds a server during a deploy.
 
 **Resumes after a drain under load measure the gateway's per-address limit, not the move.** Every k6 player comes from one address (the dev box's, or the Mac's Docker bridge locally), and the gateway allows one address 20 requests a second with a burst of 40 (`limit_req zone=api`), for the lobby's join and the WebSocket upgrade alike. A drained room's players all reconnect within the drain's few seconds, and each resume costs two requests: the 160 resumes of the reproduction needed about 320 at once. The rest got 429 and k6 backed off as clients do (design doc 7.4: 0.25 to 0.5 s, doubling up to 4 to 8 s), so with about four refusals each a player waited 8 to 15 s, which is the p50 of 10.6 to 12.4 s. The move itself is fast: the drain moved 41 rooms in 6.1 s, and in AWS the drill's own players, who connected from the Mac and so had a bucket of their own, were disconnected for 0.1 to 0.2 s. On the dev box the drill shared k6's address, and the same move cost its players 4.3 to 7.0 s. Real players each have their own address. A resume p50 that means something needs k6 spread over several addresses, or a load-test exemption in the gateway. The lobby answered no 5xx in either run.
 
@@ -176,7 +176,7 @@ The relays measure until each write returns, and a viewer that reads late makes 
 
 Rejected, because `EXPLAIN` didn't use it: a ledger index `(account_id) INCLUDE (amount)` for the accounts check (the planner kept a parallel sequential scan, which reads less than an index over every row).
 
-The migration to partitions (V8) copied the 1.7 million entries in 17.8 s. The read replica (ADR 0020) runs in both composes; locally it replays within a second of the primary (0 bytes behind at rest). Its lag and the primary's load under real traffic are measured in AWS in task 6.9.
+The migration to partitions (V8) copied the 1.7 million entries in 17.8 s. The read replica (ADR 0020) runs in both composes; locally it replays within a second of the primary (0 bytes behind at rest). In AWS (task 6.9, session 1) its lag peaked at 0 s over 10 minutes of the 80-room load test. That load writes little to Postgres (a reward posting per finished match, about 235 matches), so it bounds the lag under game traffic, not under a burst of marketplace writes such as `make loadtest-tips`, which hasn't run in AWS.
 
 ## 8. Tips: the hot wallet (task 6.3)
 

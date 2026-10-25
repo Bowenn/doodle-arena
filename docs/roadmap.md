@@ -161,7 +161,7 @@ Tracks:
 
 Track A:
 
-- [ ] **6.1 Live-stream room**: a relay role that reads room streams and fans them out to viewers who watch and guess.
+- [x] **6.1 Live-stream room**: a relay role that reads room streams and fans them out to viewers who watch and guess.
   - ADR 0017 is decided (2026-10-21): the lobby places viewers on relays, viewers sign in and use tickets with their own audience, a host opts in with `live`, and the target is 5,000 viewers on one room with p99 broadcast latency under 250 ms. Three PRs:
   - [x] 6.1a: the relay role, the lobby's live rooms and `watch`, two relays in `make up`, relay telemetry and the SlowRelayBroadcast alert; `scripts/drills/live_room.py` passes through the gateway (evidence log).
   - [x] 6.1b: the web app's "Live now" list and watch page (`/rooms/<id>/watch`), checked in a browser against `make up` (evidence log).
