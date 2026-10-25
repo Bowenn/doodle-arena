@@ -214,7 +214,7 @@ case "$profile" in
     rooms=1 script=loadtest/live.js
     viewer_tokens="${VIEWER_VUS:-50}"
     ;;
-  *) echo "usage: $0 [full|smoke|live|live-smoke|tips|drops]" >&2; exit 2 ;;
+  *) echo "usage: $0 [full|smoke|live|live-smoke|tips|drops|gallery]" >&2; exit 2 ;;
 esac
 
 # The players' tokens, 100 per variable (TOKENS_0, TOKENS_1, ...): Linux refuses one environment

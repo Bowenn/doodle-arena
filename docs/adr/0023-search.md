@@ -84,7 +84,7 @@ So the projection ends in the same state whatever order a drawing's events arriv
 
 It is safe while the indexer runs, because external versions refuse stale writes.
 
-**The backfill.** `POST /api/market/admin/listings/republish` (admin only) writes a `ListingCreated` for every active listing to the marketplace's outbox. The indexer treats them like any other. Run it after the first deploy of search, and after `aws-up` restores a backup. No contract changes.
+**The backfill.** `POST /api/market/listings/republish` (admin only) writes a `ListingCreated` for every active listing to the marketplace's outbox. The indexer treats them like any other. Run it after the first deploy of search, and after `aws-up` restores a backup. No contract changes.
 
 **The engine.**
 

@@ -76,7 +76,7 @@ Until Will joins the project, Bowen covers every service, including marketplace 
 
 ### 4.1 Gateway (Nginx)
 
-- Routes `/api/auth/*` to auth, `/api/lobby/*` to lobby, `/api/assets/*` and `/admin/*` to assets, `/api/market/*` to marketplace, `/api/notifier/*` to notifier, and `/ws/*` to game servers. `/otlp/v1/metrics` goes to the collector's browser receiver (task 5.4: POST only, 64 KB, 2 requests a second per address; `docs/observability.md`, "Browser telemetry").
+- Routes `/api/auth/*` to auth, `/api/lobby/*` to lobby, `/api/assets/*` and `/admin/*` to assets, `/api/market/*` to marketplace, `/api/notifier/*` to notifier, and `/ws/*` to game servers. `/otlp/v1/metrics` goes to the collector's browser receiver (task 5.4: POST only, 64 KB, 2 requests a second per address; `docs/observability.md`, "Browser telemetry"), and since task 6.9 `/otlp/v1/traces` does the same for the browser's spans, with the same limits.
 - Passes the `Upgrade` and `Connection` headers for WebSockets, with a long read timeout.
 - Applies coarse per-IP rate limiting with `limit_req`, which is a leaky bucket. Fine-grained limits live in the services.
 - Serves `/healthz` for itself and `/healthz/<service>` for every service, including each game-server instance (used by `make smoke`). These are restricted to internal traffic in AWS.
@@ -97,14 +97,15 @@ Owns the Postgres database `auth`.
 - Stores the minimum user data: Google subject id, display name, avatar URL and roles. No email address.
 - API keys (task 4.7) for developers who register webhooks. Format `da_<prefix>_<secret>`: a 12-character prefix that finds the row and 32 random bytes stored only as their SHA-256 (random and long, so a plain hash is enough), with scopes (`webhooks`) and `last_used_at` (updated at most once a minute). A key is shown once; at most 10 are active per user (counted and created under a per-user advisory lock, so concurrent requests can't pass the cap). Other services verify keys through `/internal/api-keys/verify` (constant-time comparison; revoked keys refused) and cache the result: the notifier for 30 seconds (5 seconds for an unknown key), so a revoked key keeps working for up to 30 seconds. A bearer that can't be a key (wrong shape, or over 200 characters) is refused without asking auth. When a rotated refresh token is replayed (theft), the user's API keys are revoked along with the session, since a stolen access token could have created one, and a `CredentialsRevoked` goes to `auth.users.v1`, so the notifier disables the user's webhooks (ADR 0015). This happens once per family (`reuse_handled_at`), so replaying an old token again can't revoke the user's new keys. The same transaction sets `users.credentials_revoked_at`: an access token issued at or before it can't create, list or revoke API keys (`401 TOKEN_REVOKED`), so the thief's still-valid token can't mint a fresh key. Key creation checks again under the user's advisory lock, which the theft response also takes.
 - Auth's events are written to its outbox in the transaction that causes them and published by the `auth-relay` process (`python -m app.relay`, same image; SKIP LOCKED batches, an idempotent producer, rows stamped after Kafka's acknowledgement and deleted after 7 days), like assets' relay.
-- Internal endpoints (`/internal/api-keys/verify`) are served on a separate internal port, 9091 (one uvicorn on two sockets, like the AI service), that the gateway never routes and compose never publishes.
-- Each service verifies JWTs itself, against the cached JWKS: see ADR 0001 (Accepted) for the exact checks and for how the Django admin signs moderators in. The lobby, the notifier and assets refetch the JWKS on an unknown `kid` (at most every 30 seconds) and once the cached set is 10 minutes old, so a key auth withdraws stops working within 10 minutes. While auth can't be reached they keep the last good set, but for at most an hour; after that they refuse every token until a fetch succeeds. A failed fetch is retried after 1 second, then 2, 4 and so on up to 30 seconds, so an outage costs auth at most one fetch per 30 seconds per process. While one request refreshes a stale set, the others keep using it rather than wait for the fetch.
+- Internal endpoints (`/internal/api-keys/verify`, `401 API_KEY_INVALID` for an unknown, malformed or revoked key) are served on a separate internal port, 9091 (one uvicorn on two sockets, like the AI service), that the gateway never routes and compose never publishes.
+- Each service verifies JWTs itself, against the cached JWKS: see ADR 0001 (Accepted) for the exact checks and for how the Django admin signs moderators in. The lobby, the notifier and assets refetch the JWKS on an unknown `kid` (at most every 30 seconds) and once the cached set is 10 minutes old, so a key auth withdraws stops working within 10 minutes. While auth can't be reached they keep the last good set, but for at most an hour; after that they refuse every token until a fetch succeeds. A failed fetch is retried after 1 second, then 2, 4 and so on up to 30 seconds, so an outage costs auth at most one fetch per 30 seconds per process. While one request refreshes a stale set, the others keep using it rather than wait for the fetch. The marketplace uses Spring Security's `NimbusJwtDecoder` (7.1) with its defaults instead: the set is cached for 5 minutes, so a withdrawn key stops working sooner; an unknown `kid` refetches at once, without the 30-second limit; and there is no last-good grace, so an auth outage longer than the cache refuses every token at the marketplace until auth answers again.
 
 ### 4.3 Lobby (Go)
 
 Owns the Redis key prefix `lobby:*`.
 
-- REST: create a room, list public rooms, quick play, join a room, read the leaderboard.
+- REST: create a room, list public rooms, quick play, join a room, watch a live room (`POST /rooms/{id}/watch`: a viewer's ticket for a relay, ADR 0017), read the leaderboard.
+- Relays register through the same `Heartbeat` with `role` relay, their viewer count and the rooms they stream. Watch picks the relay with the fewest viewers, counting the tickets this lobby process issued since that relay's last heartbeat, so a burst of viewers between two heartbeats spreads over the relays.
 - Keeps a registry of game servers. Each game server sends a gRPC `Heartbeat` every 2 seconds with its addresses, load and per-room status (connected players, held seats, waiting or playing), and an entry expires after 6 seconds without one. The registry gRPC port (9090) is internal.
 - Allocates new rooms to the least-loaded healthy game server through gRPC `AllocateRoom` (fewest sockets, then fewest rooms; draining servers are skipped). Each call has a 2-second deadline; if a server is full, draining or unreachable, the lobby tries the next one, up to three. Every request names the target (`server_id`), so a cached connection that reaches another instance after containers swap IP addresses is refused instead of creating a room there; on a refusal or a mismatched answer the lobby drops the connection, looks the name up again and asks the same server once more. A server that didn't answer is tried last for the next 10 seconds, so a server that heartbeats but can't be reached doesn't add its deadline to every create. The room is stored only after a server has taken it. The lobby's gRPC client takes no service config from DNS: gRPC's DNS resolver would otherwise also look up a `_grpc_config` TXT record before reporting any address, and a cold upstream took 5–8 s to answer it, longer than the first call's deadline.
 - On join, returns the room's WebSocket URL (`<ws_address>/rooms/<room_id>`, where `ws_address` is the gateway path the game server reports, such as `/ws/game-server-1`) and a join ticket: a token signed with the lobby's Ed25519 key, valid for 60 seconds and usable once, that names the user and the room (ADR 0005). The lobby doesn't enforce `max_players`: only the game server knows whether a joining player is already in the room (a reconnect), so it decides. Quick play uses the reported status to pick the fullest waiting room with a free seat: it compares held seats, not connected players, with `max_players`, because a player who steps away keeps their seat and the game server would refuse the joiner (ADR 0008). It looks at the 60 newest public rooms.
@@ -136,7 +137,7 @@ Owns the Redis key prefix `room:*` and the bucket `round-logs`.
   - When the queue is full (Kafka or S3 down for a long time), a new job is dropped rather than blocking rooms, and a job that misses its deadline is given up; either way the entry stays in the outbox. Every 30 seconds each server queues again its rooms' entries older than a minute, skipping those still queued or in flight. A server that takes a room over queues whatever the previous owner's outbox still holds, so a crash or a kill delays events instead of losing them. An empty room isn't closed while its outbox has entries: it waits another `EmptyTTL` and tries again, keeping its lease, so its entries always have an owner.
   - Every finished round is published, even one with no strokes. A match is published only if at least one round finished: one that ended during the countdown is not a result and earns nothing. Undo removes strokes from the canvas, so the stroke log contains only the strokes that remained. The canvas has a fixed 4:3 aspect, so events report 800 x 600.
 - Sends the lobby a `Heartbeat` every 2 seconds, starting at startup. Its gRPC client takes no service config from DNS (`WithDisableServiceConfig`), so the first heartbeat doesn't wait for a `_grpc_config.<host>` TXT lookup that Docker's DNS forwards upstream: a new server registers within milliseconds instead of up to 8 seconds.
-- At least two instances run locally, so failover can be tested. The same binary also runs in a relay role for live rooms (`ROLE=relay`, ADR 0017, task 6.1): `relay-1` and `relay-2` locally, section 9.
+- At least two instances run locally, so failover can be tested. The same binary also runs in a relay role for live rooms (`ROLE=relay`, ADR 0017, task 6.1): `relay-1` and `relay-2` locally under the compose profile `live` (`PROFILES=live make up`), section 9.
 
 ### 4.5 Assets (Django + Celery)
 
@@ -151,7 +152,7 @@ Consumes `RoundFinished` and runs a Celery pipeline for each drawing:
 
 Processing is idempotent: a unique `(match_id, round_no)` constraint stops a replayed `RoundFinished` from creating a second drawing.
 
-Processes (one image): gunicorn serves the REST API and the admin; `assets-consumer` reads `game.rounds.v1`; `assets-worker` runs Celery with Redis logical database 1 as its broker; `assets-beat` (exactly one) runs the recovery sweeper every minute; `assets-migrate` applies the Django migrations and `mongo-users` creates assets' MongoDB user before they start. Celery tasks are acknowledged after they finish and redelivered when their worker dies (`acks_late`, `reject_on_worker_lost`, prefetch 1), so every task runs at least once and must be idempotent. There is no result backend: a drawing's state lives in Postgres.
+Processes (one image): gunicorn serves the REST API and the admin; `assets-consumer` reads `game.rounds.v1`; `assets-worker` runs Celery with Redis logical database 1 as its broker; `assets-beat` (exactly one) runs the recovery sweeper every minute; `assets-migrate` applies the Django migrations and `mongo-users` creates assets' MongoDB user before they start; `assets-relay` publishes the outbox to Kafka (below); `assets-indexer` keeps the search index (below, compose profile `search`). Celery tasks are acknowledged after they finish and redelivered when their worker dies (`acks_late`, `reject_on_worker_lost`, prefetch 1), so every task runs at least once and must be idempotent. There is no result backend: a drawing's state lives in Postgres.
 
 A drawing's `id` is a UUIDv7: random, so it can't be guessed, and time-ordered, so new rows land at the end of the primary-key index and the gallery can page by id. Its `status` is the only state machine:
 
@@ -184,7 +185,7 @@ Search (ADR 0023, task 6.7) covers approved drawings and their active listings:
 - **The index.** The alias `drawings` points at `drawings-v<ms>`, a strict mapping: `word` (standard analyzer with ASCII folding, plus an edge n-gram subfield for prefixes), `author_ids`, `match_id`, `ended_at`, `listed` and `listing.{listing_id, seller_id, price, listed_at}`. `manage.py reindex_search` rebuilds from Postgres while the indexer runs: a new index in bulk, an atomic alias swap, a catch-up pass for drawings whose version moved during the build, then the old index is deleted.
 - **The query.** `GET /api/assets/search` matches `word` with `fuzziness: AUTO` (boosted) and `word.prefix`; filters (`listed`, price range, author) don't score; a `range` aggregation counts listed prices. Elasticsearch ranks and Postgres answers: the hits are read back from assets' tables, so a drawing rejected a moment ago is dropped and the image URLs are fresh. When Elasticsearch is down, search answers `503 SEARCH_UNAVAILABLE` and the gallery's and the market's plain lists keep working.
 - **The backfill.** Kafka keeps 7 days, so the first fill (and the one after a restore) is the marketplace's `POST /api/market/listings/republish`, which writes a `ListingCreated` for every active listing to its outbox; approved drawings come from `reindex_search`.
-- **Credentials.** Two Elasticsearch users: `assets` (read on `drawings*`) for the web process, `assets-indexer` (write and manage on `drawings*`) for the indexer. `elastic` is for the init job and humans.
+- **Credentials.** Two Elasticsearch users: `assets` (read on `drawings*`) for the web process, `assets-indexer` (read, write, create and manage on `drawings*`) for the indexer. `elastic` is for the init job and humans.
 
 The gallery cache (ADR 0024, task 6.7b) keeps the busiest reads off Postgres. It is cache-aside in assets' Redis database, under `assets:cache:*`:
 
@@ -203,6 +204,7 @@ Owns the Postgres database `marketplace`.
 - Consumes `DrawingApproved` (creates the first ownership record) and `MatchFinished` (pays rewards).
 - Publishes through a transactional outbox: `SaleCompleted`, `ListingCreated`, `ListingCancelled` and `CoinsCredited`.
 - Runs a reconciliation job every minute that checks the ledger and ownership invariants and exports them as metrics.
+- Other scheduled jobs (section 8 has the details): the outbox relay and its cleanup, the ledger's monthly partitions (daily at 03:15), expired idempotency keys (hourly), the tip and drop sweepers, and the replica's lag (every 15 seconds).
 - Takes viewers' tips into a sharded escrow and pays them to a round's drawers when its `RoundFinished` arrives (consumer of `game.rounds.v1`, ADR 0021, task 6.3; section 7.13).
 - Sells limited drops (ADR 0022, task 6.8; section 7.14): N numbered editions of an approved drawing from a set time, through a waiting room, with Redis (`market:*`) as the gate in front of Postgres.
 - Reads its browsing endpoints (listings, ownership history, owned drawings, wallet entries) from a read replica, with read-your-writes by WAL position (ADR 0020, task 6.6); writes and every read inside a transaction use the primary.
@@ -226,7 +228,7 @@ Owns the Postgres database `notifier`.
 
 Stateless.
 
-- Stage 3: `POST /v1/moderate` is a stub. The body is the drawing as `image/png` (at most 2 MB; `X-Drawing-Id` for logs). It answers `200 {decision, reason, model}` with `decision` one of `approve`, `reject` or `review` (unsure: a human decides), `503 MODERATION_UNAVAILABLE` when it fails, `415` or `400 INVALID_IMAGE` for bad input. It approves by default; `MODERATION_MODE` (`approve`, `reject`, `review`, `fail`), `MODERATION_DELAY_MS` and `MODERATION_FAILURE_RATE` change that, and `PUT /internal/moderation-mode` changes them at runtime until the next restart (`scripts/ai-mode.sh`). `/internal/*` answers only on the internal port 9091, which the gateway never routes and compose never publishes; both ports are sockets of one uvicorn server.
+- Stage 3: `POST /v1/moderate` is a stub. The body is the drawing as `image/png` (at most 2 MB; `X-Drawing-Id` for logs). It answers `200 {decision, reason, model}` with `decision` one of `approve`, `reject` or `review` (unsure: a human decides), `503 MODERATION_UNAVAILABLE` when it fails, `415` or `400 INVALID_IMAGE` for bad input. It approves by default; `MODERATION_MODE` (`approve`, `reject`, `review`, `fail`), `MODERATION_DELAY_MS` and `MODERATION_FAILURE_RATE` change that, and `PUT /internal/moderation-mode` changes them at runtime until the next restart (`GET` reads them; `scripts/ai-mode.sh`). A caller that leaves before the verdict gets `499 CLIENT_CLOSED_REQUEST` in the logs. `/internal/*` answers only on the internal port 9091, which the gateway never routes and compose never publishes; both ports are sockets of one uvicorn server.
 - Later (Stage 7): a real moderation model, `POST /v1/guess` (an AI player that guesses from the canvas) and `POST /v1/similarity` (embeddings for "close!" hints), with an eval set built from real drawings.
 
 ### 4.9 Analytics (Flink, Stage 6)
@@ -272,10 +274,12 @@ Live rooms (task 6.1b, ADR 0017):
 - The lobby has a "Live" checkbox for a new room and, above the open rooms, a "Live now" list: each live room's players and viewers (summed over every relay), with Watch. A live room in the open-rooms list shows its viewers and has Watch next to Join.
 - `/rooms/<room_id>/watch` is the room page as a viewer. It uses the same connection, which asks the lobby for a viewer's ticket (`POST /api/lobby/rooms/{id}/watch`) on every attempt and reconnects and resumes as a player's does. The page uses the same reducer and the same canvas, read-only. There is no Start button and no word choice. Its guess box sends viewer guesses (task 6.2, ADR 0019), and a panel shows the room's top guesses. "Copy watch link" shares the page.
 - A room that isn't live (`409 ROOM_NOT_LIVE`) ends the connection with a message, and `503 NO_RELAY` is retried. The page reports its Web Vitals as `page=room`.
+- A viewer sees the round's top guesses and a tip box (ADR 0021, task 6.3) while a round is being chosen or drawn: the coins leave the wallet at once and reach the drawers when the round ends, with one `Idempotency-Key` per click, reused on a retry.
 
 The gallery (task 3.5):
 
 - `/gallery` lists everyone's approved drawings (newest first, "Load more" follows `next_cursor`) or, on "Drawn by me", your own in any state with its status. Opened from the end of a match (`/gallery?match_id=<id>`), it lists that match's drawings in round order. Thumbnails load straight from storage through their presigned URLs.
+- A search box on `/gallery` and `/market` (ADR 0023, task 6.7) swaps the list for search results: a grid of hits with the total, "Load more" and the price facet's counts.
 - `/drawings/<id>` shows a drawing and plays its replay with the live canvas's `drawPoints`, so it looks like the round did. A stroke starts at its `server_received_ms` minus its last point's `t_ms`, and each point lands at that start plus its own `t_ms` (`game/replay.ts`). The replay starts at the first point, pauses longer than a second are squeezed to one, and it plays at 1x, 2x or 4x. Undone strokes are left out: the log says that a stroke was undone, not when, so the replay ends on the same picture as the PNG.
 
 The economy pages (task 4.8):
@@ -294,8 +298,8 @@ The economy pages (task 4.8):
 | Store | Database, prefix or bucket | What it holds | Owner |
 |---|---|---|---|
 | PostgreSQL | `auth` | Users, refresh tokens, API keys, the outbox of auth events | auth |
-| PostgreSQL | `assets` | Drawing metadata and moderation status, the outbox of drawing events, admin sessions | assets |
-| PostgreSQL | `marketplace` | Accounts, ledger, balances, ownership, listings, idempotency keys, outbox, Stripe events | marketplace |
+| PostgreSQL | `assets` | Drawing metadata and moderation status, the outbox of drawing events, admin sessions, and search's projection of listings (`search_listings`, `search_closed_listings`, ADR 0023) | assets |
+| PostgreSQL | `marketplace` | Accounts, ledger (partitioned by month, with closed months' totals), balances, ownership and its events, drawing authors, listings, idempotency keys, outbox, Stripe events and checkouts, tips and their rounds (ADR 0021), drops and their editions (ADR 0022) | marketplace |
 | PostgreSQL | `notifier` | Endpoints, deliveries, credential revocation watermarks | notifier |
 | Redis | `room:*` | Room event streams, snapshots, leases, fencing counters; redeemed join tickets (`room:{id}:ticket:*`); viewers' redeemed tickets (`room:{id}:viewer-ticket:*`) and correct guesses (`room:{id}:viewer-guesses`), written by relays (ADR 0019) | game-server |
 | Redis | `lobby:*` | Rooms, game-server registry, leaderboards | lobby |
@@ -305,10 +309,12 @@ The economy pages (task 4.8):
 | Object storage | `round-logs` bucket | Raw round stroke logs; a lifecycle rule deletes them after 7 days. Assets reads them: the claim check in `RoundFinished` (D13) is the one deliberate exception to "no service reads another's bucket" | game-server |
 | Object storage | `drawings` bucket | PNGs and thumbnails, content-addressed | assets |
 | Object storage | `analytics-checkpoints` bucket | Flink's checkpoints (ADR 0018) | analytics |
+| Object storage (AWS only) | `config` bucket | The data host's compose bundle for one session, written by `aws-up` | the AWS scripts |
+| Object storage (AWS only) | `doodle-arena-backups-<account>` (bootstrap root) | Each session's database dumps and drawings (ADR 0016), written by the data host's role during `aws-down` | the AWS scripts |
 | Elasticsearch | `drawings` alias (`drawings-v<ms>` indices) | Search documents for approved drawings and their active listings, rebuilt from assets' Postgres (ADR 0023) | assets |
 | Kafka | Topics in section 6.2 | Events between services | Each topic's producer |
 
-Locally there is one Postgres server with four databases and one database user per service, and a streaming read replica of it (ADR 0020: marketplace and assets read from it; it is a copy, so the owners don't change), plus one Redis, one MongoDB, SeaweedFS for S3, and one Kafka broker in KRaft mode.
+Locally there is one Postgres server with four databases and one database user per service, and a streaming read replica of it (ADR 0020: marketplace and assets read from it; it is a copy, so the owners don't change), plus one Redis, one MongoDB, SeaweedFS for S3, and one Kafka broker in KRaft mode. Elasticsearch runs only under the compose profile `search`, like the relays (`live`) and Flink (`analytics`).
 
 The owners are enforced, not just agreed on (task 5.5):
 
@@ -316,12 +322,12 @@ The owners are enforced, not just agreed on (task 5.5):
 - **Redis:** one ACL user per service, allowed only its prefixes (`infra/redis/start.sh`). Relays have their own user (ADR 0019): they read `room:*` and write only viewer tickets and viewer-guess streams.
   - The default user is off, and no user has `@admin` or `@dangerous` commands.
   - Celery's two `PSUBSCRIBE` patterns are listed literally, because Redis compares a subscribed pattern with the ACL as text.
-- **Object storage:** one SeaweedFS identity per service, scoped to its buckets (`infra/seaweedfs/entrypoint.sh`). In AWS, the IAM task roles do the same (`infra/terraform/stack/iam.tf`).
+- **Object storage:** one SeaweedFS identity per service, scoped to its buckets (`infra/seaweedfs/entrypoint.sh`), plus `dev-tools` for the host's tools (reads everything, writes `round-logs`; locally and in CI only). In AWS, the IAM task roles do the same (`infra/terraform/stack/iam.tf`).
   - game-server may only write `round-logs`.
   - assets may only read it, and read and write `drawings`.
   - analytics may only read and write `analytics-checkpoints`.
 - **MongoDB:** the `assets` user with `readWrite` on `assets` only.
-- **Elasticsearch:** security on; the `assets` user may only read `drawings*`, and `assets-indexer` only write and manage `drawings*` (`infra/elasticsearch/init.sh`). Neither reads cluster settings or system indices.
+- **Elasticsearch:** security on; the `assets` user may only read `drawings*`, and `assets-indexer` only read, write, create and manage `drawings*` (a rebuild creates a new index and swaps the alias; `infra/elasticsearch/init.sh`). Neither reads cluster settings or system indices.
 - **Kafka:** per-topic ACLs (ADR 0013).
 
 `make data-acl-check` and `make kafka-acl-check` prove the refusals in CI's stack job.
@@ -336,8 +342,8 @@ Contracts live in `proto/` and change only with human approval (see `.claude/rul
 
 | Service | Served by | Called by | Methods |
 |---|---|---|---|
-| `doodle.game.v1.ControlService` | Each game server | Lobby | `AllocateRoom(room_id, mode, settings, host_user_id, server_id)` (idempotent per `room_id`; refused with `FAILED_PRECONDITION` by any server that isn't `server_id`), `DrainServer()`: what SIGTERM does too (section 7.5) |
-| `doodle.lobby.v1.RegistryService` | Lobby | Game servers | `Heartbeat(server_id, ws_address, control_address, rooms[], sockets, draining)` every 2 seconds; `rooms` carries each room's connected players, held seats and phase |
+| `doodle.game.v1.ControlService` | Each game server | Lobby | `AllocateRoom(room_id, mode, settings, host_user_id, server_id)` (idempotent per `room_id`; refused with `FAILED_PRECONDITION` by any server that isn't `server_id`), `AllocateRoom` also carries `live` (ADR 0019: the room's owner then reads its viewer guesses); `DrainServer()`: what SIGTERM does too (section 7.5), for an operator's gRPC client: the lobby never calls it |
+| `doodle.lobby.v1.RegistryService` | Lobby | Game servers and relays | `Heartbeat(server_id, ws_address, control_address, rooms[], sockets, draining, role, viewers, watched[])` every 2 seconds; `rooms` carries each room's connected players, held seats and phase; `role` is game or relay (ADR 0017), and a relay reports its `viewers` and the rooms it streams (`watched`). The older `room_ids` is still sent and read |
 
 Every call has a deadline. `AllocateRoom` returns `INVALID_ARGUMENT` for a malformed room id, mode or settings, `FAILED_PRECONDITION` when it is meant for another server or this one drains, `RESOURCE_EXHAUSTED` when the server is full (`MAX_ROOMS`, 100 by default), `NOT_FOUND` for a room that has ended (its tombstone), `UNAVAILABLE` when the room store can't be reached or the room's previous copy here is still stopping, and `INTERNAL` when stored state can't be restored. For a room this server already runs it checks its lease first: a copy that lost the lease is stopped and the room taken again with a new token. Stage 7 may add `doodle.ai.v1` for the AI guesser.
 
@@ -354,16 +360,20 @@ Every message on a topic is that topic's wrapper message: one `oneof event` with
 | `market.sales.v1` | `SaleEvent` | `SaleCompleted` | marketplace (outbox) | notifier, analytics (Stage 6), assets (search) | `drawing_id` | 4 |
 | `market.wallet.v1` | `WalletEvent` | `CoinsCredited` | marketplace (outbox) | notifier | `user_id` | 4 |
 | `auth.users.v1` | `UserEvent` | `CredentialsRevoked` | auth (outbox, `auth-relay`) | notifier (group `notifier-auth`) | `user_id` | 4 |
-| `notifier.dlq.v1` | `DeadLetterEvent` | `DeliveryDead` | notifier | alerting, humans | `endpoint_id` | 4 |
+| `notifier.dlq.v1` | `DeadLetterEvent` | `DeliveryDead` | notifier | humans: `eventctl` as `dev-tools` locally, `kafka-admin` on the data host in AWS (no service reads it; WebhooksFailing alerts on `notifier.deliveries`) | `endpoint_id` | 4 |
 | `live.guesses.v1` | `ViewerGuessEvent` | `ViewerGuess` | relays (Kafka user `relay`, ADR 0019) | analytics | `room_id` | 6 |
 | `live.top-guesses.v1` | `TopGuessesEvent` | `TopGuesses` | analytics | relays (no consumer group) | `room_id` | 6 |
-| `analytics.flags.v1` | `AnalyticsFlagEvent` | `WashTradeFlagged` | analytics | humans, the analytics dashboard and alerts | `drawing_id` | 6 |
+| `analytics.flags.v1` | `AnalyticsFlagEvent` | `WashTradeFlagged` | analytics | humans, as for `notifier.dlq.v1` (no service reads it; the analytics dashboard and WashTradingFlagged use the job's counter) | `drawing_id` | 6 |
 
 Key payload fields:
 
 - `RoundFinished`: `match_id`, `room_id`, `round_no`, `word`, `drawer_ids` (the first one becomes the initial owner), `stroke_log_key`, `stroke_count`, `canvas_width`, `canvas_height`, `ended_at`.
 - `MatchFinished`: `match_id`, `room_id`, `mode`, `started_at`, `ended_at`, `results[]` with `user_id`, `score` and `placement`.
-- `DrawingApproved`: `drawing_id`, `match_id`, `round_no`, `author_ids`, `initial_owner_id`, `sha256`, `image_key`, `thumb_key`.
+- `DrawingApproved`: `drawing_id`, `match_id`, `round_no`, `author_ids`, `initial_owner_id`, `sha256`, `image_key`, `thumb_key`, `approved_by` (the AI or a moderator).
+- `DrawingRejected`: `drawing_id`, `match_id`, `round_no`, `author_ids`, `rejected_by`, `reason` (short and machine-readable, such as `moderation:unsafe`).
+- `ListingCreated`: `listing_id`, `drawing_id`, `seller_id`, `price`, `created_at`. `ListingCancelled`: `listing_id`, `drawing_id`, `seller_id`, `cancelled_at`.
+- `CredentialsRevoked`: `user_id`, `reason` (`refresh_token_reuse`), `revoked_at`: access tokens issued at or before it are no longer trusted by the notifier (ADR 0015).
+- `DeliveryDead`: `delivery_id`, `endpoint_id`, `source_event_id`, `source_event_type`, `attempts`, `last_status_code` (0 without a response), `last_error` (never secrets or bodies), `first_attempt_at`, `dead_at`.
 - `SaleCompleted`: `sale_id`, `listing_id`, `drawing_id`, `seller_id`, `buyer_id`, `price`, `royalties[]` with `user_id` and `amount`, `completed_at`.
 - `CoinsCredited`: `user_id`, `amount`, `reason` (`stripe_purchase`, `reward`, `tip`, `tip_refund` (ADR 0021) or `drop_sale` (ADR 0022)), `reference` (the session id, the match id, `<match_id>:<round_no>` for tips, the tip id for a refund).
 - `ViewerGuess`: `room_id`, `round_no`, `text` (normalized as in section 6.4), `guessed_at` (the event time). Only wrong guesses are published: the top guesses are shown to every viewer.
@@ -378,8 +388,8 @@ All endpoints go through the gateway, use JSON, and require a JWT bearer token u
 
 Auth:
 
-- `GET /api/auth/google/login` and `GET /api/auth/google/callback` (no JWT)
-- `POST /api/auth/refresh` (refresh cookie), `POST /api/auth/logout`, `GET /api/auth/me`
+- `GET /api/auth/google/login?return_to=<path>` and `GET /api/auth/google/callback` (no JWT). `return_to` must be a path on this site (`400 INVALID_RETURN_TO`); without Google's settings both answer `503 GOOGLE_NOT_CONFIGURED`. The callback answers `400 OAUTH_STATE_INVALID` (expired or started elsewhere), `502 GOOGLE_UNAVAILABLE` or `400 ID_TOKEN_INVALID`.
+- `POST /api/auth/refresh` (refresh cookie), `POST /api/auth/logout`, `GET /api/auth/me`. Refresh and logout refuse another site's `Origin` (`403 ORIGIN_NOT_ALLOWED`); a refresh without a valid token answers `401 REFRESH_TOKEN_INVALID`. `/me` answers `401 TOKEN_MISSING` or `TOKEN_INVALID`, where the other services say `UNAUTHENTICATED`.
 - `GET /api/auth/.well-known/jwks.json` (public)
 - `POST /api/auth/api-keys` takes `{name, scopes: ["webhooks"]}` and returns `201 {id, name, prefix, scopes, created_at, last_used_at, key}` (the key appears only here; `Cache-Control: no-store`). `GET /api/auth/api-keys` returns `{api_keys: [...]}` without keys; `DELETE /api/auth/api-keys/{id}` revokes (`204`, or `404 API_KEY_NOT_FOUND`). `400 INVALID_SCOPE`, `400 INVALID_REQUEST` (an empty `scopes` list, or a `name` that isn't 1 to 100 characters), `409 TOO_MANY_API_KEYS` (10 active). JWT-authenticated; a token issued at or before the user's credential revocation is `401 TOKEN_REVOKED` (ADR 0015).
 
@@ -606,7 +616,7 @@ The reconciliation job also checks that each escrow shard holds exactly its pend
 ADR 0022, task 6.8. Many buyers race for few editions at the same second; most must hear "sold out" quickly, and none may get an edition that doesn't exist.
 
 1. An admin creates the drop: a `drops` row and, in the same transaction, the edition numbers 1..N in a Redis list (`market:{drop:<id>}:free`).
-2. Before `opens_at`, buyers join the waiting room: a sorted set scored by a random number (a lottery), so joining early or refreshing gives no advantage. After the open, joiners queue behind in arrival order. A place is admitted once its rank is below `admit_per_second` (50) times the seconds since the open: admission is a function of time, so nothing has to run to admit people.
+2. Before `opens_at`, buyers join the waiting room: a sorted set scored by a random number (a lottery), so joining early or refreshing gives no advantage. After the open, joiners queue behind in arrival order. A place is admitted once its rank is below `admit_per_second` (50) times the seconds since the open plus one (every started second admits its 50): admission is a function of time, so nothing has to run to admit people.
 3. A purchase passes the user's token bucket and a read-only Lua look at the drop, which answers sold out (first, so everyone hears it at once), not joined and not admitted without touching Postgres. Then, under the `Idempotency-Key`, a Lua script reserves one edition, and one Postgres transaction inserts the edition row and posts a `drop_purchase` (buyer to one of 16 `drop_escrow` accounts, key `drop:<drop_id>:<buyer>`). `PRIMARY KEY(drop_id, edition_no)`, `UNIQUE(drop_id, buyer_id)` and `CHECK(edition_no <= editions)` make overselling impossible even if Redis is wrong. After the commit Redis marks the reservation paid; a rollback gives it back.
 4. Once the drop sold out, or a minute after it closed, the sweeper pays its escrow to the drawing's authors (split like royalties) in one posting per batch (`drop-settle:<drop_id>:<n>`), with `CoinsCredited` (`DROP_SALE`). It also gives back reservations older than a minute whose purchase never committed, and rebuilds a drop's list from Postgres if Redis lost it.
 
@@ -706,14 +716,15 @@ Limits, besides the protocol's (section 6.4):
 
 | Limit | Value | What happens past it |
 |---|---|---|
-| Messages from one socket | 100 at once, then 50 per second | Closed with 1008 (flooding) |
+| Messages from one player socket | 100 at once, then 50 per second | Closed with 1008 (flooding) |
 | Send queue per socket | 256 messages, 10-second write timeout | Closed with 1013 (too slow); the client resumes |
 | Points per round | 40,000 | `error {code: canvas_full}`; the stroke is dropped |
 | `stroke_id` | `[A-Za-z0-9_-]{1,32}`; `color` lowercase `#rrggbb` | `error {code: bad_request}` |
 | Rooms per server | `MAX_ROOMS`, 100 by default | `AllocateRoom` answers `RESOURCE_EXHAUSTED` |
-
-Measured capacity (task 5.3, evidence log): a game server with 0.25 vCPU (the AWS stack's size) holds about 20 four-player rooms with two drawers streaming strokes; past that its CPU is pinned and its sockets' send queues back up (pongs wait seconds). Two metrics show it, and the SlowBroadcasts alert watches both: `game.room.input_lag` (a player's message waiting in the room's inbox, which is where most of the delay builds up) and `game.ws.send_lag` (a message waiting in a socket's send queue). `game.broadcast.duration` ends at the send queue and can't. `MAX_ROOMS` (100) is therefore far above what that size can serve: the allocator's least-loaded choice spreads rooms, but nothing stops one server taking more than it can carry. Sizing `MAX_ROOMS` to the task's CPU, or allocating by load rather than counts, is a Stage 6 question.
 | Replay on resume | 200 events | A full `welcome` instead |
+| Messages from one viewer socket (relays) | 20 at once, then 5 per second | Closed with 1008 (flooding) |
+
+Measured capacity (task 5.3, evidence log): a game server with 0.25 vCPU (the AWS stack's size until task 6.9, which gave each game server 1 vCPU) holds about 20 four-player rooms with two drawers streaming strokes; past that its CPU is pinned and its sockets' send queues back up (pongs wait seconds). Two metrics show it, and the SlowBroadcasts alert watches both: `game.room.input_lag` (a player's message waiting in the room's inbox, which is where most of the delay builds up) and `game.ws.send_lag` (a message waiting in a socket's send queue). `game.broadcast.duration` ends at the send queue and can't. `MAX_ROOMS` (100) was therefore far above what that size could serve, and is still above what 1 vCPU has been measured to carry (80 rooms across two servers in task 6.9): the allocator's least-loaded choice spreads rooms, but nothing stops one server taking more than it can carry. Sizing `MAX_ROOMS` to the task's CPU, or allocating by load rather than counts, is still open after Stage 6.
 
 Rules the actor applies that the protocol doesn't show: a player who joins during a match goes to the back of the draw order and draws in that match; drawers can't chat while choosing either; a heartbeat's `sockets` is the sum of connected players, not open sockets.
 
@@ -758,7 +769,7 @@ In CAP terms, the marketplace chooses consistency during a network partition: it
 - Kafka (ADR 0013, task 5.5): every service has its own SCRAM-SHA-512 user, and ACLs follow the catalog in section 6.2, deny by default: each topic's producer writes it, its consumers read it and use only their own groups, and no service has admin rights (`infra/kafka/init.sh` holds the table). Only Kafka's clients share its Compose network: the gateway, auth, the AI service and the assets web process and Celery worker can't reach the broker at all. In AWS the listener is `SASL_SSL` with the stack's own CA (`infra/terraform/stack/kafka.tf`). `make kafka-acl-check` (CI's stack job) proves the refusals: no credential, a wrong password, admin over the network, writing another service's topic, joining another service's group, creating a topic, changing retention. The broker counts failed logins and logs every denial with its principal (KafkaAuthFailures). The super user for humans, `admin`, logs in only on a localhost listener inside the broker container, and every use raises KafkaAdminUsed. What ACLs can't stop is a wrong event from the right producer, so the marketplace keeps its contract checks.
 - WebSockets use single-use join tickets that expire after 60 seconds, never a JWT in the URL. The lobby signs them with an Ed25519 key, and game servers hold only the public key, so they can verify tickets but never mint them (ADR 0005).
 - Outgoing webhooks are signed with a per-endpoint secret and a timestamp, and never go to internal addresses (section 4.7); incoming Stripe webhooks are verified with Stripe's signature.
-- Secrets come from environment variables (`.env` locally, never committed; `.env.example` lists the names). In AWS they come from SSM Parameter Store or Secrets Manager.
+- Secrets come from environment variables (`.env` locally, never committed; `.env.example` lists the names). In AWS they come from SSM Parameter Store (SecureString parameters; nothing uses Secrets Manager).
 - Logs never contain secrets, tokens, API keys, email addresses or individual strokes.
 - Every endpoint validates its input. Rate limits apply at the gateway (coarse) and in the game server (per player).
 - The Django admin is reachable only for `moderator` and `admin` roles: Google sign-in is bridged into a short Django session (ADR 0001). It is restricted further in AWS.
@@ -769,7 +780,7 @@ See `docs/observability.md` for the pipeline, the log format, metric names, trac
 
 Since task 6.9 (D62):
 
-- **SLOs:** three, with multi-window burn-rate alerts (observability.md section 8): API availability 99.5%, API latency 99% under 500 ms, live broadcast 99% under 250 ms.
+- **SLOs:** three (observability.md section 8): API availability 99.5% and API latency 99% under 500 ms, each with multi-window burn-rate alerts, and live broadcast 99% under 250 ms, watched by SlowRelayBroadcast (a p99 threshold).
 - **Tail sampling in the collector:** errors, slow traces, money traces and synthetic checks are kept, health checks dropped, 10% of the rest.
 - **Deploy markers** from `make up` and `aws-up`.
 - **The browser's errors and fetch spans:** their own traces, with re-keyed ids and no trace context sent to the API.
@@ -794,6 +805,8 @@ CI (GitHub Actions, `.github/workflows/`):
 - Merge first, revert if needed: nothing deploys from `master` (AWS changes only through `make aws-*` from a developer's machine), so a low-risk PR may merge before `stack` finishes, and the `master` run is the safety net. A red `master` run is reverted at once (the merged PR's Revert button), then fixed on a branch. The rule for which PRs must wait is in `CLAUDE.md`, Definition of done.
 - `observability.yml`: dashboards, alert rules and runbooks checked against each other and `docs/observability.md` (`make lint s=observability`).
 - `workflows.yml`: actionlint on the workflow files (`make lint s=ci` locally).
+- `terraform.yml`: `infra/terraform/` checked offline (fmt, validate for both roots and the module, tflint; `make lint s=terraform`) and the backup logic's unit tests; it never plans or applies.
+- `libs-go.yml` and `eventctl.yml`: the shared Go packages (`libs/go/`) and the event tool (`tools/eventctl`), like a service.
 - `secrets.yml`: gitleaks over the whole git history, on every PR and push with no path filter (`make lint s=secrets` locally). Exceptions live in `.gitleaks.toml`; today only the JWT test fixtures, whose signing key is never stored.
 - Actions are pinned to full commit SHAs, and Dependabot updates them weekly. Workflows have read-only permissions, and event data never goes straight into `run:` scripts.
 - A path-filtered workflow that doesn't run never reports a status, so it can't be a required check. If `master` gets branch protection, add an always-run gate job first.
@@ -807,7 +820,7 @@ AWS (Stage 5):
   - Flink's JobManager and TaskManager, checkpointing to an `analytics-checkpoints` bucket through `s3a://` with the task role (locally `s3p://` with SeaweedFS's keys);
   - game servers at 1 vCPU.
   - **The data host's security group** names every caller on the stores' ports, but takes telemetry (OTLP) from the whole VPC with one rule, which keeps it under AWS's 60 inbound rules.
-- Fixed parts: S3 for both buckets, CloudWatch for AWS resource metrics and logs, a billing alarm, Terraform in `infra/terraform/`, and secrets in SSM Parameter Store or Secrets Manager.
+- Fixed parts: S3 for the buckets (round logs, drawings, analytics checkpoints and the data host's `config` bundle per session; the state and backup buckets in the bootstrap root), CloudWatch for AWS resource metrics and logs, Terraform in `infra/terraform/`, and secrets in SSM Parameter Store. The budget alarm (`doodle-arena-monthly`, $35) was made by hand before anything else and stays outside Terraform, so no destroy can remove it.
 
 Releases:
 
@@ -880,7 +893,7 @@ Releases:
 | D59 | Search (ADR 0023, task 6.7): self-hosted Elasticsearch 9 (security on, a read user for the web process and a write user for the indexer); one indexer reading `assets.drawings.v1`, `market.listings.v1` and `market.sales.v1` that keeps a projection of active listings in assets' Postgres and writes each drawing's whole document with an external version; an alias with rebuilds from Postgres; hits read back from Postgres; the marketplace's admin republish as the backfill | Building every document from assets' own tables makes the order of three topics irrelevant and a rebuild needs nothing outside assets; external versions make retries and a concurrent rebuild safe; Kafka keeps 7 days, so replaying topics can't rebuild; dual writes from the request path could leave Elasticsearch and Postgres disagreeing; a managed search service was more cost than this project needs |
 | D60 | Gallery cache (ADR 0024, task 6.7b): cache-aside in assets' Redis under `assets:cache:*`; approved drawings by their fields for 10 minutes (URLs signed per response); the gallery's first three pages for 60 seconds under a generation bumped after each approval commits, filled from the primary by one request holding a lock while others wait up to 200 ms; fail open with a 5-second skip; no takedown action | A decision is final, so approved drawings never go stale; the generation closes the cache-aside race that deleting keys leaves open, and needs no `SCAN`; single-flight turns each approval's miss into one query; Postgres stays the only truth, so Redis failing only slows the gallery |
 | D61 | Stroke wire format and batching (ADR 0025, task 6.4): batches stay at 50 ms and JSON by default; a socket may ask for the subprotocol `doodle.strokes.pb` to send and receive stroke batches as `doodle.game.v1.StrokeFrame`, encoded once per format per event, while the event log, welcome, replays, relays and viewers stay JSON | Measured with each game server at one CPU: protobuf cut stroke bytes by about 70% but not server CPU (the log stays JSON, so strokes are encoded twice), and 33 ms batches bought 17 ms of ink delay for 38% more CPU and 45% more Redis commands; the opt-in keeps the bandwidth saving available without making two codecs everyone's dependency |
-| D62 | Final measurements (task 6.9): three SLOs with multi-window burn-rate alerts computed in the alert queries; tail sampling in otel-lgtm's collector; deploy markers posted by `make up` and `aws-up`; the browser's spans as their own traces (ids re-keyed, no traceparent to the API, status decided by the collector); relays and Flink in AWS; a fire drill that times alert and runbook; `lobby.servers.healthy` by role | Burn rates say how fast the month's budget goes, which a 5xx-rate threshold doesn't. The collector can keep whole traces by outcome, which a head sampler can't know. Deploys come from a laptop, not CI. A public telemetry endpoint must not be a way into backend traces. The drill found relays hiding a dead game server from GameServerDown |
+| D62 | Final measurements (task 6.9): three SLOs, the two API ones with multi-window burn-rate alerts computed in the alert queries; tail sampling in otel-lgtm's collector; deploy markers posted by `make up` and `aws-up`; the browser's spans as their own traces (ids re-keyed, no traceparent to the API, status decided by the collector); relays and Flink in AWS; a fire drill that times alert and runbook; `lobby.servers.healthy` by role | Burn rates say how fast the month's budget goes, which a 5xx-rate threshold doesn't. The collector can keep whole traces by outcome, which a head sampler can't know. Deploys come from a laptop, not CI. A public telemetry endpoint must not be a way into backend traces. The drill found relays hiding a dead game server from GameServerDown |
 | D63 | The AWS stack serves the app at `doodle-arena.icanfly.click`, not at the apex (task 6.11); the apex is left for other uses. Terraform takes the host name and its Route 53 zone separately, and `scripts/aws/common.sh` finds the zone as the longest suffix of `DOMAIN` that Route 53 has | A subdomain keeps the app on its own origin, so its cookies, storage and CSP aren't shared with other apps on the domain, as they would be under a path such as `/exp/doodle-arena/`; a path would also need a base path in the web build, nginx and every absolute URL. It is still the same site, so a sibling subdomain could set a cookie for the whole domain: accepted while the domain's owner runs every sibling |
 
 New decisions become ADRs (`/adr`) and get a line here when accepted.

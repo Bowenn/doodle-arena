@@ -65,7 +65,7 @@ Bowen chose **A, A and A**: an admin drop that pays the authors, a Redis gate wi
   - Joining before the open scores the user with a random number in [0, 1), drawn by the marketplace (`SecureRandom`). After the open, the score is `1 + now_ms`.
   - A user is admitted once their rank is below `admit_per_second × (seconds since open + 1)`. Admission is a function of time, so nothing has to run to admit people.
 - **A purchase:**
-  1. Claim the `Idempotency-Key` (ADR 0012), then pass the user's token bucket.
+  1. Pass the user's token bucket and a read-only look at the drop in Redis (sold out, not admitted yet), then claim the `Idempotency-Key` (ADR 0012). As built, these checks run before the claim, so a refused attempt leaves no key behind (design doc 7.14).
   2. Reserve an edition in Redis.
   3. One Postgres transaction:
      - insert the edition row;
