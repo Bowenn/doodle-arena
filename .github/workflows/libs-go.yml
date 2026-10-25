@@ -6,18 +6,22 @@ on:
   pull_request:
     paths:
       - libs/go/**
+      - fixtures/jwt/** # authn's shared cases (ADR 0001)
       - .github/workflows/libs-go.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
+      - scripts/ci-pull.sh
       - scripts/lint.sh
       - scripts/services.sh
   push:
     branches: [master]
     paths:
       - libs/go/**
+      - fixtures/jwt/** # authn's shared cases (ADR 0001)
       - .github/workflows/libs-go.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
+      - scripts/ci-pull.sh
       - scripts/lint.sh
       - scripts/services.sh
   workflow_dispatch: {}

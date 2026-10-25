@@ -10,6 +10,7 @@ on:
       - .github/workflows/assets.yml
       - .github/workflows/_python.yml
       - scripts/test.sh
+      - scripts/ci-pull.sh
       - scripts/lint.sh
       - scripts/services.sh
       - .github/workflows/_docker.yml
@@ -22,6 +23,7 @@ on:
       - .github/workflows/assets.yml
       - .github/workflows/_python.yml
       - scripts/test.sh
+      - scripts/ci-pull.sh
       - scripts/lint.sh
       - scripts/services.sh
       - .github/workflows/_docker.yml

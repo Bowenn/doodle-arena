@@ -2,6 +2,17 @@
 # The build context is the repository root, so the build can include the generated contracts in
 # proto/gen/java (settings.gradle.kts includes ../../proto/gen/java). Dockerfile.dockerignore,
 # next to this file, sends only those two folders to the builder.
+# The OpenTelemetry Java agent, downloaded in a stage of its own and retried, as in
+# infra/kafka/Dockerfile: a single ADD from Maven Central got a corrupted body in CI twice (a
+# digest mismatch). The sha256 is still checked.
+FROM alpine:3.22.1 AS agent
+ARG AGENT_URL=https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.32.0/opentelemetry-javaagent-2.32.0.jar
+ARG AGENT_SHA256=f787eb6c7f3d18e69a431e108a15278d25ee37f83d68b678f621e063f3988f82
+RUN for attempt in 1 2 3 4 5; do \
+      wget -q -O /agent.jar "$AGENT_URL" && echo "$AGENT_SHA256  /agent.jar" | sha256sum -c - && exit 0; \
+      echo "agent download failed (attempt $attempt), retrying" >&2; rm -f /agent.jar; sleep $((attempt * 5)); \
+    done; exit 1
+
 FROM eclipse-temurin:25.0.4.1_1-jdk AS build
 WORKDIR /src/services/marketplace
 COPY proto/gen/java /src/proto/gen/java
@@ -20,14 +31,12 @@ RUN apt-get update \
     && useradd --system --uid 10001 app \
     && mkdir /otel
 # Traces, metrics and logs come from the OpenTelemetry Java agent (rule: .claude/rules/java.md),
-# so the code needs no tracing calls. The jar is pinned by version and Maven Central's sha256.
+# so the code needs no tracing calls. The jar is pinned by version and Maven Central's sha256
+# (the agent stage above).
 # JAVA_TOOL_OPTIONS loads it only in the image; `./gradlew test` runs without it. The agent
 # reads its settings from the OTEL_* env vars that docker-compose sets. /otel is created above,
-# because ADD --chmod would give a directory it creates the file's mode (no x bit).
-ADD --chmod=0644 \
-    --checksum=sha256:f787eb6c7f3d18e69a431e108a15278d25ee37f83d68b678f621e063f3988f82 \
-    https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.32.0/opentelemetry-javaagent-2.32.0.jar \
-    /otel/opentelemetry-javaagent.jar
+# because COPY --chmod would give a directory it creates the file's mode (no x bit).
+COPY --from=agent --chmod=0644 /agent.jar /otel/opentelemetry-javaagent.jar
 ENV JAVA_TOOL_OPTIONS="-javaagent:/otel/opentelemetry-javaagent.jar"
 COPY --from=build /app.jar /app/app.jar
 USER app

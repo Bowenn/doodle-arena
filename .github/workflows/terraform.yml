@@ -13,6 +13,7 @@ on:
       - scripts/aws/**
       - scripts/lint.sh
       - scripts/test.sh
+      - scripts/ci-pull.sh
       - .github/workflows/terraform.yml
   push:
     branches: [master]
@@ -22,6 +23,7 @@ on:
       - scripts/aws/**
       - scripts/lint.sh
       - scripts/test.sh
+      - scripts/ci-pull.sh
       - .github/workflows/terraform.yml
   workflow_dispatch: {}
 

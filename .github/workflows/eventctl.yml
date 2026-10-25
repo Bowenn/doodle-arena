@@ -10,6 +10,7 @@ on:
       - .github/workflows/eventctl.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
+      - scripts/ci-pull.sh
       - scripts/lint.sh
       - scripts/services.sh
   push:
@@ -21,6 +22,7 @@ on:
       - .github/workflows/eventctl.yml
       - .github/workflows/_go.yml
       - scripts/test.sh
+      - scripts/ci-pull.sh
       - scripts/lint.sh
       - scripts/services.sh
   workflow_dispatch: {}
