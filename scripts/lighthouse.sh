@@ -3,7 +3,7 @@
 # Lighthouse's default mobile emulation (a mid-range phone on a slow 4G link), asserting the
 # median run: performance score >= 0.9, LCP <= 2.5 s, CLS <= 0.1 (TBT and accessibility warn).
 #   scripts/lighthouse.sh                                 the production web image, run locally
-#   GATEWAY=https://icanfly.click scripts/lighthouse.sh   the AWS stack (make aws-up)
+#   GATEWAY=https://doodle-arena.icanfly.click scripts/lighthouse.sh   the AWS stack (make aws-up)
 # The local run builds web/Dockerfile's static target (the image AWS runs) and serves it alone,
 # so it measures the bundle and nginx's caching and compression; the app's API calls fail there,
 # so only AWS gives the real numbers. Reports stay on disk (web/.lighthouseci/reports), never

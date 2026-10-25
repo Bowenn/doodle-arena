@@ -18,9 +18,9 @@ Two drills:
 
 Before a drill:
 
-1. **Is the stack healthy?** `make smoke` (in AWS, `DOMAIN=icanfly.click make aws-check`), and no alert firing on the service overview: the script refuses to start if its alert isn't normal.
+1. **Is the stack healthy?** `make smoke` (in AWS, `DOMAIN=doodle-arena.icanfly.click make aws-check`), and no alert firing on the service overview: the script refuses to start if its alert isn't normal.
 2. **Is the team told?** Say "fire drill" in the team channel first: the alerts reach Discord in AWS.
-3. **For the game-server drill, is the load test running?** `make loadtest` (locally, or `GATEWAY=https://icanfly.click` from the dev box in AWS). Its rooms' resumes are the failover under load.
+3. **For the game-server drill, is the load test running?** `make loadtest` (locally, or `GATEWAY=https://doodle-arena.icanfly.click` from the dev box in AWS). Its rooms' resumes are the failover under load.
 
 ## Fix
 
@@ -30,7 +30,7 @@ Running it:
 - In AWS: run `make aws-grafana` in another terminal, then:
 
   ```bash
-  DRILL_ENV=aws GATEWAY=https://icanfly.click GRAFANA=http://localhost:3300 GRAFANA_USER=admin GRAFANA_PASSWORD=<from SSM> DRILL_JWT_PEM="$(aws ssm get-parameter ... jwt-private-key ...)" uv run --project services/auth python scripts/drills/fire_drill.py
+  DRILL_ENV=aws GATEWAY=https://doodle-arena.icanfly.click GRAFANA=http://localhost:3300 GRAFANA_USER=admin GRAFANA_PASSWORD=<from SSM> DRILL_JWT_PEM="$(aws ssm get-parameter ... jwt-private-key ...)" uv run --project services/auth python scripts/drills/fire_drill.py
   ```
 
 What happens:

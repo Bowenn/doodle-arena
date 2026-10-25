@@ -17,17 +17,34 @@ require_aws() {
 
 account_id() { aws sts get-caller-identity --query Account --output text; }
 
-# The stack root's settings: the domain (required), who may reach the load balancer
-# (ALLOWED_CIDRS, default everyone; TEAM_CIDRS is its old name) and the image tag (default: HEAD,
-# which push-images.sh pushed).
+# The Route 53 hosted zone that holds $1: the longest of its suffixes Route 53 has a public zone
+# for (doodle-arena.icanfly.click, then icanfly.click). Prints nothing when none matches.
+find_zone() {
+  local name="$1" found
+  while [[ "$name" == *.* ]]; do
+    found="$(aws route53 list-hosted-zones-by-name --dns-name "$name" --max-items 1 \
+      --query "HostedZones[?Name==\`$name.\` && Config.PrivateZone==\`false\`].Name | [0]" --output text)"
+    if [[ "$found" == "$name." ]]; then
+      echo "$name"
+      return
+    fi
+    name="${name#*.}"
+  done
+}
+
+# The stack root's settings: the domain (required), its hosted zone (ZONE, default: found from
+# DOMAIN), who may reach the load balancer (ALLOWED_CIDRS, default everyone; TEAM_CIDRS is its old
+# name) and the image tag (default: HEAD, which push-images.sh pushed).
 stack_vars() {
-  : "${DOMAIN:?set DOMAIN to the Route 53 domain, for example DOMAIN=example.com}"
+  : "${DOMAIN:?set DOMAIN to the host name of the app, for example DOMAIN=doodle-arena.example.com}"
+  ZONE="${ZONE:-$(find_zone "$DOMAIN")}"
+  : "${ZONE:?no Route 53 hosted zone found for $DOMAIN, or an AWS error above; set ZONE to the name of the zone}"
   ALLOWED_CIDRS="${ALLOWED_CIDRS:-${TEAM_CIDRS:-0.0.0.0/0}}"
   IMAGE_TAG="${IMAGE_TAG:-$(git -C "$ROOT" rev-parse --short=12 HEAD)}"
   local cidrs
   cidrs="$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1].split(",")))' "$ALLOWED_CIDRS")"
   # shellcheck disable=SC2034 # used by the scripts that source this file
-  TF_STACK_VARS=(-var "domain_name=$DOMAIN" -var "allowed_cidrs=$cidrs" -var "image_tag=$IMAGE_TAG")
+  TF_STACK_VARS=(-var "domain_name=$DOMAIN" -var "zone_name=$ZONE" -var "allowed_cidrs=$cidrs" -var "image_tag=$IMAGE_TAG")
 }
 
 # Points the stack root at the state bucket the bootstrap root made.

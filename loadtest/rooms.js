@@ -48,7 +48,7 @@ const HOLD = Number(__ENV.HOLD || 240)
 const ROOM_SECONDS = Number(__ENV.ROOM_SECONDS || (SMOKE ? 50 : FIXED ? ROOMS + HOLD : 420))
 
 export const options = {
-  // PIN_HOST=icanfly.click PIN_IP=<address> skips the local resolver, which may still cache a
+  // PIN_HOST=doodle-arena.icanfly.click PIN_IP=<address> skips the local resolver, which may still cache a
   // "no such name" from before the stack existed (a fresh stack's record is minutes old).
   hosts: __ENV.PIN_HOST ? { [__ENV.PIN_HOST]: __ENV.PIN_IP } : {},
   scenarios: {

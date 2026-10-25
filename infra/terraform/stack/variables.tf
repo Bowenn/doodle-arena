@@ -5,7 +5,12 @@ variable "region" {
 }
 
 variable "domain_name" {
-  description = "The public domain, registered in Route 53 (its hosted zone already exists). The app is served at its apex."
+  description = "The app's host name: the hosted zone's apex or a name under it, such as doodle-arena.icanfly.click."
+  type        = string
+}
+
+variable "zone_name" {
+  description = "The Route 53 hosted zone that holds domain_name: its apex or a parent, such as icanfly.click. It already exists (the domain's registration made it); scripts/aws/common.sh finds it from DOMAIN."
   type        = string
 }
 

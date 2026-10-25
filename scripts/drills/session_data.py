@@ -1,9 +1,9 @@
 """Data that must survive from one AWS session to the next (ADR 0016, the exit of task 6.10,
 run in task 6.9).
 
-    GATEWAY=https://icanfly.click DRILL_JWT_PEM=... uv run --project services/auth \\
+    GATEWAY=https://doodle-arena.icanfly.click DRILL_JWT_PEM=... uv run --project services/auth \\
         python scripts/drills/session_data.py record <file>     in session 1, after make loadtest
-    GATEWAY=https://icanfly.click DRILL_JWT_PEM=... uv run --project services/auth \\
+    GATEWAY=https://doodle-arena.icanfly.click DRILL_JWT_PEM=... uv run --project services/auth \\
         python scripts/drills/session_data.py check <file>      in session 2, after aws-up restored
 
 record works with two load-test players (Load0001 and Load0002, whose matches gave them coins

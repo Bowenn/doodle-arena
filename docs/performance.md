@@ -6,9 +6,9 @@ All of the measured numbers on one page: the game under load and failover (task 
 
 | What | Command | Where to look |
 |---|---|---|
-| Load: up to 80 four-player rooms over 12 minutes, two drawers each sending a stroke batch every 50 ms | `make loadtest` (local), `GATEWAY=https://icanfly.click make loadtest` (AWS) | Grafana, "Doodle Arena: load test" |
+| Load: up to 80 four-player rooms over 12 minutes, two drawers each sending a stroke batch every 50 ms | `make loadtest` (local), `GATEWAY=https://doodle-arena.icanfly.click make loadtest` (AWS) | Grafana, "Doodle Arena: load test" |
 | Failover under load | `scripts/drills/failover.py kill` (local, `docker kill`), `stop` (AWS, `aws ecs stop-task`) at the 80-room plateau | The drill's own output; lobby and game-server logs |
-| Lighthouse: 3 runs each of `/` and `/gallery`, mobile emulation, the median run | `make lighthouse` (the production web image, locally), `GATEWAY=https://icanfly.click make lighthouse` (AWS) | The script's table; reports in `web/.lighthouseci/reports` |
+| Lighthouse: 3 runs each of `/` and `/gallery`, mobile emulation, the median run | `make lighthouse` (the production web image, locally), `GATEWAY=https://doodle-arena.icanfly.click make lighthouse` (AWS) | The script's table; reports in `web/.lighthouseci/reports` |
 | Real users' Core Web Vitals and WebSocket round trip | The web app reports them on its own (`web/src/rum.ts`) | Grafana, "Doodle Arena: service overview", row "Web app (real users)" |
 
 The AWS stack (ADR 0003): 15 Fargate ARM64 services at 0.25 vCPU each, one t4g.large data host, load generated from Bowen's laptop through the ALB. Locally, one laptop runs the whole stack and k6.

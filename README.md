@@ -161,18 +161,18 @@ make aws-push
 ```
 
 ```bash
-DOMAIN=icanfly.click make aws-up
+DOMAIN=doodle-arena.icanfly.click make aws-up
 ```
 
 ```bash
-DOMAIN=icanfly.click make aws-down
+DOMAIN=doodle-arena.icanfly.click make aws-down
 ```
 
 The data outlives the session (ADR 0016). `aws-down` backs up every service's database and the drawings to a bucket that stays, and destroys nothing if that fails. `aws-up` restores the latest backup before the migrations.
 
 While the stack is up:
 - `make aws-grafana` opens Grafana on `localhost:3300` through Session Manager.
-- `DOMAIN=icanfly.click make aws-check` runs the checks against AWS.
+- `DOMAIN=doodle-arena.icanfly.click make aws-check` runs the checks against AWS.
 - The load balancer is open to everyone; `ALLOWED_CIDRS=<ip>/32` narrows it.
 
 ## Commands
