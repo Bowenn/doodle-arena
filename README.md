@@ -209,7 +209,7 @@ CLAUDE.md, the project's working notes for humans and its coding agent, lists ev
 ## Repository layout
 
 ```text
-services/   gateway, auth, lobby, game-server, assets, marketplace, notifier, ai
+services/   gateway, auth, lobby, game-server, assets, marketplace, notifier, ai, analytics
 libs/go/    Go packages the Go services share: authn, logging, kafkaauth, and the test helpers kafkatest, redistest, tcretry
 proto/      gRPC services and Kafka event schemas; generated code in proto/gen/
 web/        React + TypeScript web app

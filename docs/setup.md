@@ -132,7 +132,7 @@ DOMAIN=doodle-arena.icanfly.click make aws-down
   - Mint the players' tokens on the Mac with the stack's key, and pipe them to the dev box over `gcloud compute ssh`'s stdin. `scripts/loadtest.sh` then mints nothing, so the signing key never leaves the Mac (CLAUDE.md, gotchas).
   - The dev box has no AWS credentials, by design.
   - Measured in task 6.9: 80 rooms, the 5,000-viewer live room, and the fire drill (`docs/fire-drill.md`).
-- **Restores download through presigned URLs** that `aws-up` signs with your SSO session (valid one hour): the data host's role may only put objects in the backup bucket. The URLs are part of the SSM Run Command, so they stay in the command history (`aws ssm list-commands`) until they expire.
+- **Restores download through presigned URLs** that `aws-up` signs with your SSO session (valid 15 minutes, `--expires-in 900`): the data host's role may only put objects in the backup bucket. The URLs are part of the SSM Run Command, so they stay in the command history (`aws ssm list-commands`) until they expire.
 
 ### Discord (task 5.1)
 

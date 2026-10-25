@@ -78,7 +78,7 @@ The details, as built in task 6.5:
   - Event time is the relay's `guessed_at`, with 2 seconds of out-of-orderness.
   - Windows are 30 seconds long and slide every 2 seconds (a hopping window TVF), grouped by room and round, keeping the top 5 per window with `ROW_NUMBER`.
   - Each window's list becomes one `TopGuesses`, which replaces the room's previous one.
-- **Checkpoints.** Every 30 seconds to `s3://analytics-checkpoints`, through the Presto S3 filesystem: SeaweedFS with analytics' own S3 identity locally, S3 in AWS. The HashMap state backend is used.
+- **Checkpoints.** Every 30 seconds to the `analytics-checkpoints` bucket: through the Presto S3 filesystem (`s3p://`) to SeaweedFS with analytics' own S3 identity locally, and since task 6.9 through the Hadoop one (`s3a://`) to S3 with the ECS task role in AWS, because Presto falls back to an EC2 instance profile, which Fargate tasks don't have. The HashMap state backend is used.
 - **Wash trading** (task 6.5b, decided by Bowen on 2026-10-21):
   - The job keeps, per drawing (keyed by `drawing_id`, the key of `market.sales.v1`), the sales of the last 7 days by event time (`completed_at`). Event-time timers drop each sale 7 days after it happened.
   - One check covers both rules. A sale whose buyer sold this drawing within the last 7 days closes a loop. Two hops (A to B to A) is R1, three or more is R3.

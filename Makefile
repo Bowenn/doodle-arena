@@ -7,7 +7,7 @@ COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env --profile 
 .PHONY: help up down ps logs test lint smoke proto telemetry-check pipeline-check analytics-check wash-check tips-check drops-check search-check search-bench seed explain kafka-acl-check data-acl-check backup-check alerts-check loadtest loadtest-smoke loadtest-live loadtest-live-smoke loadtest-tips loadtest-drops loadtest-gallery experiment-strokes lighthouse aws-bootstrap aws-push aws-up aws-down aws-grafana aws-check
 
 help:
-	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | tips-check | drops-check | search-check | search-bench | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | loadtest-tips | loadtest-drops | loadtest-gallery | experiment-strokes | lighthouse | proto"
+	@echo "make up | down | ps | logs [s=svc] | test [s=svc] | lint [s=svc] | smoke | telemetry-check | pipeline-check | analytics-check | wash-check | tips-check | drops-check | search-check | search-bench | kafka-acl-check | data-acl-check | backup-check | alerts-check | loadtest | loadtest-smoke | loadtest-live | loadtest-live-smoke | loadtest-tips | loadtest-drops | loadtest-gallery | experiment-strokes | lighthouse | seed | explain | proto"
 	@echo "AWS (ADR 0003): make aws-bootstrap | aws-push | DOMAIN=<domain> make aws-up | aws-check | aws-grafana | aws-down"
 
 up:

@@ -241,6 +241,8 @@ Dashboards are JSON files in `infra/observability/dashboards/`, provisioned into
 3. Marketplace (`da-marketplace`): the three invariant gauges and the outbox lag as stats, purchases and conflicts, lock waits, idempotent replays, Stripe webhooks, rewards and minting.
 4. Async pipeline (`da-async-pipeline`): Kafka consumer lag, the outbox lags, Celery job age, the drawing pipeline and moderation, webhook deliveries, the queue age and the dead-letter queue.
 5. Load test (`da-load-test`, task 5.3): what k6 applies and what players feel, next to the game servers' broadcast latency, input and send lag, scheduler latency, rooms, connections and Go runtime, and, in AWS, ECS CPU from CloudWatch. The panels to watch while `make loadtest` runs, and to screenshot for the README.
+6. Analytics (`da-analytics`, task 6.5): the Flink job (uptime, checkpoints and their duration and size, restarts), Kafka in (records per source, the `analytics` group's lag, watermark lag, skipped records), top guesses, and wash trading.
+7. SLOs (`da-slo`, task 6.9): section 8.
 
 The gateway (Nginx) exports traces but no metrics, so the overview shows the services behind it, not the gateway itself.
 
@@ -249,7 +251,7 @@ The gateway (Nginx) exports traces but no metrics, so the overview shows the ser
 - Propagate W3C trace context over HTTP, gRPC and Kafka message headers (`traceparent`). Without the Kafka header, a trace breaks at every async step.
 - The showcase trace follows a purchase across languages: gateway, marketplace (Java), Postgres, the outbox, Kafka, notifier (Go), and the outgoing webhook.
 - The gateway creates the root span with `ngx_otel_module`, which ships in the official `nginx` image's `-otel` variant. It starts a trace or continues the browser's `traceparent`.
-- Span names: domain spans are `<service>.<operation>`, for example `market.purchase`, `lobby.quickplay` or `game.round.end` (the game server's prefix is `game`). HTTP, gRPC and database spans keep the names their instrumentation gives them, which follow the OpenTelemetry conventions, such as `POST /api/lobby/rooms/{room_id}/join`.
+- Span names: domain spans are `<service>.<operation>`, for example `market.purchase`, `lobby.quickplay` or `game.round.end` (the game server's prefix is `game`). Exception, not renamed so far: assets' gallery cache and search spans are `cache.get`, `cache.fill` and `search.query`, without the `assets.` prefix (ADR 0024, ADR 0023). HTTP, gRPC and database spans keep the names their instrumentation gives them, which follow the OpenTelemetry conventions, such as `POST /api/lobby/rooms/{room_id}/join`.
 - A game server's drain (task 5.5) is one `game.server.drain` span: `rooms.start`, `rooms.left` and `drain.complete` (whether every room moved before `DRAIN_TIMEOUT`), with the `drain started` and `drain finished` logs.
 - A viewer's connection to a relay (ADR 0017) is a `game.ws.connect` span with `ws.role=viewer`; each time a relay loads a room from its snapshot it is a `relay.stream.load` span (`room.id`, `reason` = start or gap, `seq`, `events`). The fan-out itself is measured, not traced: one span per event per viewer would be thousands a second.
 - Span attributes for ids use dots: `room.id`, `match.id`, `user.id`, `round.no` (log fields keep `room_id` and the like). Ids are fine on spans, never on metrics.

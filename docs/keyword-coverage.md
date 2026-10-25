@@ -18,7 +18,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | GCP, Azure | Optional: AI service on Cloud Run; drawing backups to Azure Blob | 7 |
 | Docker | Every service; Docker Compose locally; multi-stage builds | 1 |
 | Amazon S3 | `round-logs` and `drawings` buckets (SeaweedFS locally) | 2, 3, 5 |
-| Distributed storage | Content-addressed object storage; MongoDB replica set; optional cross-cloud copy | 3, 6, 7 |
+| Distributed storage | Content-addressed object storage (SeaweedFS locally, S3 in AWS); MongoDB runs as one node, and a replica set is not built (TODO, design doc section 15); optional cross-cloud copy | 3, 6, 7 |
 | Caching | Redis cache-aside in assets (ADR 0024, task 6.7b): a generation key against the cache-aside race, single-flight fills against stampedes, TTLs, failing open, measured before and after with k6; CDN for images | 5, 6 |
 | Redis | Room event streams, snapshots, leases, rate limits, leaderboards, caches, Celery broker | 2+ |
 | Databases / database systems | Postgres, MongoDB, Redis, Elasticsearch, each with a stated reason | All |
@@ -90,7 +90,7 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | Reliability / stability | Same as reliability and high availability above | 2, 5, 6 |
 | gRPC & Protocol Buffers | Lobby and game-server gRPC; protobuf event schemas | 1, 2 |
 | Kubernetes (TODO) | Optional | 7 |
-| AI integration (TODO) | AI moderation stub, then a real model | 3, 7 |
+| AI integration | AI moderation stub (built, task 3.3), then a real model (TODO, Stage 7) | 3, 7 |
 | AI agents / agentic AI (TODO) | AI player and an MCP server; the project itself is built with agents | 7 |
 | Serverless (TODO) | Lambda thumbnails | 7 |
 
@@ -103,12 +103,12 @@ Rule for agents: never remove or replace a technology in this table without a hu
 | SDLC / full lifecycle | Design doc, tasks, tests, CI, deploys, monitoring | All |
 | MCP | MCP server for AI agents | 7 |
 | Computer networking fundamentals (TCP/IP, HTTP, DNS) | WebSocket upgrade over HTTP, TLS, DNS and a domain, CDN caching, connection routing | 2, 5 |
-| Code reviews (TODO) | Humans review every agent pull request | All |
-| Security (TODO) | OAuth with PKCE, JWT, token rotation, HMAC signatures, secrets handling | 1, 4 |
+| Code reviews | Humans review every agent pull request | All |
+| Security | OAuth with PKCE, JWT, token rotation, HMAC signatures, secrets handling | 1, 4 |
 | AWS Lambda (TODO) | Lambda thumbnails | 7 |
 | Natural language processing, vector search & embeddings (TODO) | "Close!" hints with embeddings | 7 |
 | Search / retrieval | Elasticsearch: relevance (fuzzy and prefix matching, boosting), facets, keyset paging, results read back from the source of truth (task 6.7); pHash still TODO | 6, 7 |
 | Computer vision (TODO) | AI guesser | 7 |
 | LLM evaluation (TODO) | Eval set for the AI guesser built from real drawings | 7 |
-| Data pipelines / ETL (TODO) | Round logs into replays; analytics jobs | 3, 6 |
-| Control plane vs. data plane (TODO) | Lobby (control plane) versus game servers and relays (data plane) | 2, 6 |
+| Data pipelines / ETL | Round logs into replays; analytics jobs | 3, 6 |
+| Control plane vs. data plane | Lobby (control plane) versus game servers and relays (data plane) | 2, 6 |
