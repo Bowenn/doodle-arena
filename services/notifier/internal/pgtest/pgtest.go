@@ -1,5 +1,8 @@
 // Package pgtest starts a real Postgres for integration tests, the same image as
-// infra/docker-compose.yml, and migrates it with the notifier's own migrations.
+// infra/docker-compose.yml, and migrates it with the notifier's own migrations. It starts a
+// container per test, in packages go test runs in parallel, so it goes through tcretry like the
+// other Go helpers: two packages starting their first container at once can race on
+// Testcontainers' reaper.
 package pgtest
 
 import (
@@ -8,6 +11,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/Bowenn/doodle-arena/libs/go/tcretry"
 	"github.com/Bowenn/doodle-arena/services/notifier/internal/store"
 )
 
@@ -18,12 +22,14 @@ const Image = "postgres:18.6-trixie"
 func Store(t *testing.T) *store.Store {
 	t.Helper()
 	ctx := t.Context()
-	c, err := postgres.Run(ctx, Image,
-		postgres.WithDatabase("notifier"),
-		postgres.WithUsername("notifier"),
-		postgres.WithPassword("notifier"),
-		postgres.BasicWaitStrategies(),
-	)
+	c, err := tcretry.Run("postgres", func() (*postgres.PostgresContainer, error) {
+		return postgres.Run(ctx, Image,
+			postgres.WithDatabase("notifier"),
+			postgres.WithUsername("notifier"),
+			postgres.WithPassword("notifier"),
+			postgres.BasicWaitStrategies(),
+		)
+	})
 	testcontainers.CleanupContainer(t, c)
 	if err != nil {
 		t.Fatalf("postgres: %v", err)
