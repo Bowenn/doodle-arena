@@ -12,8 +12,8 @@ Over both the last 6 hours and the last 30 minutes, API requests failed (5xx) or
 1. **Which service and which route?** Group the SLI by `service_name` and `http_route` in Explore. For example, the error share per route over 6 hours:
 
    ```promql
-   sum by (service_name, http_route) (rate(http_server_request_duration_seconds_count{http_route=~".*/api/.*", http_response_status_code=~"5.."}[6h]))
-     / sum by (service_name, http_route) (rate(http_server_request_duration_seconds_count{http_route=~".*/api/.*"}[6h]))
+   sum by (service_name, http_route) (rate(http_server_request_duration_seconds_count{http_route=~"/?api/.*", http_response_status_code=~"5.."}[6h]))
+     / sum by (service_name, http_route) (rate(http_server_request_duration_seconds_count{http_route=~"/?api/.*"}[6h]))
    ```
 
 2. **When did it start?** Look at the burn-rate panel against the deploy markers.

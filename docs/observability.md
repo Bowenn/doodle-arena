@@ -366,5 +366,6 @@ Task 6.9. They are on the SLO dashboard (`da-slo`).
 
 - **Burn-rate alerts** follow the Google SRE workbook's multi-window, multi-burn-rate pattern. Fast burn (critical) is 14.4 times the budget's rate over both 1 h and 5 min, which spends 2% of the month in an hour. Slow burn (warning) is 6 times over both 6 h and 30 min.
 - **The short window** makes an alert stop soon after the problem does.
+- **Which routes count:** `http_route=~"/?api/.*"` and `service_name!~"game-server|relay.*"`. Django (assets) labels a route without its leading slash (`api/assets/drawings`), while FastAPI, Spring and Go label `/api/...`, so the slash is optional. Before 2026-10-24 the filter was `.*/api/.*`, and assets' requests were left out of both SLOs (found on the dev box with light traffic: only auth, the marketplace and the lobby were counted).
 - **The traffic floor:** more than 6 requests a minute, so one 500 on an idle stack isn't an outage.
 - **Retention:** budgets cover what Prometheus keeps: locally, since the stack started.

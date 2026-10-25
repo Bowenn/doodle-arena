@@ -1034,21 +1034,21 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[1h]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h]))"
+              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[1h]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[1h]))"
               instant: true
           - refId: B
             relativeTimeRange: {from: 900, to: 0}
             datasourceUid: prometheus
             model:
               refId: B
-              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[5m]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[5m]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
               instant: true
           - refId: T
             relativeTimeRange: {from: 900, to: 0}
             datasourceUid: prometheus
             model:
               refId: T
-              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
               instant: true
           - refId: C
             datasourceUid: __expr__
@@ -1079,21 +1079,21 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[6h]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h]))"
+              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[6h]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[6h]))"
               instant: true
           - refId: B
             relativeTimeRange: {from: 900, to: 0}
             datasourceUid: prometheus
             model:
               refId: B
-              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30m]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m]))"
+              expr: "(sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30m]))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30m]))"
               instant: true
           - refId: T
             relativeTimeRange: {from: 900, to: 0}
             datasourceUid: prometheus
             model:
               refId: T
-              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
               instant: true
           - refId: C
             datasourceUid: __expr__
@@ -1124,21 +1124,21 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[1h])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h]))"
+              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[1h])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[1h])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[1h]))"
               instant: true
           - refId: B
             relativeTimeRange: {from: 900, to: 0}
             datasourceUid: prometheus
             model:
               refId: B
-              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[5m])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[5m])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
               instant: true
           - refId: T
             relativeTimeRange: {from: 900, to: 0}
             datasourceUid: prometheus
             model:
               refId: T
-              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
               instant: true
           - refId: C
             datasourceUid: __expr__
@@ -1169,21 +1169,21 @@ groups:
             datasourceUid: prometheus
             model:
               refId: A
-              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[6h])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h]))"
+              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[6h])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[6h])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[6h]))"
               instant: true
           - refId: B
             relativeTimeRange: {from: 900, to: 0}
             datasourceUid: prometheus
             model:
               refId: B
-              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30m])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m]))"
+              expr: "((sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30m])) - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30m])))) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30m]))"
               instant: true
           - refId: T
             relativeTimeRange: {from: 900, to: 0}
             datasourceUid: prometheus
             model:
               refId: T
-              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
+              expr: "sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m]))"
               instant: true
           - refId: C
             datasourceUid: __expr__
