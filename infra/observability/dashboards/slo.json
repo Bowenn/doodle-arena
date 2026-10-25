@@ -120,7 +120,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "1 - sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30d]))",
+          "expr": "1 - sum(increase(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30d]))",
           "legendFormat": ""
         }
       ],
@@ -176,7 +176,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "1 - (sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30d]))) / 0.005",
+          "expr": "1 - (sum(increase(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30d]))) / 0.005",
           "legendFormat": ""
         }
       ],
@@ -225,7 +225,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m])) / 0.005",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m])) / 0.005",
           "legendFormat": "5m"
         },
         {
@@ -234,7 +234,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m])) / 0.005",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[30m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30m])) / 0.005",
           "legendFormat": "30m"
         },
         {
@@ -243,7 +243,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[1h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h])) / 0.005",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[1h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[1h])) / 0.005",
           "legendFormat": "1h"
         },
         {
@@ -252,7 +252,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[6h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h])) / 0.005",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", http_response_status_code=~\"5..\"}[6h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[6h])) / 0.005",
           "legendFormat": "6h"
         }
       ],
@@ -321,7 +321,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30d]))",
+          "expr": "sum(increase(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30d]))",
           "legendFormat": ""
         }
       ],
@@ -377,7 +377,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "1 - (1 - sum(increase(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30d]))) / 0.01",
+          "expr": "1 - (1 - sum(increase(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30d])) / sum(increase(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30d]))) / 0.01",
           "legendFormat": ""
         }
       ],
@@ -426,7 +426,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[5m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[5m]))) / 0.01",
+          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[5m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[5m]))) / 0.01",
           "legendFormat": "5m"
         },
         {
@@ -435,7 +435,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[30m]))) / 0.01",
+          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[30m])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[30m]))) / 0.01",
           "legendFormat": "30m"
         },
         {
@@ -444,7 +444,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[1h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[1h]))) / 0.01",
+          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[1h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[1h]))) / 0.01",
           "legendFormat": "1h"
         },
         {
@@ -453,7 +453,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[6h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\".*/api/.*\", service_name!~\"game-server|relay.*\"}[6h]))) / 0.01",
+          "expr": "(1 - sum(rate(http_server_request_duration_seconds_bucket{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\", le=\"0.5\"}[6h])) / sum(rate(http_server_request_duration_seconds_count{http_route=~\"/?api/.*\", service_name!~\"game-server|relay.*\"}[6h]))) / 0.01",
           "legendFormat": "6h"
         }
       ],
