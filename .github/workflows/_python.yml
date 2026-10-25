@@ -39,5 +39,7 @@ jobs:
           cache-dependency-glob: ${{ inputs.directory }}/uv.lock
       - name: Lint (ruff, mypy)
         run: ./scripts/lint.sh "$SERVICE"
+      - name: Pull the test images (retried; scripts/ci-pull.sh)
+        run: ./scripts/ci-pull.sh "$SERVICE"
       - name: Test (pytest; Testcontainers uses the runner's Docker)
         run: ./scripts/test.sh "$SERVICE"

@@ -62,8 +62,10 @@ jobs:
         run: |
           uname -r
           df -h /
-      - name: make up (creates .env and the JWT key, builds every image, the opt-in parts included)
-        run: PROFILES=live,analytics,search make up
+      - name: Pull the stack's images (retried; scripts/ci-pull.sh)
+        run: ./scripts/ci-pull.sh stack
+      - name: make up (creates .env and the JWT key, builds every image, the opt-in parts included; retried once on a registry error, scripts/ci-up.sh)
+        run: PROFILES=live,analytics,search ./scripts/ci-up.sh
       - name: make smoke
         run: make smoke
       - name: make telemetry-check (trace, logs and metrics reach Grafana)
