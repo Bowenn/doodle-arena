@@ -3,6 +3,17 @@
 # mode (the jobmanager runs `standalone-job`, the taskmanager `taskmanager`; both need the jar).
 # The build context is the repository root, for the generated contracts in proto/gen/java;
 # Dockerfile.dockerignore sends only those two folders.
+# The OpenTelemetry Java agent, downloaded in a stage of its own and retried, as in
+# infra/kafka/Dockerfile: a single ADD from Maven Central got a corrupted body in CI twice (a
+# digest mismatch). The sha256 is still checked.
+FROM alpine:3.22.1 AS agent
+ARG AGENT_URL=https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.32.0/opentelemetry-javaagent-2.32.0.jar
+ARG AGENT_SHA256=f787eb6c7f3d18e69a431e108a15278d25ee37f83d68b678f621e063f3988f82
+RUN for attempt in 1 2 3 4 5; do \
+      wget -q -O /agent.jar "$AGENT_URL" && echo "$AGENT_SHA256  /agent.jar" | sha256sum -c - && exit 0; \
+      echo "agent download failed (attempt $attempt), retrying" >&2; rm -f /agent.jar; sleep $((attempt * 5)); \
+    done; exit 1
+
 FROM eclipse-temurin:21.0.12.1_1-jdk AS build
 WORKDIR /src/services/analytics
 COPY proto/gen/java /src/proto/gen/java
@@ -26,16 +37,14 @@ RUN mkdir -p /opt/flink/plugins/s3-fs-presto /opt/flink/plugins/s3-fs-hadoop \
     && cp /opt/flink/opt/flink-s3-fs-hadoop-2.2.1.jar /opt/flink/plugins/s3-fs-hadoop/
 # The OpenTelemetry Java agent, as in the marketplace and the broker (rule: .claude/rules/java.md):
 # the Kafka clients' spans, the JVM's metrics and the logs over OTLP. Flink's own metrics go out
-# through its OpenTelemetry metric reporter (FLINK_PROPERTIES). Pinned by Maven Central's sha256.
-# The image builds as the flink user; the directory is made as root first, because ADD --chmod
-# would give the directory it creates the file's 0644, which the flink user can't enter.
+# through its OpenTelemetry metric reporter (FLINK_PROPERTIES). Pinned by Maven Central's sha256
+# (the agent stage above). The image builds as the flink user; the directory is made as root
+# first, because COPY --chmod would give a directory it creates the file's 0644, which the flink
+# user can't enter.
 USER root
 RUN install -d -m 0755 /opt/otel
 USER flink
-ADD --chmod=0644 \
-    --checksum=sha256:f787eb6c7f3d18e69a431e108a15278d25ee37f83d68b678f621e063f3988f82 \
-    https://repo1.maven.org/maven2/io/opentelemetry/javaagent/opentelemetry-javaagent/2.32.0/opentelemetry-javaagent-2.32.0.jar \
-    /opt/otel/opentelemetry-javaagent.jar
+COPY --from=agent --chmod=0644 /agent.jar /opt/otel/opentelemetry-javaagent.jar
 # The role options (env.java.opts.jobmanager and .taskmanager), not FLINK_ENV_JAVA_OPTS: that one
 # replaces env.java.opts.all, whose --add-opens flags Flink needs on Java 21.
 ENV FLINK_ENV_JAVA_OPTS_JM="-javaagent:/opt/otel/opentelemetry-javaagent.jar" \
