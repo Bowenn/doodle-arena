@@ -1,9 +1,10 @@
-# Public: the app at the domain's apex, with an ACM certificate (Google sign-in needs an https
-# redirect URI, and the refresh cookie is Secure). Private: <service>.doodle.internal for every
-# ECS service (Cloud Map) and data.doodle.internal for the data host.
+# Public: the app at domain_name, the zone's apex or a name under it (D63), with an ACM
+# certificate (Google sign-in needs an https redirect URI, and the refresh cookie is Secure).
+# Private: <service>.doodle.internal for every ECS service (Cloud Map) and data.doodle.internal
+# for the data host.
 
 data "aws_route53_zone" "public" {
-  name         = var.domain_name
+  name         = var.zone_name
   private_zone = false
 }
 
