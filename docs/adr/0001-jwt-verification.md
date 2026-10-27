@@ -41,7 +41,7 @@ Option B: every service verifies access tokens itself.
 
 - Each language needs a small verification module plus a shared test suite: every service must reject an expired token, a token signed by an unknown key, a token with the wrong `aud` or `iss`, and an `alg: none` or HS256 token. The test fixtures (keys and tokens) live in one place and are reused by all three languages.
 - Key rotation: auth publishes the old and new keys in the JWKS during a rotation, and services refetch on an unknown `kid`. Rotation needs no coordinated restart. A withdrawn key stops being accepted within the cache's maximum age (10 minutes in the lobby, the notifier and assets).
-- Auth isn't on the hot path of every request, so an auth outage blocks logins and refreshes but not requests that carry a still-valid token.
+- Auth isn't on the hot path of every request, so an auth outage blocks logins and refreshes but not requests that carry a still-valid token. That holds only if every service keeps its last good key set through the outage: the marketplace used Spring's defaults, with no such grace, until 2026-10-25; it now follows the shared rule (design doc 4.2) through Nimbus's key sources.
 - The Django bridge is security-sensitive custom code (about 100 lines) and needs its own tests: wrong role, expired token, token sent by GET, CSRF.
 - A role change takes effect at the next token refresh (at most 15 minutes) for APIs and at session expiry (at most 1 hour) for the admin.
 - Interview angle: zero-trust between services; the trade-off against gateway verification; why one audience is enough here.
