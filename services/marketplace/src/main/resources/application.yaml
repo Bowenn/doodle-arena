@@ -67,6 +67,12 @@ app:
     jwks-url: ${AUTH_JWKS_URL:http://localhost:8080/api/auth/.well-known/jwks.json}
     issuer: ${JWT_ISSUER:http://localhost:8080/api/auth}
     audience: doodle-api
+    # The JWKS rule every service shares (design doc 4.2): a key set is used for max-age, an
+    # unknown key id refetches at most every min-refresh, and the last good set outlives an auth
+    # outage until max-stale after its fetch.
+    jwks-max-age: 10m
+    jwks-min-refresh: 30s
+    jwks-max-stale: 1h
   stripe:
     # Test-mode keys only (docs/setup.md). Without a secret key, checkout and the webhook answer 503.
     secret-key: ${STRIPE_SECRET_KEY:}

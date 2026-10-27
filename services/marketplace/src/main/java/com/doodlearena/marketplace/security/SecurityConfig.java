@@ -32,10 +32,12 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 
 import com.doodlearena.marketplace.api.ErrorBody;
+import com.doodlearena.marketplace.telemetry.MarketMetrics;
 
 /**
  * Access tokens are verified here, not at the gateway (ADR 0001): RS256 only, signed by a key in
- * auth's JWKS (fetched on demand, cached, refetched for an unknown key id), issuer, audience
+ * auth's JWKS (cached, refetched for an unknown key id and kept through an auth outage under the
+ * rule every service shares: {@link JwksSource}, design doc 4.2), issuer, audience
  * {@code doodle-api}, and {@code exp}/{@code iat} with at most 30 seconds of clock skew. The API
  * takes the token from the Authorization header only, never a cookie, so it needs no CSRF token.
  */
@@ -46,8 +48,14 @@ public class SecurityConfig {
 
 	@Bean
 	JwtDecoder jwtDecoder(@Value("${app.jwt.jwks-url}") String jwksUrl, @Value("${app.jwt.issuer}") String issuer,
-			@Value("${app.jwt.audience}") String audience) {
-		NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwksUrl).jwsAlgorithm(SignatureAlgorithm.RS256).build();
+			@Value("${app.jwt.audience}") String audience, @Value("${app.jwt.jwks-max-age}") Duration maxAge,
+			@Value("${app.jwt.jwks-min-refresh}") Duration minRefresh,
+			@Value("${app.jwt.jwks-max-stale}") Duration maxStale, MarketMetrics metrics) {
+		NimbusJwtDecoder decoder = NimbusJwtDecoder
+			.withJwkSource(JwksSource.create(jwksUrl, JwksSource.Timings.of(maxAge, minRefresh, maxStale),
+					metrics.meter()))
+			.jwsAlgorithm(SignatureAlgorithm.RS256)
+			.build();
 		decoder.setJwtValidator(validator(issuer, audience));
 		return decoder;
 	}
