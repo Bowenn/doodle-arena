@@ -36,7 +36,9 @@ import io.opentelemetry.api.metrics.Meter;
  *
  * <p>Nimbus caches the set an outage serves again for a full {@code maxAge}, so outage tolerance is
  * {@code maxStale - maxAge}: a refresh that fails just before it ends keeps the old set until
- * {@code maxStale} at most, never longer.
+ * {@code maxStale} at most, never longer. The grace therefore ends somewhere between
+ * {@code maxStale - maxAge} and {@code maxStale} after the last good fetch, not exactly at
+ * {@code maxStale} as in Go.
  */
 final class JwksSource {
 
