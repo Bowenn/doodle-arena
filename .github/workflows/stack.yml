@@ -89,7 +89,7 @@ jobs:
         if: env.FULL_STACK == 'true'
         run: make analytics-check
       # uv runs the Python drills (wash-check) and the load test's token minting.
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         if: env.FULL_STACK == 'true'
         with:
           version: "0.13.1"
@@ -112,7 +112,7 @@ jobs:
         if: env.FULL_STACK == 'true'
         run: make search-check
       # The load test's script must keep working: two rooms for a minute, thresholds included.
-      - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
+      - uses: grafana/setup-k6-action@c47136d33d365efbeb9ae7266908b5dcf98cdece # v1.3.0
         if: env.FULL_STACK == 'true'
         with:
           k6-version: "2.3.0"
